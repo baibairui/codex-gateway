@@ -360,4 +360,40 @@ describe('createChatHandler', () => {
     resolveRun?.({ threadId: 'thread_onboarding', rawOutput: '' });
     await first;
   });
+
+  it('redacts internal file details in onboarding stream output', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const run = vi.fn(async (input: {
+      prompt: string;
+      onMessage?: (text: string) => void;
+    }) => {
+      input.onMessage?.('我会写入 `./shared-memory/profile.md`，并读取 `./agent.md`。');
+      return { threadId: 'thread_onboarding', rawOutput: '' };
+    });
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }),
+        isSharedMemoryEmpty: () => true,
+      },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '开始' });
+
+    const payloads = sendText.mock.calls.map((call) => String(call[2]));
+    const sanitized = payloads.find((text) => text.includes('[内部路径]') || text.includes('[记忆文件]'));
+    expect(sanitized).toBeTruthy();
+    expect(sanitized).not.toContain('shared-memory');
+    expect(sanitized).not.toContain('agent.md');
+  });
 });

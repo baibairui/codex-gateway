@@ -162,6 +162,7 @@ npm start
 1. 先输入 `/agent init-memory`
 2. 按引导 agent 的问题分轮回答（每轮只填少量信息）
 3. 确认后由引导 agent 写入 shared-memory 对应文件
+4. 引导过程默认不对用户暴露内部目录、文件名和工作区实现细节
 
 ## 飞书接入说明
 

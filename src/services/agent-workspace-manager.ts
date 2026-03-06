@@ -248,6 +248,7 @@ function renderWorkspaceAgentsMd(
         '- 必须分轮次提问，每轮最多 3 个问题，等待用户回答后再继续。',
         '- 每轮总结并写入 shared-memory 对应文件，再继续下一轮。',
         '- 遇到敏感信息先确认“是否写入长期记忆”。',
+        '- 对用户只输出引导问题和确认结论，不透露目录结构、文件名、工作区路径、系统实现细节。',
         '',
       ]
     : [];
@@ -562,9 +563,15 @@ function normalizeRelativeDir(relativeDir: string): string {
 }
 
 function hasMeaningfulMemoryContent(content: string): boolean {
+  const seededLines = new Set([
+    '- 默认慢节奏引导：先澄清目标，再分步提问，帮助用户产出更有意义的结果',
+  ]);
   for (const rawLine of content.split('\n')) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#') || line.startsWith('>')) {
+      continue;
+    }
+    if (seededLines.has(line)) {
       continue;
     }
     if (line === '-' || line.startsWith('- [ ]')) {
