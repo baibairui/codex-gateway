@@ -144,6 +144,7 @@ npm start
 - `memory/profile.md` / `preferences.md` / `projects.md` / `relationships.md` 用于保存 personal agent 的长期稳定信息。
 - `memory/decisions.md` 用于记录已确认的重要决定，`memory/open-loops.md` 用于记录未来还要继续跟进的事项。
 - `memory/daily/YYYY-MM-DD.md` 用于保存当天短期上下文和临时笔记。
+- 每个 agent 默认提供浏览器操作策略（`browser-playbook.md`），由 agent 自行使用浏览器工具执行网页任务。
 - `global-memory/*.md` 用于沉淀所有 agent 共享的背景和规则。
 - `/review` 和普通对话都会自动在当前 agent 的工作区里执行。
 - 系统默认会定期运行后台 `Memory Steward`，把 shared-memory 和各 agent 的 memory 做低噪声整理。

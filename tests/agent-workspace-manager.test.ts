@@ -27,6 +27,7 @@ describe('AgentWorkspaceManager', () => {
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'decisions.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'open-loops.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'daily', 'README.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, 'browser-playbook.md'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'shared-context.md'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'house-rules.md'))).toBe(true);
   });
@@ -62,6 +63,23 @@ describe('AgentWorkspaceManager', () => {
     expect(result.agentId).toBe('memory-onboarding');
     expect(agentsMd).toContain('初始化职责');
     expect(checklist).toContain('Round 1: Profile');
+  });
+
+  it('includes browser operation guidance in default agent scaffold', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-'));
+    const manager = new AgentWorkspaceManager(dir);
+
+    const result = manager.createWorkspace({
+      userId: 'wecom:u1',
+      agentName: '浏览器操作助手',
+      existingAgentIds: [],
+    });
+
+    const agentsMd = fs.readFileSync(path.join(result.workspaceDir, 'AGENTS.md'), 'utf8');
+    const playbook = fs.readFileSync(path.join(result.workspaceDir, 'browser-playbook.md'), 'utf8');
+
+    expect(agentsMd).toContain('浏览器操作职责');
+    expect(playbook).toContain('Browser Playbook');
   });
 
   it('detects shared memory emptiness by meaningful content', () => {

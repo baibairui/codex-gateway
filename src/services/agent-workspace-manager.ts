@@ -94,6 +94,10 @@ export class AgentWorkspaceManager {
         renderMemoryInitChecklist(),
       );
     }
+    this.writeIfMissing(
+      path.join(workspaceDir, 'browser-playbook.md'),
+      renderBrowserPlaybook(),
+    );
 
     return {
       agentId,
@@ -258,6 +262,11 @@ function renderWorkspaceAgentsMd(
     `当前工作区属于 agent \`${agentName}\`（ID: \`${agentId}\`）。`,
     '',
     ...onboardingRules,
+    '浏览器操作职责：',
+    '- 当任务需要网页交互时，优先使用可用的浏览器工具完成操作，而不是让用户手工点击。',
+    '- 每次操作前先说明计划步骤，操作后回报关键结果与下一步。',
+    '- 如果网页需要登录、验证码或支付确认，先提示用户接管，不要编造已完成。',
+    '',
     '开始任何任务前，先阅读这些记忆文件：',
     '- `./agent.md`',
     '- `./memory/profile.md`',
@@ -266,6 +275,7 @@ function renderWorkspaceAgentsMd(
     '- `./memory/relationships.md`',
     '- `./memory/decisions.md`',
     '- `./memory/open-loops.md`',
+    '- `./browser-playbook.md`',
     `- \`${sharedDir}/profile.md\``,
     `- \`${sharedDir}/preferences.md\``,
     `- \`${sharedDir}/projects.md\``,
@@ -286,7 +296,11 @@ function renderWorkspaceAgentsMd(
   ].join('\n');
 }
 
-function renderAgentMd(agentName: string, agentId: string, template: 'default' | 'memory-onboarding'): string {
+function renderAgentMd(
+  agentName: string,
+  agentId: string,
+  template: 'default' | 'memory-onboarding',
+): string {
   const role = template === 'memory-onboarding'
     ? '- Role: Memory Onboarding Guide'
     : '- Role:';
@@ -314,21 +328,28 @@ function renderAgentMd(agentName: string, agentId: string, template: 'default' |
     '- `memory/decisions.md`: 已确认的重要决定',
     '- `memory/open-loops.md`: 尚未闭环但未来要继续跟进的事',
     '- `memory/daily/`: 当天短期上下文与临时笔记',
+    '- `browser-playbook.md`: 浏览器操作规范',
     '',
   ].join('\n');
 }
 
-function renderWorkspaceReadme(agentName: string, agentId: string, template: 'default' | 'memory-onboarding'): string {
+function renderWorkspaceReadme(
+  agentName: string,
+  agentId: string,
+  template: 'default' | 'memory-onboarding',
+): string {
   const tips = template === 'memory-onboarding'
     ? [
         '- 该 agent 用于一次性或阶段性初始化 shared-memory。',
         '- 使用 `memory-init-checklist.md` 跟踪初始化进度。',
         '- 每轮提问后都要把已确认信息写入 shared-memory。',
+        '- 浏览器操作策略写在 `browser-playbook.md`。',
       ]
     : [
         '- 用户的长期稳定信息维护在 `memory/*.md`。',
         '- 当天短期上下文和临时笔记维护在 `memory/daily/`。',
         '- 跨 agent 共享的知识和规则维护在上层 `global-memory/`。',
+        '- 浏览器操作策略写在 `browser-playbook.md`。',
       ];
   return [
     `# ${agentName}`,
@@ -358,6 +379,27 @@ function renderMemoryInitChecklist(): string {
     '',
     '## Notes',
     '-',
+    '',
+  ].join('\n');
+}
+
+function renderBrowserPlaybook(): string {
+  return [
+    '# Browser Playbook',
+    '',
+    '## Default Workflow',
+    '1. Clarify target outcome and constraints before acting.',
+    '2. Open/navigate the page and take a structured snapshot.',
+    '3. Act in small reversible steps (click, type, select).',
+    '4. After each step, report what changed and what remains.',
+    '',
+    '## Guardrails',
+    '- Do not claim completion without visible page evidence.',
+    '- If login, OTP, CAPTCHA, or payment confirmation is required, ask user to take over.',
+    '- Do not expose internal paths, file names, or hidden implementation details in user-facing replies.',
+    '',
+    '## Output Style',
+    '- Keep updates short and specific: action -> observed result -> next action.',
     '',
   ].join('\n');
 }
