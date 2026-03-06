@@ -96,12 +96,20 @@ describe('SessionStore', () => {
       name: '助理',
       workspaceDir: '/tmp/assistant',
     });
+    store.createAgent('u1', {
+      agentId: 'agent-legacy',
+      name: '记忆初始化引导',
+      workspaceDir: '/tmp/legacy-onboarding',
+    });
 
     const visible = store.listAgents('u1');
     const all = store.listAgents('u1', { includeHidden: true });
     expect(visible.some((item) => item.agentId.startsWith('memory-onboarding'))).toBe(false);
+    expect(visible.some((item) => item.name === '记忆初始化引导')).toBe(false);
     expect(all.some((item) => item.agentId === 'memory-onboarding')).toBe(true);
     expect(all.some((item) => item.agentId === 'memory-onboarding-2')).toBe(true);
+    expect(all.some((item) => item.agentId === 'agent-legacy')).toBe(true);
     expect(store.resolveAgentTarget('u1', 'memory-onboarding')).toBeUndefined();
+    expect(store.resolveAgentTarget('u1', 'agent-legacy')).toBeUndefined();
   });
 });

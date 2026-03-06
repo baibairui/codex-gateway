@@ -94,6 +94,7 @@ const MEMORY_ONBOARDING_KICKOFF_PROMPT = [
 
 /** 系统内置 agent（不展示给用户，不允许通过 /agents 切换）的 ID 集合 */
 const SYSTEM_AGENT_ID_PREFIXES = [MEMORY_ONBOARDING_AGENT_ID];
+const SYSTEM_AGENT_NAMES = new Set([MEMORY_ONBOARDING_AGENT_NAME]);
 
 function renderMemoryOnboardingStartMessage(): string {
   return [
@@ -112,6 +113,12 @@ function renderMemoryOnboardingResumeMessage(): string {
 
 function isSystemAgentId(agentId: string): boolean {
   return SYSTEM_AGENT_ID_PREFIXES.some((prefix) => agentId === prefix || agentId.startsWith(`${prefix}-`));
+}
+
+function isSystemAgentRecord(agent: { agentId: string; name?: string }): boolean {
+  const byId = isSystemAgentId(agent.agentId);
+  const byName = typeof agent.name === 'string' && SYSTEM_AGENT_NAMES.has(agent.name.trim());
+  return byId || byName;
 }
 
 function sanitizeOnboardingText(text: string): string {
@@ -150,7 +157,7 @@ ${clipMessage(prompt, 500)}
     const currentSearch = userSearchOverrides.get(sessionUserKey) ?? deps.defaultSearch;
     // 对用户展示时，过滤掉系统内置 agent（如 memory-onboarding）
     const allAgents = commandNeedsAgentList(prompt) ? deps.sessionStore.listAgents(sessionUserKey, { includeHidden: true }) : [];
-    const agents = allAgents.filter((a) => !isSystemAgentId(a.agentId));
+    const agents = allAgents.filter((a) => !isSystemAgentRecord(a));
     const commandResult = handleUserCommand(prompt, {
       currentThreadId: existingThreadId,
       currentAgent,
@@ -208,7 +215,7 @@ ${clipMessage(prompt, 500)}
 
     function ensureMemoryOnboardingAgent(): AgentRecord {
       const listedAgents = deps.sessionStore.listAgents(sessionUserKey, { includeHidden: true });
-      const existing = listedAgents.find((item) => item.agentId === MEMORY_ONBOARDING_AGENT_ID);
+      const existing = listedAgents.find((item) => isSystemAgentRecord(item));
       if (existing) {
         return {
           agentId: existing.agentId,
@@ -235,13 +242,13 @@ ${clipMessage(prompt, 500)}
 
     function normalizeVisibleCurrentAgent(userKey: string): AgentRecord {
       const selected = deps.sessionStore.getCurrentAgent(userKey);
-      if (!isSystemAgentId(selected.agentId)) {
+      if (!isSystemAgentRecord(selected)) {
         return selected;
       }
 
       const listedAgents = deps.sessionStore.listAgents(userKey, { includeHidden: true });
-      const customFallback = listedAgents.find((item) => !item.isDefault && !isSystemAgentId(item.agentId));
-      const fallback = customFallback ?? listedAgents.find((item) => !isSystemAgentId(item.agentId));
+      const customFallback = listedAgents.find((item) => !item.isDefault && !isSystemAgentRecord(item));
+      const fallback = customFallback ?? listedAgents.find((item) => !isSystemAgentRecord(item));
       if (fallback) {
         deps.sessionStore.setCurrentAgent(userKey, fallback.agentId);
         return deps.sessionStore.getCurrentAgent(userKey);

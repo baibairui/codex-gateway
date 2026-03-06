@@ -6,6 +6,7 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('SessionStore');
 const DEFAULT_AGENT_ID = 'default';
 const HIDDEN_AGENT_ID_PREFIXES = ['memory-onboarding'];
+const HIDDEN_AGENT_NAMES = new Set(['记忆初始化引导']);
 
 export interface SessionMeta {
   name?: string;
@@ -100,7 +101,7 @@ export class SessionStore {
       current: currentAgentId === row.agentId,
       isDefault: false,
       }))
-      .filter((agent) => includeHidden || !isHiddenAgentId(agent.agentId));
+      .filter((agent) => includeHidden || !isHiddenAgent(agent));
 
     return [
       {
@@ -186,7 +187,14 @@ export class SessionStore {
     if (isHiddenAgentId(raw)) {
       return undefined;
     }
-    return this.getCustomAgent(userId, raw)?.agentId;
+    const custom = this.getCustomAgent(userId, raw);
+    if (!custom) {
+      return undefined;
+    }
+    if (isHiddenAgent(custom)) {
+      return undefined;
+    }
+    return custom.agentId;
   }
 
   getSession(userId: string, agentId: string): string | undefined {
@@ -551,4 +559,8 @@ function numberRow(value: unknown): number {
 
 function isHiddenAgentId(agentId: string): boolean {
   return HIDDEN_AGENT_ID_PREFIXES.some((prefix) => agentId === prefix || agentId.startsWith(`${prefix}-`));
+}
+
+function isHiddenAgent(agent: { agentId: string; name: string }): boolean {
+  return isHiddenAgentId(agent.agentId) || HIDDEN_AGENT_NAMES.has(agent.name.trim());
 }
