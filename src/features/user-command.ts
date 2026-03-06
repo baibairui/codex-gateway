@@ -24,6 +24,7 @@ export interface UserCommandResult {
   reviewTarget?: string;
   reviewPrompt?: string;
   openUrl?: string;
+  publishWorkspace?: boolean;
   queryAgent?: boolean;
   queryAgents?: boolean;
   createAgentName?: string;
@@ -114,6 +115,7 @@ export function handleUserCommand(content: string, context: UserCommandContext =
           '/search - 查看联网搜索状态',
           '/search on|off - 开启/关闭联网搜索',
           '/open <URL> - 在宿主机打开浏览器',
+          '/deploy-workspace - 发布当前 workspace 到网关运行目录',
           '/review - 审查当前 agent 工作区变更',
           '/review base <分支> - 审查相对分支的变更',
           '/review commit <SHA> - 审查指定提交',
@@ -303,6 +305,12 @@ export function handleUserCommand(content: string, context: UserCommandContext =
         openUrl: url,
       };
     }
+    case '/deploy-workspace':
+    case '/publish-workspace':
+      return {
+        handled: true,
+        publishWorkspace: true,
+      };
     case '/review': {
       const args = parts.slice(1);
       if (args.length === 0) {

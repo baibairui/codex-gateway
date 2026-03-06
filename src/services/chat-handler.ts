@@ -52,6 +52,10 @@ interface BrowserOpenerLike {
   open(url: string): Promise<void>;
 }
 
+interface WorkspacePublisherLike {
+  publish(): Promise<{ output: string }>;
+}
+
 interface AgentWorkspaceManagerLike {
   createWorkspace(input: {
     userId: string;
@@ -68,6 +72,7 @@ interface ChatHandlerDeps {
   codexRunner: CodexRunnerLike;
   agentWorkspaceManager: AgentWorkspaceManagerLike;
   browserOpener?: BrowserOpenerLike;
+  workspacePublisher?: WorkspacePublisherLike;
   browserOpenEnabled: boolean;
   runnerEnabled: boolean;
   defaultModel?: string;
@@ -523,6 +528,28 @@ ${clipMessage(text, 500)}
             stack: error instanceof Error ? error.stack : undefined,
           });
           await deps.sendText(channel, userId, '❌ 打开浏览器失败，请检查 URL 或宿主机图形环境。');
+        }
+        return;
+      }
+      if (commandResult.publishWorkspace) {
+        if (!deps.workspacePublisher) {
+          await deps.sendText(channel, userId, '⚠️ 当前服务未开启 workspace 发布命令，请联系管理员。');
+          return;
+        }
+        await deps.sendText(channel, userId, '⏳ 正在发布 workspace，请稍候...');
+        try {
+          const result = await deps.workspacePublisher.publish();
+          const preview = result.output
+            ? `\n\n发布输出（末尾）：\n${clipMessage(result.output, 600)}`
+            : '';
+          await deps.sendText(channel, userId, `✅ workspace 发布完成。${preview}`);
+        } catch (error) {
+          log.error('handleText /deploy-workspace 执行失败', {
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+          });
+          await deps.sendText(channel, userId, '❌ workspace 发布失败，请检查日志后重试。');
         }
         return;
       }

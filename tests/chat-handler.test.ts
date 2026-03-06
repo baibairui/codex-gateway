@@ -357,6 +357,35 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '✅ 已尝试打开浏览器：https://example.com');
   });
 
+  it('publishes workspace for /deploy-workspace command', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const publish = vi.fn(async () => ({ output: 'publish ok' }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      workspacePublisher: { publish },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/deploy-workspace' });
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '⏳ 正在发布 workspace，请稍候...');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('workspace 发布完成'));
+  });
+
   it('starts hidden memory onboarding flow when shared memory is empty', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async () => ({ threadId: 'thread_onboarding', rawOutput: '' }));

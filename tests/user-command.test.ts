@@ -142,6 +142,7 @@ describe('handleUserCommand', () => {
 
   it('supports /open and /review', () => {
     expect(handleUserCommand('/open https://example.com', context).openUrl).toBe('https://example.com');
+    expect(handleUserCommand('/deploy-workspace', context).publishWorkspace).toBe(true);
     expect(handleUserCommand('/review', context).reviewMode).toBe('uncommitted');
     expect(handleUserCommand('/review base main', context).reviewTarget).toBe('main');
   });

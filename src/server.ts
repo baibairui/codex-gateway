@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { BrowserOpener } from './services/browser-opener.js';
+import { WorkspacePublisher } from './services/workspace-publisher.js';
 import { AgentWorkspaceManager } from './services/agent-workspace-manager.js';
 import { CodexRunner } from './services/codex-runner.js';
 import { createChatHandler } from './services/chat-handler.js';
@@ -84,6 +85,11 @@ if (browserOpener) {
   });
 }
 
+const workspacePublisher = new WorkspacePublisher({
+  cwd: '/opt/gateway',
+});
+log.debug('WorkspacePublisher 已初始化', { cwd: '/opt/gateway' });
+
 const weComApi = new WeComApi({
   corpId: config.corpId,
   secret: config.corpSecret,
@@ -155,6 +161,7 @@ const handleChatText = createChatHandler({
   codexRunner,
   agentWorkspaceManager,
   browserOpener,
+  workspacePublisher,
   browserOpenEnabled: config.browserOpenEnabled,
   runnerEnabled: config.runnerEnabled,
   defaultModel: config.codexModel,
