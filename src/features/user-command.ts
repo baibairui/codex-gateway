@@ -11,6 +11,11 @@ export interface UserCommandResult {
   queryModels?: boolean;
   setModel?: string;
   clearModel?: boolean;
+  querySearch?: boolean;
+  setSearchEnabled?: boolean;
+  reviewMode?: 'uncommitted' | 'base' | 'commit';
+  reviewTarget?: string;
+  reviewPrompt?: string;
 }
 
 export function maskThreadId(threadId?: string): string {
@@ -66,6 +71,11 @@ export function handleUserCommand(
           '/model <模型名> - 切换模型',
           '/model reset - 重置为默认模型',
           '/models - 查看当前 Codex 支持的模型',
+          '/search - 查看联网搜索状态',
+          '/search on|off - 开启/关闭联网搜索',
+          '/review - 审查当前工作区变更',
+          '/review base <分支> - 审查相对分支的变更',
+          '/review commit <SHA> - 审查指定提交',
         ].join('\n'),
       };
     case '/new':
@@ -144,6 +154,80 @@ export function handleUserCommand(
         handled: true,
         queryModels: true,
       };
+    case '/search': {
+      const action = (parts[1] ?? '').toLowerCase();
+      if (!action) {
+        return {
+          handled: true,
+          querySearch: true,
+        };
+      }
+      if (action === 'on' || action === 'true' || action === '1') {
+        return {
+          handled: true,
+          setSearchEnabled: true,
+        };
+      }
+      if (action === 'off' || action === 'false' || action === '0') {
+        return {
+          handled: true,
+          setSearchEnabled: false,
+        };
+      }
+      return {
+        handled: true,
+        message: '用法：/search on|off',
+      };
+    }
+    case '/review': {
+      const args = parts.slice(1);
+      if (args.length === 0) {
+        return {
+          handled: true,
+          reviewMode: 'uncommitted',
+        };
+      }
+      const mode = (args[0] ?? '').toLowerCase();
+      if (mode === 'uncommitted') {
+        return {
+          handled: true,
+          reviewMode: 'uncommitted',
+        };
+      }
+      if (mode === 'base') {
+        const target = args[1] ?? '';
+        if (!target) {
+          return {
+            handled: true,
+            message: '用法：/review base <分支>',
+          };
+        }
+        return {
+          handled: true,
+          reviewMode: 'base',
+          reviewTarget: target,
+        };
+      }
+      if (mode === 'commit') {
+        const target = args[1] ?? '';
+        if (!target) {
+          return {
+            handled: true,
+            message: '用法：/review commit <SHA>',
+          };
+        }
+        return {
+          handled: true,
+          reviewMode: 'commit',
+          reviewTarget: target,
+        };
+      }
+      return {
+        handled: true,
+        reviewMode: 'uncommitted',
+        reviewPrompt: args.join(' '),
+      };
+    }
     default:
       return {
         handled: true,

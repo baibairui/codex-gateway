@@ -93,6 +93,7 @@ export const config = {
   allowFrom: optionalString('ALLOW_FROM', '*'),
   codexBin: process.env.CODEX_BIN ?? 'codex',
   codexModel: optionalStringUndefined('CODEX_MODEL'),
+  codexSearch: process.env.CODEX_SEARCH === 'true',
   codexWorkdir: process.env.CODEX_WORKDIR ?? process.cwd(),
   /** 'full-auto' (默认，有沙箱) 或 'none' (跳过沙箱，适合服务器) */
   codexSandbox: codexSandboxMode(),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCodexArgs, parseCodexJsonl } from '../src/services/codex-runner.js';
+import { buildCodexArgs, buildCodexReviewArgs, parseCodexJsonl } from '../src/services/codex-runner.js';
 
 describe('parseCodexJsonl', () => {
   it('parses thread id and latest agent message', () => {
@@ -54,6 +54,60 @@ describe('buildCodexArgs', () => {
       '--dangerously-bypass-approvals-and-sandbox',
       '--skip-git-repo-check',
       'hello',
+    ]);
+  });
+
+  it('puts --search before exec when enabled', () => {
+    const args = buildCodexArgs(
+      { prompt: 'hello', model: 'gpt-5.4', search: true },
+      'full-auto',
+    );
+    expect(args).toEqual([
+      '--search',
+      'exec',
+      '--json',
+      '--full-auto',
+      '--skip-git-repo-check',
+      '--model',
+      'gpt-5.4',
+      'hello',
+    ]);
+  });
+});
+
+describe('buildCodexReviewArgs', () => {
+  it('builds uncommitted review args', () => {
+    const args = buildCodexReviewArgs(
+      { mode: 'uncommitted', model: 'gpt-5.4', search: true },
+      'full-auto',
+    );
+    expect(args).toEqual([
+      '--search',
+      'exec',
+      'review',
+      '--json',
+      '--full-auto',
+      '--skip-git-repo-check',
+      '--uncommitted',
+      '--model',
+      'gpt-5.4',
+    ]);
+  });
+
+  it('builds base review args with prompt', () => {
+    const args = buildCodexReviewArgs(
+      { mode: 'base', target: 'main', prompt: 'focus on regressions' },
+      'none',
+    );
+    expect(args).toEqual([
+      'exec',
+      'review',
+      '--json',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--skip-git-repo-check',
+      '--base',
+      'main',
+      'focus on regressions',
     ]);
   });
 });

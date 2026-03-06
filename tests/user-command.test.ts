@@ -95,6 +95,36 @@ describe('handleUserCommand', () => {
     expect(result.handled).toBe(true);
     expect(result.queryModels).toBe(true);
   });
+
+  it('supports /search query and toggle', () => {
+    const query = handleUserCommand('/search', 'thread_old');
+    expect(query.handled).toBe(true);
+    expect(query.querySearch).toBe(true);
+
+    const on = handleUserCommand('/search on', 'thread_old');
+    expect(on.handled).toBe(true);
+    expect(on.setSearchEnabled).toBe(true);
+
+    const off = handleUserCommand('/search off', 'thread_old');
+    expect(off.handled).toBe(true);
+    expect(off.setSearchEnabled).toBe(false);
+  });
+
+  it('supports /review command', () => {
+    const uncommitted = handleUserCommand('/review', 'thread_old');
+    expect(uncommitted.handled).toBe(true);
+    expect(uncommitted.reviewMode).toBe('uncommitted');
+
+    const base = handleUserCommand('/review base main', 'thread_old');
+    expect(base.handled).toBe(true);
+    expect(base.reviewMode).toBe('base');
+    expect(base.reviewTarget).toBe('main');
+
+    const commit = handleUserCommand('/review commit abc123', 'thread_old');
+    expect(commit.handled).toBe(true);
+    expect(commit.reviewMode).toBe('commit');
+    expect(commit.reviewTarget).toBe('abc123');
+  });
 });
 
 describe('commandNeedsDetailedSessions', () => {

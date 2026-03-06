@@ -7,6 +7,7 @@ export interface CodexRunInput {
   prompt: string;
   threadId?: string;
   model?: string;
+  search?: boolean;
   /** 每产出一条 agent_message 就回调一次 */
   onMessage?: (text: string) => void;
 }
@@ -14,6 +15,15 @@ export interface CodexRunInput {
 export interface CodexRunResult {
   threadId: string;
   rawOutput: string;
+}
+
+export interface CodexReviewInput {
+  mode: 'uncommitted' | 'base' | 'commit';
+  target?: string;
+  prompt?: string;
+  model?: string;
+  search?: boolean;
+  onMessage?: (text: string) => void;
 }
 
 export interface ParsedCodexOutput {
@@ -103,24 +113,68 @@ export class CodexRunner {
 
   run(input: CodexRunInput): Promise<CodexRunResult> {
     const args = buildCodexArgs(input, this.sandbox);
+    return this.runJsonl({
+      args,
+      prompt: input.prompt,
+      onMessage: input.onMessage,
+      initialThreadId: input.threadId,
+      requireThreadId: true,
+      logMeta: {
+        mode: 'exec',
+        isResume: !!input.threadId,
+        threadId: maskThreadId(input.threadId),
+      },
+    }).then((result) => {
+      if (!result.threadId) {
+        throw new Error('thread id not found in codex output');
+      }
+      return {
+        threadId: result.threadId,
+        rawOutput: result.rawOutput,
+      };
+    });
+  }
 
+  review(input: CodexReviewInput): Promise<{ rawOutput: string }> {
+    const args = buildCodexReviewArgs(input, this.sandbox);
+    const timeoutHint = input.prompt ?? input.target ?? input.mode;
+    return this.runJsonl({
+      args,
+      prompt: timeoutHint,
+      onMessage: input.onMessage,
+      requireThreadId: false,
+      logMeta: {
+        mode: 'review',
+        reviewMode: input.mode,
+        reviewTarget: input.target ?? '(none)',
+      },
+    }).then((result) => ({ rawOutput: result.rawOutput }));
+  }
+
+  private runJsonl(options: {
+    args: string[];
+    prompt: string;
+    onMessage?: (text: string) => void;
+    initialThreadId?: string;
+    requireThreadId: boolean;
+    logMeta?: Record<string, unknown>;
+  }): Promise<{ rawOutput: string; threadId?: string }> {
     log.info('Codex 子进程启动', {
       bin: this.codexBin,
-      args: redactArgsForLog(args),
+      args: redactArgsForLog(options.args),
       cwd: this.workdir,
-      isResume: !!input.threadId,
-      threadId: maskThreadId(input.threadId),
       timeoutMode: this.timeoutMs ? 'fixed' : 'adaptive',
+      ...options.logMeta,
     });
 
-    const effectiveTimeoutMs = this.resolveTimeoutMs(input.prompt);
+    const effectiveTimeoutMs = this.resolveTimeoutMs(options.prompt);
     log.debug('Codex 子进程超时阈值已计算', {
-      promptLength: input.prompt.length,
+      promptLength: options.prompt.length,
       effectiveTimeoutMs,
     });
 
-    return new Promise<CodexRunResult>((resolve, reject) => {
-      const child = spawn(this.codexBin, args, {
+    return new Promise<{ rawOutput: string; threadId?: string }>((resolve, reject) => {
+      const child = spawn(this.codexBin, options.args, {
         cwd: this.workdir,
         env: process.env,
       });
@@ -130,10 +184,9 @@ export class CodexRunner {
       let stdout = '';
       let stderr = '';
       let settled = false;
-      // 用于处理跨 chunk 的不完整行
       let lineBuf = '';
       let eventCount = 0;
-      let observedThreadId = input.threadId;
+      let observedThreadId = options.initialThreadId;
 
       const timer = setTimeout(() => {
         if (settled) {
@@ -155,10 +208,8 @@ export class CodexRunner {
         const text = chunk.toString('utf8');
         stdout += text;
 
-        // 逐行解析，实时回调 agent_message
         lineBuf += text;
         const lines = lineBuf.split('\n');
-        // 最后一个元素可能是不完整行，留到下次
         lineBuf = lines.pop() ?? '';
 
         for (const rawLine of lines) {
@@ -166,7 +217,7 @@ export class CodexRunner {
           if (!line) continue;
           handleCodexLine(
             line,
-            input.onMessage,
+            options.onMessage,
             () => {
               eventCount++;
             },
@@ -218,12 +269,11 @@ export class CodexRunner {
           return;
         }
 
-        // flush 最后一行（可能没有以换行结束）
         const tail = lineBuf.trim();
         if (tail) {
           handleCodexLine(
             tail,
-            input.onMessage,
+            options.onMessage,
             () => {
               eventCount++;
             },
@@ -237,7 +287,7 @@ export class CodexRunner {
         if (!threadId) {
           threadId = parseCodexJsonl(stdout).threadId;
         }
-        if (!threadId) {
+        if (options.requireThreadId && !threadId) {
           log.error('Codex 输出中未找到 threadId', {
             stdoutPreview: stdout.substring(0, 500),
           });
@@ -270,21 +320,52 @@ export class CodexRunner {
 }
 
 export function buildCodexArgs(
-  input: Pick<CodexRunInput, 'prompt' | 'threadId' | 'model'>,
+  input: Pick<CodexRunInput, 'prompt' | 'threadId' | 'model' | 'search'>,
   sandbox: 'full-auto' | 'none',
 ): string[] {
   const sandboxFlag = sandbox === 'none'
     ? '--dangerously-bypass-approvals-and-sandbox'
     : '--full-auto';
 
-  const args = input.threadId
+  const args: string[] = input.threadId
     ? ['exec', 'resume', input.threadId, '--json', sandboxFlag, '--skip-git-repo-check']
     : ['exec', '--json', sandboxFlag, '--skip-git-repo-check'];
 
   if (input.model) {
     args.push('--model', input.model);
   }
+  if (input.search) {
+    args.unshift('--search');
+  }
   args.push(input.prompt);
+  return args;
+}
+
+export function buildCodexReviewArgs(
+  input: Pick<CodexReviewInput, 'mode' | 'target' | 'prompt' | 'model' | 'search'>,
+  sandbox: 'full-auto' | 'none',
+): string[] {
+  const sandboxFlag = sandbox === 'none'
+    ? '--dangerously-bypass-approvals-and-sandbox'
+    : '--full-auto';
+
+  const args: string[] = ['exec', 'review', '--json', sandboxFlag, '--skip-git-repo-check'];
+  if (input.mode === 'uncommitted') {
+    args.push('--uncommitted');
+  } else if (input.mode === 'base' && input.target) {
+    args.push('--base', input.target);
+  } else if (input.mode === 'commit' && input.target) {
+    args.push('--commit', input.target);
+  }
+  if (input.model) {
+    args.push('--model', input.model);
+  }
+  if (input.search) {
+    args.unshift('--search');
+  }
+  if (input.prompt) {
+    args.push(input.prompt);
+  }
   return args;
 }
 

@@ -20,6 +20,7 @@ log.info('服务启动初始化...', {
   port: config.port,
   codexBin: config.codexBin,
   codexModel: config.codexModel ?? '(codex cli default)',
+  codexSearch: config.codexSearch,
   codexWorkdir: config.codexWorkdir,
   commandTimeoutMs: config.commandTimeoutMs ?? '(adaptive)',
   commandTimeoutMinMs: config.commandTimeoutMinMs,
@@ -99,6 +100,7 @@ function clipMessage(message: string, maxLength = 1500): string {
 const userTaskQueue = new Map<string, Promise<void>>();
 const outboundSendQueue = new Map<string, Promise<void>>();
 const userModelOverrides = new Map<string, string>();
+const userSearchOverrides = new Map<string, boolean>();
 
 function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void> {
   const previous = userTaskQueue.get(userId) ?? Promise.resolve();
@@ -157,6 +159,7 @@ ${clipMessage(prompt, 500)}
 
       const existingThreadId = sessionStore.get(sessionUserKey);
       const currentModel = userModelOverrides.get(sessionUserKey) ?? config.codexModel;
+      const currentSearch = userSearchOverrides.get(sessionUserKey) ?? config.codexSearch;
       const commandResult = handleUserCommand(
         prompt,
         existingThreadId,
@@ -211,6 +214,66 @@ ${clipMessage(prompt, 500)}
           await sendText(channel, userId, `✅ 已切换模型为：${resolved.model}${note}`);
           return;
         }
+        if (commandResult.querySearch) {
+          await sendText(channel, userId, `联网搜索：${currentSearch ? 'on' : 'off'}`);
+          return;
+        }
+        if (typeof commandResult.setSearchEnabled === 'boolean') {
+          userSearchOverrides.set(sessionUserKey, commandResult.setSearchEnabled);
+          await sendText(channel, userId, `✅ 已${commandResult.setSearchEnabled ? '开启' : '关闭'}联网搜索`);
+          return;
+        }
+        if (commandResult.reviewMode) {
+          if (!rateLimitStore.allow(sessionUserKey)) {
+            log.warn('handleText /review 命中限流，拒绝执行', { userId });
+            await sendText(channel, userId, '⏳ 请求过于频繁，请稍后再试。');
+            return;
+          }
+          if (!config.runnerEnabled) {
+            log.warn('handleText /review runnerEnabled=false，拒绝执行', { userId });
+            await sendText(channel, userId, '⚠️ 当前服务已禁用命令执行，请联系管理员。');
+            return;
+          }
+          try {
+            let lastStreamSend: Promise<void> = Promise.resolve();
+            const startTime = Date.now();
+            const reviewResult = await codexRunner.review({
+              mode: commandResult.reviewMode,
+              target: commandResult.reviewTarget,
+              prompt: commandResult.reviewPrompt,
+              model: currentModel,
+              search: currentSearch,
+              onMessage: (text) => {
+                log.info(`
+════════════════════════════════════════════════════════════
+🧪 Codex Review  [${channel}:${userId}]
+────────────────────────────────────────────────────────────
+${clipMessage(text, 500)}
+════════════════════════════════════════════════════════════`);
+                lastStreamSend = enqueueSendText(channel, userId, text).catch((err) => {
+                  log.error('handleText review onMessage 推送失败', err);
+                });
+              },
+            });
+            const elapsed = Date.now() - startTime;
+            await lastStreamSend;
+            log.info('<<< handleText Codex review 执行完成', {
+              userId,
+              mode: commandResult.reviewMode,
+              target: commandResult.reviewTarget ?? '(none)',
+              elapsedMs: elapsed,
+              rawOutputLength: reviewResult.rawOutput.length,
+            });
+          } catch (error) {
+            log.error('handleText /review 执行失败', {
+              userId,
+              error: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+            });
+            await sendText(channel, userId, '❌ review 执行失败，请稍后重试。');
+          }
+          return;
+        }
         if (commandResult.message) {
           await sendText(channel, userId, commandResult.message);
         }
@@ -242,6 +305,7 @@ ${clipMessage(prompt, 500)}
           prompt,
           threadId,
           model: currentModel,
+          search: currentSearch,
           // 每产出一条 agent_message 就实时推给用户
           onMessage: (text) => {
             log.info(`

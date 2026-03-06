@@ -42,6 +42,7 @@ npm start
 - `FEISHU_VERIFICATION_TOKEN`（推荐，飞书事件回调 token 校验）
 - `CODEX_WORKDIR`（Codex 执行目录）
 - `CODEX_MODEL`（可选，默认模型）
+- `CODEX_SEARCH`（默认是否开启联网搜索）
 - `CODEX_SANDBOX`：`full-auto`（默认）或 `none`
 - `RUNNER_ENABLED`：`false` 时禁用执行，仅返回提示
 - `COMMAND_TIMEOUT_MS`：固定超时（可选）。不设时启用自适应超时
@@ -72,6 +73,11 @@ npm start
 - `/model <模型名>`：切换当前用户模型
 - `/model reset`：重置为默认模型（`CODEX_MODEL` 或 Codex CLI 默认）
 - `/models`：查看当前 Codex 支持模型（读取本机 `~/.codex/models_cache.json`）
+- `/search`：查看联网搜索状态
+- `/search on|off`：开启/关闭联网搜索（按用户生效）
+- `/review`：审查当前工作区改动（`codex exec review --uncommitted`）
+- `/review base <分支>`：审查相对分支改动
+- `/review commit <SHA>`：审查指定提交改动
 
 推荐使用：
 - 先输入 `/sessions` 查看编号
