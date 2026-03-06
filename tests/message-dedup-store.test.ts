@@ -19,4 +19,21 @@ describe('MessageDedupStore', () => {
 
     vi.useRealTimers();
   });
+
+  it('runs gc at intervals instead of every message', () => {
+    vi.useFakeTimers();
+    const store = new MessageDedupStore(60);
+    const gcSpy = vi.spyOn(store as any, 'gc');
+
+    expect(store.isDuplicate('a1')).toBe(false);
+    expect(store.isDuplicate('a2')).toBe(false);
+    expect(store.isDuplicate('a3')).toBe(false);
+    expect(gcSpy).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(31_000);
+    expect(store.isDuplicate('a4')).toBe(false);
+    expect(gcSpy).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
 });

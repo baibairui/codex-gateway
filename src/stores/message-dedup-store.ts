@@ -4,10 +4,13 @@
  */
 export class MessageDedupStore {
   private readonly windowMs: number;
+  private readonly gcIntervalMs: number;
   private readonly seen = new Map<string, number>();
+  private lastGcAt = 0;
 
   constructor(windowSeconds: number) {
     this.windowMs = Math.max(1, windowSeconds) * 1000;
+    this.gcIntervalMs = Math.min(this.windowMs, 30_000);
   }
 
   isDuplicate(msgId?: string): boolean {
@@ -17,13 +20,22 @@ export class MessageDedupStore {
     }
 
     const now = Date.now();
-    this.gc(now);
+    this.maybeGc(now);
 
-    if (this.seen.has(id)) {
+    const previousTs = this.seen.get(id);
+    if (typeof previousTs === 'number' && now - previousTs <= this.windowMs) {
       return true;
     }
     this.seen.set(id, now);
     return false;
+  }
+
+  private maybeGc(now: number): void {
+    if (this.lastGcAt !== 0 && now - this.lastGcAt < this.gcIntervalMs) {
+      return;
+    }
+    this.gc(now);
+    this.lastGcAt = now;
   }
 
   private gc(now: number): void {

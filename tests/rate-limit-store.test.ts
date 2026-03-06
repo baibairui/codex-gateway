@@ -19,4 +19,19 @@ describe('RateLimitStore', () => {
     expect(store.allow('u2')).toBe(true);
     vi.useRealTimers();
   });
+
+  it('evicts stale buckets during periodic gc', () => {
+    vi.useFakeTimers();
+    const store = new RateLimitStore(1, 1);
+
+    expect(store.allow('u1')).toBe(true);
+    vi.advanceTimersByTime(1_500);
+
+    for (let i = 0; i < 64; i += 1) {
+      expect(store.allow(`u${i + 2}`)).toBe(true);
+    }
+
+    expect((store as any).buckets.has('u1')).toBe(false);
+    vi.useRealTimers();
+  });
 });
