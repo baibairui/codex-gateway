@@ -27,10 +27,12 @@ describe('parseCodexJsonl', () => {
 describe('buildCodexArgs', () => {
   it('includes --model when model is provided', () => {
     const args = buildCodexArgs(
-      { prompt: 'hello', model: 'gpt-5-codex' },
+      { prompt: 'hello', model: 'gpt-5-codex', workdir: '/tmp/agent-a' },
       'full-auto',
     );
     expect(args).toEqual([
+      '--cd',
+      '/tmp/agent-a',
       'exec',
       '--json',
       '--full-auto',
@@ -43,10 +45,12 @@ describe('buildCodexArgs', () => {
 
   it('builds resume args without --model when model is empty', () => {
     const args = buildCodexArgs(
-      { prompt: 'hello', threadId: 'thread_123' },
+      { prompt: 'hello', threadId: 'thread_123', workdir: '/tmp/agent-a' },
       'none',
     );
     expect(args).toEqual([
+      '--cd',
+      '/tmp/agent-a',
       'exec',
       'resume',
       'thread_123',
@@ -59,11 +63,13 @@ describe('buildCodexArgs', () => {
 
   it('puts --search before exec when enabled', () => {
     const args = buildCodexArgs(
-      { prompt: 'hello', model: 'gpt-5.4', search: true },
+      { prompt: 'hello', model: 'gpt-5.4', search: true, workdir: '/tmp/agent-b' },
       'full-auto',
     );
     expect(args).toEqual([
       '--search',
+      '--cd',
+      '/tmp/agent-b',
       'exec',
       '--json',
       '--full-auto',
@@ -78,11 +84,13 @@ describe('buildCodexArgs', () => {
 describe('buildCodexReviewArgs', () => {
   it('builds uncommitted review args', () => {
     const args = buildCodexReviewArgs(
-      { mode: 'uncommitted', model: 'gpt-5.4', search: true },
+      { mode: 'uncommitted', model: 'gpt-5.4', search: true, workdir: '/tmp/agent-b' },
       'full-auto',
     );
     expect(args).toEqual([
       '--search',
+      '--cd',
+      '/tmp/agent-b',
       'exec',
       'review',
       '--json',
@@ -96,10 +104,12 @@ describe('buildCodexReviewArgs', () => {
 
   it('builds base review args with prompt', () => {
     const args = buildCodexReviewArgs(
-      { mode: 'base', target: 'main', prompt: 'focus on regressions' },
+      { mode: 'base', target: 'main', prompt: 'focus on regressions', workdir: '/tmp/agent-c' },
       'none',
     );
     expect(args).toEqual([
+      '--cd',
+      '/tmp/agent-c',
       'exec',
       'review',
       '--json',

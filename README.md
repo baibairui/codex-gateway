@@ -41,9 +41,12 @@ npm start
 - `FEISHU_APP_ID` / `FEISHU_APP_SECRET`（启用飞书时必填）
 - `FEISHU_VERIFICATION_TOKEN`（推荐，飞书事件回调 token 校验）
 - `CODEX_WORKDIR`（Codex 执行目录）
+- `CODEX_AGENTS_DIR`（可选，agent 工作区根目录；默认 `.data/agents`）
 - `CODEX_MODEL`（可选，默认模型）
 - `CODEX_SEARCH`（默认是否开启联网搜索）
 - `CODEX_SANDBOX`：`full-auto`（默认）或 `none`
+- `BROWSER_OPEN_ENABLED`：是否允许通过 `/open <URL>` 在宿主机打开浏览器
+- `BROWSER_OPEN_COMMAND`：可选，自定义浏览器打开命令
 - `RUNNER_ENABLED`：`false` 时禁用执行，仅返回提示
 - `COMMAND_TIMEOUT_MS`：固定超时（可选）。不设时启用自适应超时
 - `COMMAND_TIMEOUT_MIN_MS` / `COMMAND_TIMEOUT_MAX_MS` / `COMMAND_TIMEOUT_PER_CHAR_MS`：自适应超时参数
@@ -68,6 +71,10 @@ npm start
 - `/session`：查看当前会话状态
 - `/sessions`：查看历史会话列表（最近优先，含名称与最近问题摘要）
 - `/switch <编号|threadId>`：切换会话
+- `/agents`：查看当前用户的 agent 列表
+- `/agent`：查看当前激活的 agent、工作区和会话
+- `/agent create <名称>`：创建独立 agent 工作区并立即切换
+- `/agent use <编号|agentId>`：切换到指定 agent
 - `/rename <编号|threadId> <名称>`：重命名会话
 - `/model`：查看当前模型
 - `/model <模型名>`：切换当前用户模型
@@ -75,6 +82,7 @@ npm start
 - `/models`：查看当前 Codex 支持模型（读取本机 `~/.codex/models_cache.json`）
 - `/search`：查看联网搜索状态
 - `/search on|off`：开启/关闭联网搜索（按用户生效）
+- `/open <URL>`：在宿主机打开浏览器
 - `/review`：审查当前工作区改动（`codex exec review --uncommitted`）
 - `/review base <分支>`：审查相对分支改动
 - `/review commit <SHA>`：审查指定提交改动
@@ -84,6 +92,41 @@ npm start
 - 再输入 `/switch 2` 按编号切换
 
 普通消息会先收到“处理中”提示，再持续收到 Codex 的流式回复。
+
+## Agent 工作区与记忆设计
+
+现在支持通过聊天命令创建 agent。每个 agent 都有独立工作区，Codex 会在对应目录执行：
+
+```text
+.data/agents/
+  global-memory/
+    README.md
+    shared-context.md
+    engineering-rules.md
+  users/
+    <user-slug>-<hash>/
+      <agent-id>/
+        AGENTS.md
+        agent.md
+        memory/
+          profile.md
+          context.md
+          notes.md
+```
+
+说明：
+- `AGENTS.md` 是 Codex 自动读取的工作区规则入口。
+- `agent.md` 是该 agent 的主记忆索引。
+- `memory/*.md` 用于拆分 agent 私有记忆，避免单文件膨胀。
+- `global-memory/*.md` 用于沉淀所有 agent 共享的长期知识。
+- `/review` 和普通对话都会自动在当前 agent 的工作区里执行。
+
+推荐用法：
+1. 先输入 `/agent create 前端重构`
+2. 在生成的工作区里放项目代码或拉取仓库
+3. 将长期上下文写入 `agent.md` 和 `memory/*.md`
+4. 将跨 agent 的共识写入 `global-memory/*.md`
+5. 通过 `/agent use <编号>` 在多个 agent 之间切换
 
 ## 飞书接入说明
 
@@ -115,4 +158,6 @@ npm test
 
 ## 会话持久化
 
-- 现在使用 SQLite 存储会话数据：`.data/sessions.db`
+- 现在使用 SQLite 存储会话、当前 agent、agent 元数据：`.data/sessions.db`
+- 默认 agent 仍使用 `CODEX_WORKDIR`
+- 自定义 agent 使用 `CODEX_AGENTS_DIR` 下的独立工作区

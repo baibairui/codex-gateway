@@ -8,24 +8,62 @@ import { SessionStore } from '../src/stores/session-store.js';
 
 function makeStore(): SessionStore {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-store-'));
-  return new SessionStore(path.join(dir, 'sessions.db'));
+  return new SessionStore(path.join(dir, 'sessions.db'), {
+    defaultWorkspaceDir: '/repo/default-workdir',
+  });
 }
 
 describe('SessionStore', () => {
-  it('keeps session history and resolves numeric switch target', () => {
+  it('defaults to the built-in default agent', () => {
     const store = makeStore();
-    store.set('u1', 'thread_1', 'first prompt');
-    store.set('u1', 'thread_2', 'second prompt');
-    store.set('u1', 'thread_3', 'third prompt');
+    const agent = store.getCurrentAgent('u1');
 
-    expect(store.list('u1')).toEqual(['thread_3', 'thread_2', 'thread_1']);
-    expect(store.resolveSwitchTarget('u1', '2')).toBe('thread_2');
-    expect(store.resolveSwitchTarget('u1', '999')).toBeUndefined();
-
-    store.renameSession('thread_2', '发布修复');
-    const list = store.listDetailed('u1');
-    expect(list[1]?.name).toBe('发布修复');
-    expect(list[0]?.lastPrompt).toContain('third prompt');
+    expect(agent.agentId).toBe('default');
+    expect(agent.workspaceDir).toBe('/repo/default-workdir');
+    expect(store.listAgents('u1')[0]?.isDefault).toBe(true);
   });
 
+  it('creates agents and resolves numeric targets', () => {
+    const store = makeStore();
+    store.createAgent('u1', {
+      agentId: 'frontend',
+      name: '前端Agent',
+      workspaceDir: '/tmp/frontend',
+    });
+    store.createAgent('u1', {
+      agentId: 'backend',
+      name: '后端Agent',
+      workspaceDir: '/tmp/backend',
+    });
+
+    const listed = store.listAgents('u1');
+    expect(listed).toHaveLength(3);
+    expect(store.resolveAgentTarget('u1', '2')).toBeTruthy();
+    expect(store.resolveAgentTarget('u1', 'frontend')).toBe('frontend');
+
+    expect(store.setCurrentAgent('u1', 'frontend')).toBe(true);
+    expect(store.getCurrentAgent('u1').agentId).toBe('frontend');
+  });
+
+  it('keeps session history isolated per agent', () => {
+    const store = makeStore();
+    store.createAgent('u1', {
+      agentId: 'frontend',
+      name: '前端Agent',
+      workspaceDir: '/tmp/frontend',
+    });
+
+    store.setSession('u1', 'default', 'thread_default_1', 'first prompt');
+    store.setSession('u1', 'frontend', 'thread_front_1', 'second prompt');
+    store.setSession('u1', 'frontend', 'thread_front_2', 'third prompt');
+
+    expect(store.getSession('u1', 'default')).toBe('thread_default_1');
+    expect(store.getSession('u1', 'frontend')).toBe('thread_front_2');
+    expect(store.resolveSwitchTarget('u1', 'frontend', '2')).toBe('thread_front_1');
+    expect(store.listDetailed('u1', 'default')).toHaveLength(1);
+    expect(store.listDetailed('u1', 'frontend')).toHaveLength(2);
+
+    store.renameSession('thread_front_1', '发布修复');
+    expect(store.listDetailed('u1', 'frontend')[1]?.name).toBe('发布修复');
+  });
 });

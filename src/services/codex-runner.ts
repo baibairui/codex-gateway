@@ -8,6 +8,7 @@ export interface CodexRunInput {
   threadId?: string;
   model?: string;
   search?: boolean;
+  workdir?: string;
   /** 每产出一条 agent_message 就回调一次 */
   onMessage?: (text: string) => void;
 }
@@ -23,6 +24,7 @@ export interface CodexReviewInput {
   prompt?: string;
   model?: string;
   search?: boolean;
+  workdir?: string;
   onMessage?: (text: string) => void;
 }
 
@@ -116,6 +118,7 @@ export class CodexRunner {
     return this.runJsonl({
       args,
       prompt: input.prompt,
+      workdir: input.workdir,
       onMessage: input.onMessage,
       initialThreadId: input.threadId,
       requireThreadId: true,
@@ -141,6 +144,7 @@ export class CodexRunner {
     return this.runJsonl({
       args,
       prompt: timeoutHint,
+      workdir: input.workdir,
       onMessage: input.onMessage,
       requireThreadId: false,
       logMeta: {
@@ -154,6 +158,7 @@ export class CodexRunner {
   private runJsonl(options: {
     args: string[];
     prompt: string;
+    workdir?: string;
     onMessage?: (text: string) => void;
     initialThreadId?: string;
     requireThreadId: boolean;
@@ -162,7 +167,7 @@ export class CodexRunner {
     log.info('Codex 子进程启动', {
       bin: this.codexBin,
       args: redactArgsForLog(options.args),
-      cwd: this.workdir,
+      cwd: options.workdir ?? this.workdir,
       timeoutMode: this.timeoutMs ? 'fixed' : 'adaptive',
       ...options.logMeta,
     });
@@ -175,7 +180,7 @@ export class CodexRunner {
 
     return new Promise<{ rawOutput: string; threadId?: string }>((resolve, reject) => {
       const child = spawn(this.codexBin, options.args, {
-        cwd: this.workdir,
+        cwd: options.workdir ?? this.workdir,
         env: process.env,
       });
 
@@ -320,7 +325,7 @@ export class CodexRunner {
 }
 
 export function buildCodexArgs(
-  input: Pick<CodexRunInput, 'prompt' | 'threadId' | 'model' | 'search'>,
+  input: Pick<CodexRunInput, 'prompt' | 'threadId' | 'model' | 'search' | 'workdir'>,
   sandbox: 'full-auto' | 'none',
 ): string[] {
   const sandboxFlag = sandbox === 'none'
@@ -334,6 +339,10 @@ export function buildCodexArgs(
   if (input.model) {
     args.push('--model', input.model);
   }
+  if (input.workdir?.trim()) {
+    args.unshift(input.workdir.trim());
+    args.unshift('--cd');
+  }
   if (input.search) {
     args.unshift('--search');
   }
@@ -342,7 +351,7 @@ export function buildCodexArgs(
 }
 
 export function buildCodexReviewArgs(
-  input: Pick<CodexReviewInput, 'mode' | 'target' | 'prompt' | 'model' | 'search'>,
+  input: Pick<CodexReviewInput, 'mode' | 'target' | 'prompt' | 'model' | 'search' | 'workdir'>,
   sandbox: 'full-auto' | 'none',
 ): string[] {
   const sandboxFlag = sandbox === 'none'
@@ -359,6 +368,10 @@ export function buildCodexReviewArgs(
   }
   if (input.model) {
     args.push('--model', input.model);
+  }
+  if (input.workdir?.trim()) {
+    args.unshift(input.workdir.trim());
+    args.unshift('--cd');
   }
   if (input.search) {
     args.unshift('--search');
