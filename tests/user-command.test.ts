@@ -48,6 +48,7 @@ describe('handleUserCommand', () => {
     expect(result.handled).toBe(true);
     expect(result.message).toContain('可用命令');
     expect(result.message).toContain('/agent create <名称>');
+    expect(result.message).toContain('/skill-agent');
     expect(result.message).not.toContain('/agent init-memory');
   });
 
@@ -92,6 +93,10 @@ describe('handleUserCommand', () => {
     const init = handleUserCommand('/agent init-memory', context);
     expect(init.handled).toBe(true);
     expect(init.initMemoryAgent).toBe(true);
+
+    const initSkill = handleUserCommand('/skill-agent', context);
+    expect(initSkill.handled).toBe(true);
+    expect(initSkill.initSkillAgent).toBe(true);
 
     const useAgent = handleUserCommand('/agent use 2', context);
     expect(useAgent.handled).toBe(true);
@@ -160,6 +165,7 @@ describe('commandNeedsAgentList', () => {
     expect(commandNeedsAgentList('/agent')).toBe(true);
     expect(commandNeedsAgentList('/agent use 2')).toBe(true);
     expect(commandNeedsAgentList('/agent init-memory')).toBe(false);
+    expect(commandNeedsAgentList('/agent init-skill')).toBe(false);
   });
 
   it('returns false for other commands', () => {

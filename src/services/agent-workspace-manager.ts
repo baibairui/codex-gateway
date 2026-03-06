@@ -16,10 +16,11 @@ interface CreateAgentWorkspaceInput {
   userId: string;
   agentName: string;
   existingAgentIds: string[];
-  template?: 'default' | 'memory-onboarding';
+  template?: 'default' | 'memory-onboarding' | 'skill-onboarding';
 }
 
 const MEMORY_ONBOARDING_AGENT_ID = 'memory-onboarding';
+const SKILL_ONBOARDING_AGENT_ID = 'skill-onboarding';
 
 export class AgentWorkspaceManager {
   private readonly rootDir: string;
@@ -92,6 +93,12 @@ export class AgentWorkspaceManager {
       this.writeIfMissing(
         path.join(workspaceDir, 'memory-init-checklist.md'),
         renderMemoryInitChecklist(),
+      );
+    }
+    if (template === 'skill-onboarding') {
+      this.writeIfMissing(
+        path.join(workspaceDir, 'skill-install-checklist.md'),
+        renderSkillInstallChecklist(),
       );
     }
     this.writeIfMissing(
@@ -241,7 +248,7 @@ function renderWorkspaceAgentsMd(
   agentId: string,
   relativeGlobalDir: string,
   relativeSharedDir: string,
-  template: 'default' | 'memory-onboarding',
+  template: 'default' | 'memory-onboarding' | 'skill-onboarding',
 ): string {
   const globalDir = normalizeRelativeDir(relativeGlobalDir);
   const sharedDir = normalizeRelativeDir(relativeSharedDir);
@@ -253,6 +260,16 @@ function renderWorkspaceAgentsMd(
         '- 每轮总结并写入 shared-memory 对应文件，再继续下一轮。',
         '- 遇到敏感信息先确认“是否写入长期记忆”。',
         '- 对用户只输出引导问题和确认结论，不透露目录结构、文件名、工作区路径、系统实现细节。',
+        '',
+      ]
+    : template === 'skill-onboarding'
+    ? [
+        '技能扩展职责：',
+        '- 你不是通用助手；你的主要职责是帮助用户给“其他 agent”安装和配置 skills。',
+        '- 必须先确认目标 agent（名称/ID）和目标能力，再执行安装。',
+        '- 安装后要给出验证步骤（如何确认 skill 已生效）。',
+        '- 如需改动目标 agent 的 AGENTS.md，先展示计划，再执行最小改动。',
+        '- 对用户只输出可操作结论，不透露系统实现细节。',
         '',
       ]
     : [];
@@ -299,16 +316,22 @@ function renderWorkspaceAgentsMd(
 function renderAgentMd(
   agentName: string,
   agentId: string,
-  template: 'default' | 'memory-onboarding',
+  template: 'default' | 'memory-onboarding' | 'skill-onboarding',
 ): string {
   const role = template === 'memory-onboarding'
     ? '- Role: Memory Onboarding Guide'
+    : template === 'skill-onboarding'
+    ? '- Role: Skill Enablement Guide'
     : '- Role:';
   const goals = template === 'memory-onboarding'
     ? '- Primary Goals: Guide the user to initialize shared-memory with confirmed facts and preferences'
+    : template === 'skill-onboarding'
+    ? '- Primary Goals: Install and configure skills for target agents with explicit verification'
     : '- Primary Goals:';
   const boundaries = template === 'memory-onboarding'
     ? '- Boundaries: Ask before writing sensitive details; keep each round short and structured'
+    : template === 'skill-onboarding'
+    ? '- Boundaries: Confirm target agent before changes; avoid broad or unrelated edits'
     : '- Boundaries:';
   return [
     '# Agent Memory Index',
@@ -336,13 +359,20 @@ function renderAgentMd(
 function renderWorkspaceReadme(
   agentName: string,
   agentId: string,
-  template: 'default' | 'memory-onboarding',
+  template: 'default' | 'memory-onboarding' | 'skill-onboarding',
 ): string {
   const tips = template === 'memory-onboarding'
     ? [
         '- 该 agent 用于一次性或阶段性初始化 shared-memory。',
         '- 使用 `memory-init-checklist.md` 跟踪初始化进度。',
         '- 每轮提问后都要把已确认信息写入 shared-memory。',
+        '- 浏览器操作策略写在 `browser-playbook.md`。',
+      ]
+    : template === 'skill-onboarding'
+    ? [
+        '- 该 agent 专门用于给其它 agent 拓展能力（安装/配置 skills）。',
+        '- 使用 `skill-install-checklist.md` 跟踪安装进度与验证项。',
+        '- 每次安装前先确认目标 agent，再执行最小改动。',
         '- 浏览器操作策略写在 `browser-playbook.md`。',
       ]
     : [
@@ -379,6 +409,25 @@ function renderMemoryInitChecklist(): string {
     '',
     '## Notes',
     '-',
+    '',
+  ].join('\n');
+}
+
+function renderSkillInstallChecklist(): string {
+  return [
+    '# Skill Install Checklist',
+    '',
+    '## Scope',
+    '- [ ] 目标 agent 已确认（名称/ID）',
+    '- [ ] 目标能力与验收标准已确认',
+    '',
+    '## Install',
+    '- [ ] 已选择技能来源（内置 skill / 社区 skill / GitHub）',
+    '- [ ] 已完成安装并记录必要配置',
+    '',
+    '## Verify',
+    '- [ ] 已通过最小任务验证 skill 生效',
+    '- [ ] 已给出回滚或替代方案',
     '',
   ].join('\n');
 }
@@ -588,6 +637,9 @@ function createUniqueAgentId(name: string, existingAgentIds: string[]): string {
 function resolveAgentId(input: CreateAgentWorkspaceInput): string {
   if (input.template === 'memory-onboarding') {
     return MEMORY_ONBOARDING_AGENT_ID;
+  }
+  if (input.template === 'skill-onboarding') {
+    return SKILL_ONBOARDING_AGENT_ID;
   }
   return createUniqueAgentId(input.agentName, input.existingAgentIds);
 }

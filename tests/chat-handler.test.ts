@@ -186,6 +186,78 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('开始记忆初始化引导'));
   });
 
+  it('creates skill onboarding agent by command and switches to it', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const createWorkspace = vi.fn(() => ({ agentId: 'skill-onboarding', workspaceDir: '/tmp/skill-onboarding' }));
+    const run = vi.fn(async () => ({ threadId: 'thread_skill', rawOutput: '' }));
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace,
+        isSharedMemoryEmpty: () => false,
+      },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/skill-agent' });
+
+    expect(createWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      template: 'skill-onboarding',
+    }));
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      workdir: '/tmp/skill-onboarding',
+      search: false,
+    }));
+    expect(sessionStore.getCurrentAgent('wecom:u1').agentId).toBe('skill-onboarding');
+    expect(sessionStore.getSession('wecom:u1', 'skill-onboarding')).toBe('thread_skill');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('技能扩展助手'));
+  });
+
+  it('reuses existing skill onboarding session when already initialized', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.createAgent('wecom:u1', {
+      agentId: 'skill-onboarding',
+      name: '技能扩展助手',
+      workspaceDir: '/tmp/skill-onboarding',
+    });
+    sessionStore.setSession('wecom:u1', 'skill-onboarding', 'thread_skill');
+    const createWorkspace = vi.fn(() => ({ agentId: 'skill-onboarding', workspaceDir: '/tmp/skill-onboarding' }));
+    const run = vi.fn(async () => ({ threadId: 'thread_skill', rawOutput: '' }));
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace,
+        isSharedMemoryEmpty: () => false,
+      },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/skill-agent' });
+
+    expect(createWorkspace).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(sessionStore.getCurrentAgent('wecom:u1').agentId).toBe('skill-onboarding');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('已有进行中的会话'));
+  });
+
   it('reuses legacy named onboarding agent instead of creating duplicates', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();

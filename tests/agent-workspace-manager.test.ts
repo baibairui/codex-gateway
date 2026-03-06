@@ -65,6 +65,25 @@ describe('AgentWorkspaceManager', () => {
     expect(checklist).toContain('Round 1: Profile');
   });
 
+  it('creates scaffold for skill onboarding template', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-'));
+    const manager = new AgentWorkspaceManager(dir);
+
+    const result = manager.createWorkspace({
+      userId: 'wecom:u1',
+      agentName: '技能扩展助手',
+      existingAgentIds: [],
+      template: 'skill-onboarding',
+    });
+
+    const agentsMd = fs.readFileSync(path.join(result.workspaceDir, 'AGENTS.md'), 'utf8');
+    const checklist = fs.readFileSync(path.join(result.workspaceDir, 'skill-install-checklist.md'), 'utf8');
+
+    expect(result.agentId).toBe('skill-onboarding');
+    expect(agentsMd).toContain('技能扩展职责');
+    expect(checklist).toContain('Skill Install Checklist');
+  });
+
   it('includes browser operation guidance in default agent scaffold', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-'));
     const manager = new AgentWorkspaceManager(dir);

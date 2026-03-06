@@ -27,8 +27,9 @@ export interface UserCommandResult {
   queryAgent?: boolean;
   queryAgents?: boolean;
   createAgentName?: string;
-  createAgentTemplate?: 'default' | 'memory-onboarding';
+  createAgentTemplate?: 'default' | 'memory-onboarding' | 'skill-onboarding';
   initMemoryAgent?: boolean;
+  initSkillAgent?: boolean;
   useAgentTarget?: string;
   initLogin?: boolean;
 }
@@ -104,6 +105,7 @@ export function handleUserCommand(content: string, context: UserCommandContext =
           '/agents - 查看 agent 列表',
           '/agent - 查看当前 agent',
           '/agent create <名称> - 创建独立 agent 工作区',
+          '/skill-agent - 启动技能扩展助手 agent',
           '/agent use <编号|agentId> - 切换 agent',
           '/model - 查看当前模型',
           '/model <模型名> - 切换模型',
@@ -205,6 +207,13 @@ export function handleUserCommand(content: string, context: UserCommandContext =
         switchTarget: target,
       };
     }
+    case '/skill-agent':
+    case '/skillagent':
+    case '/skill':
+      return {
+        handled: true,
+        initSkillAgent: true,
+      };
     case '/login':
       return {
         handled: true,

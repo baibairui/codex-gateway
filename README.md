@@ -77,6 +77,7 @@ npm start
 - `/agent`：查看当前激活的 agent、工作区和会话
 - `/agent create <名称>`：创建独立 agent 工作区并立即切换
 - `/agent init-memory`：创建或切换到“记忆初始化引导”agent
+- `/skill-agent`：创建或切换到“技能扩展助手”agent
 - `/agent use <编号|agentId>`：切换到指定 agent
 - `/rename <编号|threadId> <名称>`：重命名会话
 - `/model`：查看当前模型
@@ -164,6 +165,12 @@ npm start
 2. 按引导 agent 的问题分轮回答（每轮只填少量信息）
 3. 确认后由引导 agent 写入 shared-memory 对应文件
 4. 引导过程默认不对用户暴露内部目录、文件名和工作区实现细节
+
+给其他 agent 扩展能力推荐：
+1. 先输入 `/skill-agent`
+2. 告诉技能扩展助手：目标 agent + 目标能力 + 验收标准
+3. 按助手引导完成 skill 安装与必要配置
+4. 按助手给出的最小验证步骤确认技能已生效
 
 ## 飞书接入说明
 

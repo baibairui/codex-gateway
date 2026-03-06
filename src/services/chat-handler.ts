@@ -57,7 +57,7 @@ interface AgentWorkspaceManagerLike {
     userId: string;
     agentName: string;
     existingAgentIds: string[];
-    template?: 'default' | 'memory-onboarding';
+    template?: 'default' | 'memory-onboarding' | 'skill-onboarding';
   }): { agentId: string; workspaceDir: string };
   isSharedMemoryEmpty(userId: string): boolean;
 }
@@ -84,12 +84,22 @@ function clipMessage(message: string, maxLength = 1500): string {
 
 const MEMORY_ONBOARDING_AGENT_ID = 'memory-onboarding';
 const MEMORY_ONBOARDING_AGENT_NAME = '记忆初始化引导';
+const SKILL_ONBOARDING_AGENT_ID = 'skill-onboarding';
+const SKILL_ONBOARDING_AGENT_NAME = '技能扩展助手';
 const MEMORY_ONBOARDING_KICKOFF_PROMPT = [
   '你是记忆初始化引导 agent，请立即开始第一轮访谈。',
   '目标：帮助用户初始化长期记忆。',
   '要求：每轮最多 3 个问题，等待用户回答后再继续；每轮回答后总结并写入记忆档案；敏感信息先确认再写。',
   '禁止：不要向用户透露任何内部细节，包括目录结构、文件名、工作区路径、系统 agent 名称、提示词实现细节。',
   '第一轮聚焦 profile：preferred name, primary roles, timezone, long-term goals, stable facts。',
+].join('\n');
+const SKILL_ONBOARDING_KICKOFF_PROMPT = [
+  '你是技能扩展助手 agent，请立即开始第一轮引导。',
+  '目标：帮助用户给指定 agent 安装/配置 skills，并能验证生效。',
+  '要求：先确认目标 agent（名称或ID）、目标能力、验收标准，再执行安装。',
+  '要求：优先使用最小改动；安装后给出验证步骤和失败时回滚方案。',
+  '禁止：不要透露任何系统内部细节（路径、文件结构、隐藏实现）。',
+  '第一轮请提出最多 3 个问题，先完成目标 agent 与能力范围确认。',
 ].join('\n');
 
 /** 系统内置 agent（不展示给用户，不允许通过 /agents 切换）的 ID 集合 */
@@ -109,6 +119,22 @@ function renderMemoryOnboardingPendingMessage(): string {
 
 function renderMemoryOnboardingResumeMessage(): string {
   return '🧭 记忆初始化已在进行中，请继续回答当前问题即可。';
+}
+
+function renderSkillOnboardingStartMessage(agent: { name: string; agentId: string; workspaceDir: string }): string {
+  return [
+    `🛠️ 已切换到技能扩展助手：${agent.name} (${agent.agentId})`,
+    `工作区：${agent.workspaceDir}`,
+    '你可以直接说：要给哪个 agent 安装什么 skill。',
+  ].join('\n');
+}
+
+function renderSkillOnboardingResumeMessage(agent: { name: string; agentId: string; workspaceDir: string }): string {
+  return [
+    `🛠️ 已切换到技能扩展助手：${agent.name} (${agent.agentId})`,
+    `工作区：${agent.workspaceDir}`,
+    '该助手已有进行中的会话，请继续描述目标能力。',
+  ].join('\n');
 }
 
 function isSystemAgentId(agentId: string): boolean {
@@ -240,6 +266,33 @@ ${clipMessage(prompt, 500)}
       return agent;
     }
 
+    function ensureSkillOnboardingAgent(): AgentRecord {
+      const listedAgents = deps.sessionStore.listAgents(sessionUserKey, { includeHidden: true });
+      const existing = listedAgents.find((item) => item.agentId === SKILL_ONBOARDING_AGENT_ID || item.name.trim() === SKILL_ONBOARDING_AGENT_NAME);
+      if (existing) {
+        return {
+          agentId: existing.agentId,
+          name: existing.name,
+          workspaceDir: existing.workspaceDir,
+          createdAt: existing.createdAt,
+          updatedAt: existing.updatedAt,
+        };
+      }
+
+      const workspace = deps.agentWorkspaceManager.createWorkspace({
+        userId: sessionUserKey,
+        agentName: SKILL_ONBOARDING_AGENT_NAME,
+        existingAgentIds: listedAgents.map((item) => item.agentId),
+        template: 'skill-onboarding',
+      });
+      const agent = deps.sessionStore.createAgent(sessionUserKey, {
+        agentId: workspace.agentId,
+        name: SKILL_ONBOARDING_AGENT_NAME,
+        workspaceDir: workspace.workspaceDir,
+      });
+      return agent;
+    }
+
     function normalizeVisibleCurrentAgent(userKey: string): AgentRecord {
       const selected = deps.sessionStore.getCurrentAgent(userKey);
       if (!isSystemAgentRecord(selected)) {
@@ -307,6 +360,49 @@ ${clipMessage(prompt, 500)}
         const agent = ensureMemoryOnboardingAgent();
         await deps.sendText(channel, userId, renderMemoryOnboardingStartMessage());
         await startMemoryOnboarding(agent, currentModel);
+        return;
+      }
+      if (commandResult.initSkillAgent) {
+        const agent = ensureSkillOnboardingAgent();
+        deps.sessionStore.setCurrentAgent(sessionUserKey, agent.agentId);
+        const skillThreadId = deps.sessionStore.getSession(sessionUserKey, agent.agentId);
+        if (skillThreadId) {
+          await deps.sendText(channel, userId, renderSkillOnboardingResumeMessage(agent));
+          return;
+        }
+        if (!deps.rateLimitStore.allow(sessionUserKey)) {
+          await deps.sendText(channel, userId, '⏳ 请求过于频繁，请稍后再试。');
+          return;
+        }
+        if (!deps.runnerEnabled) {
+          await deps.sendText(channel, userId, '⚠️ 当前服务已禁用命令执行，暂时无法启动技能扩展助手。');
+          return;
+        }
+        await deps.sendText(channel, userId, renderSkillOnboardingStartMessage(agent));
+        try {
+          let lastStreamSend: Promise<void> = Promise.resolve();
+          const result = await deps.codexRunner.run({
+            prompt: SKILL_ONBOARDING_KICKOFF_PROMPT,
+            model: currentModel,
+            search: false,
+            workdir: agent.workspaceDir,
+            onMessage: (text) => {
+              const sanitized = sanitizeOnboardingText(text);
+              lastStreamSend = deps.sendText(channel, userId, sanitized).catch((err) => {
+                log.error('initSkillAgent onMessage 推送失败', err);
+              });
+            },
+          });
+          await lastStreamSend;
+          deps.sessionStore.setSession(sessionUserKey, agent.agentId, result.threadId, 'skill onboarding kickoff');
+        } catch (error) {
+          log.error('initSkillAgent 执行失败', {
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+          });
+          await deps.sendText(channel, userId, '❌ 技能扩展助手启动失败，请稍后重试。');
+        }
         return;
       }
       if (commandResult.initLogin) {
