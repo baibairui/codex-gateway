@@ -4,6 +4,7 @@
 - 接收企业微信安全模式回调（验签 + 解密）
 - 将文本消息转发给本地 `codex` CLI
 - 使用企业微信 API 主动推送回复
+- 可选接入飞书事件回调（文本消息）并主动回推回复
 
 ## 快速开始
 
@@ -36,6 +37,9 @@ npm start
 
 - `WEWORK_CORP_ID` / `WEWORK_SECRET` / `WEWORK_AGENT_ID`
 - `WEWORK_TOKEN` / `WEWORK_ENCODING_AES_KEY`（企业微信回调安全模式）
+- `FEISHU_ENABLED`：是否启用飞书回调（默认 `false`）
+- `FEISHU_APP_ID` / `FEISHU_APP_SECRET`（启用飞书时必填）
+- `FEISHU_VERIFICATION_TOKEN`（推荐，飞书事件回调 token 校验）
 - `CODEX_WORKDIR`（Codex 执行目录）
 - `CODEX_SANDBOX`：`full-auto`（默认）或 `none`
 - `RUNNER_ENABLED`：`false` 时禁用执行，仅返回提示
@@ -49,6 +53,7 @@ npm start
 - `GET /healthz`：健康检查
 - `GET /wecom/callback`：企业微信回调地址校验
 - `POST /wecom/callback`：企业微信消息回调
+- `POST /feishu/callback`：飞书事件回调（含 `url_verification`）
 
 ## 聊天内功能命令
 
@@ -65,6 +70,28 @@ npm start
 - 再输入 `/switch 2` 按编号切换
 
 普通消息会先收到“处理中”提示，再持续收到 Codex 的流式回复。
+
+## 飞书接入说明
+
+1. 在 `.env` 配置：
+
+```bash
+FEISHU_ENABLED=true
+FEISHU_APP_ID=cli_xxx
+FEISHU_APP_SECRET=xxx
+FEISHU_VERIFICATION_TOKEN=xxx
+```
+
+2. 在飞书开放平台事件订阅里设置请求地址：
+
+```text
+http://<your-host>:3000/feishu/callback
+```
+
+3. 订阅事件：
+- `im.message.receive_v1`
+
+当前实现仅处理文本消息（`message_type=text`），用户标识使用 `open_id`。
 
 ## 测试
 

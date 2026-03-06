@@ -39,6 +39,15 @@ function optionalString(name: string, fallback: string): string {
   return raw.trim();
 }
 
+function optionalStringUndefined(name: string): string | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) {
+    return undefined;
+  }
+  const value = raw.trim();
+  return value ? value : undefined;
+}
+
 function codexSandboxMode(): 'full-auto' | 'none' {
   const value = process.env.CODEX_SANDBOX ?? 'full-auto';
   if (value === 'full-auto' || value === 'none') {
@@ -57,6 +66,11 @@ export const config = {
   confirmTtlSeconds: optionalNumber('CONFIRM_TTL_SECONDS', 120),
   commandTimeoutMs: optionalNumber('COMMAND_TIMEOUT_MS', 180_000),
   apiTimeoutMs: optionalNumber('API_TIMEOUT_MS', 15_000),
+  feishuEnabled: process.env.FEISHU_ENABLED === 'true',
+  feishuAppId: optionalStringUndefined('FEISHU_APP_ID'),
+  feishuAppSecret: optionalStringUndefined('FEISHU_APP_SECRET'),
+  feishuVerificationToken: optionalStringUndefined('FEISHU_VERIFICATION_TOKEN'),
+  feishuApiTimeoutMs: optionalNumber('FEISHU_API_TIMEOUT_MS', 15_000),
   dedupWindowSeconds: optionalNumber('DEDUP_WINDOW_SECONDS', 60),
   rateLimitMaxMessages: optionalNumber('RATE_LIMIT_MAX_MESSAGES', 20),
   rateLimitWindowSeconds: optionalNumber('RATE_LIMIT_WINDOW_SECONDS', 60),
@@ -67,3 +81,9 @@ export const config = {
   codexSandbox: codexSandboxMode(),
   runnerEnabled: process.env.RUNNER_ENABLED !== 'false',
 };
+
+if (config.feishuEnabled) {
+  if (!config.feishuAppId || !config.feishuAppSecret) {
+    throw new Error('missing required env for Feishu: FEISHU_APP_ID / FEISHU_APP_SECRET');
+  }
+}

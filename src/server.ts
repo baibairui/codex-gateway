@@ -5,6 +5,7 @@ import { createApp } from './app.js';
 import { config } from './config.js';
 import { CodexRunner } from './services/codex-runner.js';
 import { WeComApi } from './services/wecom-api.js';
+import { FeishuApi } from './services/feishu-api.js';
 import { WeComCrypto } from './utils/wecom-crypto.js';
 import { SessionStore } from './stores/session-store.js';
 import { MessageDedupStore } from './stores/message-dedup-store.js';
@@ -25,6 +26,8 @@ log.info('服务启动初始化...', {
   rateLimitMaxMessages: config.rateLimitMaxMessages,
   rateLimitWindowSeconds: config.rateLimitWindowSeconds,
   apiTimeoutMs: config.apiTimeoutMs,
+  feishuEnabled: config.feishuEnabled,
+  feishuApiTimeoutMs: config.feishuApiTimeoutMs,
 });
 
 const dataDir = path.resolve(process.cwd(), '.data');
@@ -56,6 +59,17 @@ const weComApi = new WeComApi({
   timeoutMs: config.apiTimeoutMs,
 });
 log.debug('WeComApi 已初始化');
+
+const feishuApi = config.feishuEnabled && config.feishuAppId && config.feishuAppSecret
+  ? new FeishuApi({
+      appId: config.feishuAppId,
+      appSecret: config.feishuAppSecret,
+      timeoutMs: config.feishuApiTimeoutMs,
+    })
+  : undefined;
+if (feishuApi) {
+  log.debug('FeishuApi 已初始化');
+}
 
 const wecomCrypto = new WeComCrypto({
   token: config.token,
@@ -91,74 +105,76 @@ function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void
 const app = createApp({
   wecomCrypto,
   allowFrom: config.allowFrom,
+  feishuVerificationToken: config.feishuVerificationToken,
   isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
-  handleText: async ({ userId, content }) => {
-    await runInUserQueue(userId, async () => {
+  handleText: async ({ channel, userId, content }) => {
+    const sessionUserKey = `${channel}:${userId}`;
+    await runInUserQueue(sessionUserKey, async () => {
       const prompt = content.trim();
       if (!prompt) {
-        log.debug('handleText 收到空 prompt，跳过', { userId });
+        log.debug('handleText 收到空 prompt，跳过', { channel, userId });
         return;
       }
 
       log.info(`
 ════════════════════════════════════════════════════════════
-📩 用户消息  [${userId}]
+📩 用户消息  [${channel}:${userId}]
 ────────────────────────────────────────────────────────────
 ${clipMessage(prompt, 500)}
 ════════════════════════════════════════════════════════════`);
 
-      const existingThreadId = sessionStore.get(userId);
-      const commandResult = handleUserCommand(prompt, existingThreadId, sessionStore.listDetailed(userId));
+      const existingThreadId = sessionStore.get(sessionUserKey);
+      const commandResult = handleUserCommand(prompt, existingThreadId, sessionStore.listDetailed(sessionUserKey));
       if (commandResult.handled) {
         if (commandResult.clearSession) {
-          sessionStore.clear(userId);
+          sessionStore.clear(sessionUserKey);
         }
         if (commandResult.renameTarget && commandResult.renameName) {
-          const resolved = sessionStore.resolveSwitchTarget(userId, commandResult.renameTarget);
+          const resolved = sessionStore.resolveSwitchTarget(sessionUserKey, commandResult.renameTarget);
           if (!resolved) {
-            await weComApi.sendText(userId, '❌ 未找到目标会话，请先发送 /sessions 查看编号。');
+            await sendText(channel, userId, '❌ 未找到目标会话，请先发送 /sessions 查看编号。');
             return;
           }
           sessionStore.renameSession(resolved, commandResult.renameName);
-          await weComApi.sendText(userId, `✅ 已重命名会话：${commandResult.renameName}`);
+          await sendText(channel, userId, `✅ 已重命名会话：${commandResult.renameName}`);
           return;
         }
         if (commandResult.switchTarget) {
-          const resolved = sessionStore.resolveSwitchTarget(userId, commandResult.switchTarget);
+          const resolved = sessionStore.resolveSwitchTarget(sessionUserKey, commandResult.switchTarget);
           if (!resolved) {
-            await weComApi.sendText(userId, '❌ 未找到目标会话，请先发送 /sessions 查看编号。');
+            await sendText(channel, userId, '❌ 未找到目标会话，请先发送 /sessions 查看编号。');
             return;
           }
-          sessionStore.set(userId, resolved);
-          await weComApi.sendText(userId, `✅ 已切换到会话：${maskThreadId(resolved)}`);
+          sessionStore.set(sessionUserKey, resolved);
+          await sendText(channel, userId, `✅ 已切换到会话：${maskThreadId(resolved)}`);
           return;
         }
         if (commandResult.message) {
-          await weComApi.sendText(userId, commandResult.message);
+          await sendText(channel, userId, commandResult.message);
         }
         return;
       }
 
-      if (!rateLimitStore.allow(userId)) {
+      if (!rateLimitStore.allow(sessionUserKey)) {
         log.warn('handleText 命中限流，拒绝执行', { userId });
-        await weComApi.sendText(userId, '⏳ 请求过于频繁，请稍后再试。');
+        await sendText(channel, userId, '⏳ 请求过于频繁，请稍后再试。');
         return;
       }
 
       if (!config.runnerEnabled) {
         log.warn('handleText runnerEnabled=false，拒绝执行', { userId });
-        await weComApi.sendText(userId, '⚠️ 当前服务已禁用命令执行，请联系管理员。');
+        await sendText(channel, userId, '⚠️ 当前服务已禁用命令执行，请联系管理员。');
         return;
       }
 
       try {
-        const threadId = sessionStore.get(userId);
+        const threadId = sessionStore.get(sessionUserKey);
         log.debug('handleText 查询 session', {
           userId,
           existingThreadId: threadId ?? '(无，新会话)',
         });
 
-        await weComApi.sendText(userId, '⏳ 已收到，正在处理，请稍候...');
+        await sendText(channel, userId, '⏳ 已收到，正在处理，请稍候...');
 
         const startTime = Date.now();
         const result = await codexRunner.run({
@@ -168,11 +184,11 @@ ${clipMessage(prompt, 500)}
           onMessage: (text) => {
             log.info(`
 ════════════════════════════════════════════════════════════
-🤖 Codex 回复  [${userId}]
+🤖 Codex 回复  [${channel}:${userId}]
 ────────────────────────────────────────────────────────────
 ${clipMessage(text, 500)}
 ════════════════════════════════════════════════════════════`);
-            weComApi.sendText(userId, text).catch((err) => {
+            sendText(channel, userId, text).catch((err) => {
               log.error('handleText onMessage 推送失败', err);
             });
           },
@@ -186,7 +202,7 @@ ${clipMessage(text, 500)}
           rawOutputLength: result.rawOutput.length,
         });
 
-        sessionStore.set(userId, result.threadId, prompt);
+        sessionStore.set(sessionUserKey, result.threadId, prompt);
         log.debug('handleText session 已更新', {
           userId,
           threadId: result.threadId,
@@ -200,7 +216,7 @@ ${clipMessage(text, 500)}
 
         const message = error instanceof Error ? error.message : String(error);
         try {
-          await weComApi.sendText(userId, `❌ 执行失败：${clipMessage(message, 1000)}`);
+          await sendText(channel, userId, `❌ 执行失败：${clipMessage(message, 1000)}`);
           log.debug('handleText 已推送失败通知给用户', { userId });
         } catch (sendErr) {
           log.error('handleText 推送失败通知也失败', sendErr);
@@ -209,6 +225,17 @@ ${clipMessage(text, 500)}
     });
   },
 });
+
+async function sendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
+  if (channel === 'wecom') {
+    await weComApi.sendText(userId, content);
+    return;
+  }
+  if (!feishuApi) {
+    throw new Error('feishu api not configured');
+  }
+  await feishuApi.sendText(userId, content);
+}
 
 app.listen(config.port, () => {
   log.info(`✅ wecom-codex gateway 已启动，监听 http://127.0.0.1:${config.port}`);

@@ -1,0 +1,69 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { FeishuApi, splitFeishuTextByUtf8Bytes } from '../src/services/feishu-api.js';
+
+describe('splitFeishuTextByUtf8Bytes', () => {
+  it('splits long text and preserves content', () => {
+    const input = '你好hello'.repeat(500);
+    const chunks = splitFeishuTextByUtf8Bytes(input, 800);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join('')).toBe(input);
+    expect(chunks.every((c) => Buffer.byteLength(c, 'utf8') <= 800)).toBe(true);
+  });
+});
+
+describe('FeishuApi token cache', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('uses a single in-flight token request for concurrent sends', async () => {
+    let tokenCalls = 0;
+    let messageCalls = 0;
+
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        tokenCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+            tenant_access_token: 'tenant-token',
+            expire: 7200,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/im/v1/messages')) {
+        messageCalls += 1;
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+    });
+
+    await Promise.all([
+      api.sendText('ou_a', 'hello'),
+      api.sendText('ou_b', 'world'),
+    ]);
+
+    expect(tokenCalls).toBe(1);
+    expect(messageCalls).toBe(2);
+  });
+});

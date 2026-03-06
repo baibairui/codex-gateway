@@ -10,12 +10,13 @@ const log = createLogger('App');
 interface AppDeps {
   wecomCrypto: WeComCrypto;
   allowFrom: string;
+  feishuVerificationToken?: string;
   isDuplicateMessage: (msgId?: string) => boolean;
   /**
    * 处理文本消息，业务回复统一走主动发消息 API，无需返回值。
    * 该函数被 fire-and-forget 调用，不阻塞回调响应。
    */
-  handleText: (input: { userId: string; content: string }) => Promise<void>;
+  handleText: (input: { channel: 'wecom' | 'feishu'; userId: string; content: string }) => Promise<void>;
 }
 
 /**
@@ -28,8 +29,10 @@ function qs(val: unknown): string {
 export function createApp(deps: AppDeps) {
   const app = express();
 
-  // 接收原始 body（XML 密文）
-  app.use(express.text({ type: '*/*' }));
+  // WeCom 接收原始 body（XML 密文）
+  app.use('/wecom/callback', express.text({ type: '*/*' }));
+  // Feishu 事件回调为 JSON
+  app.use('/feishu/callback', express.json({ type: '*/*' }));
 
   // ============ 请求日志中间件 ============
   app.use((req, _res, next) => {
@@ -191,7 +194,7 @@ export function createApp(deps: AppDeps) {
           userId: msg.fromUserName,
           contentLength: msg.content.length,
         });
-        deps.handleText({ userId: msg.fromUserName, content: msg.content }).catch((err) => {
+        deps.handleText({ channel: 'wecom', userId: msg.fromUserName, content: msg.content }).catch((err) => {
           log.error('POST /wecom/callback handleText 异步处理失败', err);
         });
       } else {
@@ -204,6 +207,78 @@ export function createApp(deps: AppDeps) {
       log.error('POST /wecom/callback 回调处理异常', error);
       // 即使出错也返回 success，避免企业微信重试
       res.type('text/plain').send('success');
+    }
+  });
+
+  app.post('/feishu/callback', (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const bodyType = typeof body.type === 'string' ? body.type : '';
+
+      if (bodyType === 'url_verification') {
+        const challenge = typeof body.challenge === 'string' ? body.challenge : '';
+        res.json({ challenge });
+        return;
+      }
+
+      const header = (body.header ?? {}) as Record<string, unknown>;
+      const token = typeof header.token === 'string'
+        ? header.token
+        : (typeof body.token === 'string' ? body.token : '');
+      if (deps.feishuVerificationToken && token !== deps.feishuVerificationToken) {
+        res.status(403).json({ code: 403, msg: 'token mismatch' });
+        return;
+      }
+
+      const eventType = typeof header.event_type === 'string' ? header.event_type : '';
+      if (eventType !== 'im.message.receive_v1') {
+        res.json({ code: 0, msg: 'ignored' });
+        return;
+      }
+
+      const event = (body.event ?? {}) as Record<string, unknown>;
+      const message = (event.message ?? {}) as Record<string, unknown>;
+      const sender = (event.sender ?? {}) as Record<string, unknown>;
+      const senderId = (sender.sender_id ?? {}) as Record<string, unknown>;
+      const openId = typeof senderId.open_id === 'string' ? senderId.open_id : '';
+      const messageId = typeof message.message_id === 'string' ? message.message_id : '';
+      const messageType = typeof message.message_type === 'string' ? message.message_type : '';
+      const rawContent = typeof message.content === 'string' ? message.content : '';
+
+      if (!openId || !messageId || messageType !== 'text' || !rawContent) {
+        res.json({ code: 0, msg: 'ignored' });
+        return;
+      }
+
+      let content = '';
+      try {
+        const contentObj = JSON.parse(rawContent) as { text?: unknown };
+        content = typeof contentObj.text === 'string' ? contentObj.text.trim() : '';
+      } catch {
+        content = '';
+      }
+      if (!content) {
+        res.json({ code: 0, msg: 'ignored' });
+        return;
+      }
+
+      if (deps.isDuplicateMessage(`feishu:${messageId}`)) {
+        res.json({ code: 0, msg: 'success' });
+        return;
+      }
+
+      res.json({ code: 0, msg: 'success' });
+
+      if (!allowList(deps.allowFrom, openId)) {
+        return;
+      }
+
+      deps.handleText({ channel: 'feishu', userId: openId, content }).catch((err) => {
+        log.error('POST /feishu/callback handleText 异步处理失败', err);
+      });
+    } catch (error) {
+      log.error('POST /feishu/callback 回调处理异常', error);
+      res.json({ code: 0, msg: 'success' });
     }
   });
 

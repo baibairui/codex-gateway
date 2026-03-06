@@ -58,6 +58,7 @@ export class WeComApi {
   private readonly agentId: number;
   private readonly timeoutMs: number;
   private tokenCache?: TokenCache;
+  private tokenInFlight?: Promise<string>;
 
   constructor(options: WeComApiOptions) {
     this.corpId = options.corpId;
@@ -173,9 +174,24 @@ export class WeComApi {
       return this.tokenCache.value;
     }
 
+    if (this.tokenInFlight) {
+      log.debug('等待进行中的 accessToken 获取请求');
+      return this.tokenInFlight;
+    }
+
+    this.tokenInFlight = this.fetchAccessToken();
+    try {
+      return await this.tokenInFlight;
+    } finally {
+      this.tokenInFlight = undefined;
+    }
+  }
+
+  private async fetchAccessToken(): Promise<string> {
     log.info('accessToken 已过期或不存在，重新获取...');
     const url = `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${this.corpId}&corpsecret=${this.secret}`;
 
+    const now = Date.now();
     const startTime = Date.now();
     const response = await this.fetchWithTimeout(url);
     const body = (await response.json()) as {
