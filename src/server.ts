@@ -174,8 +174,6 @@ ${clipMessage(prompt, 500)}
           existingThreadId: threadId ?? '(无，新会话)',
         });
 
-        await sendText(channel, userId, '⏳ 已收到，正在处理，请稍候...');
-
         const startTime = Date.now();
         const result = await codexRunner.run({
           prompt,
@@ -213,14 +211,6 @@ ${clipMessage(text, 500)}
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
         });
-
-        const message = error instanceof Error ? error.message : String(error);
-        try {
-          await sendText(channel, userId, `❌ 执行失败：${clipMessage(message, 1000)}`);
-          log.debug('handleText 已推送失败通知给用户', { userId });
-        } catch (sendErr) {
-          log.error('handleText 推送失败通知也失败', sendErr);
-        }
       }
     });
   },
