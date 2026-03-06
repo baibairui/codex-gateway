@@ -214,19 +214,20 @@ export function createApp(deps: AppDeps) {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const bodyType = typeof body.type === 'string' ? body.type : '';
-
-      if (bodyType === 'url_verification') {
-        const challenge = typeof body.challenge === 'string' ? body.challenge : '';
-        res.json({ challenge });
-        return;
-      }
-
       const header = (body.header ?? {}) as Record<string, unknown>;
       const token = typeof header.token === 'string'
         ? header.token
         : (typeof body.token === 'string' ? body.token : '');
+
+      // 对所有事件类型统一做 token 校验，避免 url_verification 绕过校验。
       if (deps.feishuVerificationToken && token !== deps.feishuVerificationToken) {
         res.status(403).json({ code: 403, msg: 'token mismatch' });
+        return;
+      }
+
+      if (bodyType === 'url_verification') {
+        const challenge = typeof body.challenge === 'string' ? body.challenge : '';
+        res.json({ challenge });
         return;
       }
 

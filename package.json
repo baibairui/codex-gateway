@@ -6,7 +6,8 @@
     "test": "LOG_LEVEL=error vitest run",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "publish:workspace": "bash ./bin/publish-workspace.sh"
   },
   "keywords": [],
   "author": "",
