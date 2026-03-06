@@ -24,11 +24,16 @@ interface CodexRunnerOptions {
   codexBin?: string;
   workdir?: string;
   timeoutMs?: number;
+  timeoutMinMs?: number;
+  timeoutMaxMs?: number;
+  timeoutPerCharMs?: number;
   /** 'full-auto' (沙箱) 或 'none' (无沙箱) */
   sandbox?: 'full-auto' | 'none';
 }
 
-const DEFAULT_TIMEOUT_MS = 180_000;
+const DEFAULT_TIMEOUT_MIN_MS = 180_000;
+const DEFAULT_TIMEOUT_MAX_MS = 900_000;
+const DEFAULT_TIMEOUT_PER_CHAR_MS = 80;
 
 export function parseCodexJsonl(raw: string): ParsedCodexOutput {
   let threadId: string | undefined;
@@ -70,18 +75,27 @@ function *iterateCodexEvents(raw: string): Generator<Record<string, unknown>> {
 export class CodexRunner {
   private readonly codexBin: string;
   private readonly workdir: string;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs?: number;
+  private readonly timeoutMinMs: number;
+  private readonly timeoutMaxMs: number;
+  private readonly timeoutPerCharMs: number;
   private readonly sandbox: 'full-auto' | 'none';
 
   constructor(options: CodexRunnerOptions = {}) {
     this.codexBin = options.codexBin ?? 'codex';
     this.workdir = options.workdir ?? process.cwd();
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.timeoutMs = options.timeoutMs;
+    this.timeoutMinMs = options.timeoutMinMs ?? DEFAULT_TIMEOUT_MIN_MS;
+    this.timeoutMaxMs = options.timeoutMaxMs ?? DEFAULT_TIMEOUT_MAX_MS;
+    this.timeoutPerCharMs = options.timeoutPerCharMs ?? DEFAULT_TIMEOUT_PER_CHAR_MS;
     this.sandbox = options.sandbox ?? 'full-auto';
     log.debug('CodexRunner 构造完成', {
       codexBin: this.codexBin,
       workdir: this.workdir,
-      timeoutMs: this.timeoutMs,
+      timeoutMs: this.timeoutMs ?? '(adaptive)',
+      timeoutMinMs: this.timeoutMinMs,
+      timeoutMaxMs: this.timeoutMaxMs,
+      timeoutPerCharMs: this.timeoutPerCharMs,
       sandbox: this.sandbox,
     });
   }
@@ -101,6 +115,13 @@ export class CodexRunner {
       cwd: this.workdir,
       isResume: !!input.threadId,
       threadId: maskThreadId(input.threadId),
+      timeoutMode: this.timeoutMs ? 'fixed' : 'adaptive',
+    });
+
+    const effectiveTimeoutMs = this.resolveTimeoutMs(input.prompt);
+    log.debug('Codex 子进程超时阈值已计算', {
+      promptLength: input.prompt.length,
+      effectiveTimeoutMs,
     });
 
     return new Promise<CodexRunResult>((resolve, reject) => {
@@ -117,6 +138,7 @@ export class CodexRunner {
       // 用于处理跨 chunk 的不完整行
       let lineBuf = '';
       let eventCount = 0;
+      let observedThreadId = input.threadId;
 
       const timer = setTimeout(() => {
         if (settled) {
@@ -126,13 +148,13 @@ export class CodexRunner {
         child.kill('SIGKILL');
         log.error('Codex 子进程超时，已 SIGKILL', {
           pid: child.pid,
-          timeoutMs: this.timeoutMs,
+          timeoutMs: effectiveTimeoutMs,
           stdoutLength: stdout.length,
           stderrLength: stderr.length,
           eventCount,
         });
-        reject(new Error(`codex timeout after ${this.timeoutMs}ms`));
-      }, this.timeoutMs);
+        reject(new Error(`codex timeout after ${effectiveTimeoutMs}ms`));
+      }, effectiveTimeoutMs);
 
       child.stdout.on('data', (chunk) => {
         const text = chunk.toString('utf8');
@@ -147,9 +169,16 @@ export class CodexRunner {
         for (const rawLine of lines) {
           const line = rawLine.trim();
           if (!line) continue;
-          handleCodexLine(line, input.onMessage, () => {
-            eventCount++;
-          });
+          handleCodexLine(
+            line,
+            input.onMessage,
+            () => {
+              eventCount++;
+            },
+            (threadId) => {
+              observedThreadId = threadId;
+            },
+          );
         }
       });
 
@@ -197,13 +226,22 @@ export class CodexRunner {
         // flush 最后一行（可能没有以换行结束）
         const tail = lineBuf.trim();
         if (tail) {
-          handleCodexLine(tail, input.onMessage, () => {
-            eventCount++;
-          });
+          handleCodexLine(
+            tail,
+            input.onMessage,
+            () => {
+              eventCount++;
+            },
+            (threadId) => {
+              observedThreadId = threadId;
+            },
+          );
         }
 
-        const parsed = parseCodexJsonl(stdout);
-        const threadId = parsed.threadId ?? input.threadId;
+        let threadId = observedThreadId;
+        if (!threadId) {
+          threadId = parseCodexJsonl(stdout).threadId;
+        }
         if (!threadId) {
           log.error('Codex 输出中未找到 threadId', {
             stdoutPreview: stdout.substring(0, 500),
@@ -214,8 +252,7 @@ export class CodexRunner {
 
         log.info('Codex 执行成功', {
           threadId,
-          answerLength: parsed.answer.length,
-          answerPreview: parsed.answer.substring(0, 200),
+          rawOutputLength: stdout.length,
         });
 
         resolve({
@@ -224,6 +261,16 @@ export class CodexRunner {
         });
       });
     });
+  }
+
+  private resolveTimeoutMs(prompt: string): number {
+    if (typeof this.timeoutMs === 'number' && Number.isFinite(this.timeoutMs) && this.timeoutMs > 0) {
+      return this.timeoutMs;
+    }
+    const min = Math.max(1, this.timeoutMinMs);
+    const max = Math.max(min, this.timeoutMaxMs);
+    const byPrompt = min + Math.max(0, prompt.length) * Math.max(0, this.timeoutPerCharMs);
+    return Math.min(max, byPrompt);
   }
 }
 
@@ -255,6 +302,7 @@ function handleCodexLine(
   line: string,
   onMessage: CodexRunInput['onMessage'],
   onEvent: () => void,
+  onThreadStarted?: (threadId: string) => void,
 ): void {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
@@ -265,6 +313,7 @@ function handleCodexLine(
     });
 
     if (event.type === 'thread.started' && typeof event.thread_id === 'string') {
+      onThreadStarted?.(event.thread_id);
       log.info('Codex thread.started', { threadId: event.thread_id });
     }
 

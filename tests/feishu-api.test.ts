@@ -66,4 +66,83 @@ describe('FeishuApi token cache', () => {
     expect(tokenCalls).toBe(1);
     expect(messageCalls).toBe(2);
   });
+
+  it('does not retry on timeout by default to avoid duplicate messages', async () => {
+    let messageCalls = 0;
+
+    global.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+            tenant_access_token: 'tenant-token',
+            expire: 7200,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/im/v1/messages')) {
+        messageCalls += 1;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 10,
+    });
+
+    await expect(api.sendText('ou_a', 'hello')).rejects.toBeInstanceOf(Error);
+    expect(messageCalls).toBe(1);
+  });
+
+  it('retries on timeout when retryOnTimeout=true', async () => {
+    let messageCalls = 0;
+
+    global.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+            tenant_access_token: 'tenant-token',
+            expire: 7200,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/im/v1/messages')) {
+        messageCalls += 1;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 10,
+      retryOnTimeout: true,
+    });
+
+    await expect(api.sendText('ou_a', 'hello')).rejects.toBeInstanceOf(Error);
+    expect(messageCalls).toBe(3);
+  });
 });

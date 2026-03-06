@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { handleUserCommand } from '../src/features/user-command.js';
+import { commandNeedsDetailedSessions, handleUserCommand } from '../src/features/user-command.js';
 
 describe('handleUserCommand', () => {
   it('passes through normal text', () => {
@@ -64,5 +64,19 @@ describe('handleUserCommand', () => {
     const result = handleUserCommand('/rename 2', 'thread_old');
     expect(result.handled).toBe(true);
     expect(result.message).toContain('/rename <编号|threadId> <名称>');
+  });
+});
+
+describe('commandNeedsDetailedSessions', () => {
+  it('returns true for /sessions command', () => {
+    expect(commandNeedsDetailedSessions('/sessions')).toBe(true);
+    expect(commandNeedsDetailedSessions(' /sessions  ')).toBe(true);
+    expect(commandNeedsDetailedSessions('/sessions 2')).toBe(true);
+  });
+
+  it('returns false for non-/sessions commands and normal text', () => {
+    expect(commandNeedsDetailedSessions('/session')).toBe(false);
+    expect(commandNeedsDetailedSessions('/switch 1')).toBe(false);
+    expect(commandNeedsDetailedSessions('hello')).toBe(false);
   });
 });

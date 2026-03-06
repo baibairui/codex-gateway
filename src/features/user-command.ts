@@ -112,3 +112,12 @@ export function handleUserCommand(
       };
   }
 }
+
+export function commandNeedsDetailedSessions(content: string): boolean {
+  const raw = content.trim();
+  if (!raw.startsWith('/')) {
+    return false;
+  }
+  const cmd = (raw.split(/\s+/, 1)[0] ?? '').toLowerCase();
+  return cmd === '/sessions';
+}

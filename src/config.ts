@@ -31,6 +31,18 @@ function optionalNumber(name: string, fallback: number): number {
   return value;
 }
 
+function optionalNumberUndefined(name: string): number | undefined {
+  const raw = process.env[name];
+  if (!raw) {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    throw new Error(`invalid number env: ${name}`);
+  }
+  return value;
+}
+
 function optionalString(name: string, fallback: string): string {
   const raw = process.env[name];
   if (raw === undefined) {
@@ -64,8 +76,12 @@ export const config = {
   token: required('WEWORK_TOKEN'),
   encodingAesKey: required('WEWORK_ENCODING_AES_KEY'),
   confirmTtlSeconds: optionalNumber('CONFIRM_TTL_SECONDS', 120),
-  commandTimeoutMs: optionalNumber('COMMAND_TIMEOUT_MS', 180_000),
+  commandTimeoutMs: optionalNumberUndefined('COMMAND_TIMEOUT_MS'),
+  commandTimeoutMinMs: optionalNumber('COMMAND_TIMEOUT_MIN_MS', 180_000),
+  commandTimeoutMaxMs: optionalNumber('COMMAND_TIMEOUT_MAX_MS', 900_000),
+  commandTimeoutPerCharMs: optionalNumber('COMMAND_TIMEOUT_PER_CHAR_MS', 80),
   apiTimeoutMs: optionalNumber('API_TIMEOUT_MS', 15_000),
+  apiRetryOnTimeout: process.env.API_RETRY_ON_TIMEOUT === 'true',
   feishuEnabled: process.env.FEISHU_ENABLED === 'true',
   feishuAppId: optionalStringUndefined('FEISHU_APP_ID'),
   feishuAppSecret: optionalStringUndefined('FEISHU_APP_SECRET'),

@@ -7,6 +7,7 @@ interface WeComApiOptions {
   secret: string;
   agentId: number;
   timeoutMs?: number;
+  retryOnTimeout?: boolean;
 }
 
 interface TokenCache {
@@ -57,6 +58,7 @@ export class WeComApi {
   private readonly secret: string;
   private readonly agentId: number;
   private readonly timeoutMs: number;
+  private readonly retryOnTimeout: boolean;
   private tokenCache?: TokenCache;
   private tokenInFlight?: Promise<string>;
 
@@ -65,10 +67,12 @@ export class WeComApi {
     this.secret = options.secret;
     this.agentId = options.agentId;
     this.timeoutMs = options.timeoutMs ?? 15_000;
+    this.retryOnTimeout = options.retryOnTimeout ?? false;
     log.debug('WeComApi 构造完成', {
       corpId: this.corpId,
       agentId: this.agentId,
       timeoutMs: this.timeoutMs,
+      retryOnTimeout: this.retryOnTimeout,
     });
   }
 
@@ -153,6 +157,13 @@ export class WeComApi {
           attempt,
           error: lastError.message,
         });
+        if (isAbortError(lastError) && !this.retryOnTimeout) {
+          log.warn('发送单条文本消息命中超时，已禁用超时重试以避免重复消息', {
+            toUser,
+            attempt,
+          });
+          throw lastError;
+        }
       }
 
       if (attempt < 3) {
@@ -237,4 +248,8 @@ export class WeComApi {
       clearTimeout(timer);
     }
   }
+}
+
+function isAbortError(error: Error): boolean {
+  return error.name === 'AbortError';
 }

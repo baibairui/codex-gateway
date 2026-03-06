@@ -43,10 +43,13 @@ npm start
 - `CODEX_WORKDIR`（Codex 执行目录）
 - `CODEX_SANDBOX`：`full-auto`（默认）或 `none`
 - `RUNNER_ENABLED`：`false` 时禁用执行，仅返回提示
+- `COMMAND_TIMEOUT_MS`：固定超时（可选）。不设时启用自适应超时
+- `COMMAND_TIMEOUT_MIN_MS` / `COMMAND_TIMEOUT_MAX_MS` / `COMMAND_TIMEOUT_PER_CHAR_MS`：自适应超时参数
 - `ALLOW_FROM`：白名单，`*` 或逗号分隔用户 ID
 - `DEDUP_WINDOW_SECONDS`：消息去重窗口
 - `RATE_LIMIT_MAX_MESSAGES` + `RATE_LIMIT_WINDOW_SECONDS`：每用户限流
 - `API_TIMEOUT_MS`：企业微信 API 请求超时
+- `API_RETRY_ON_TIMEOUT`：本地超时后是否继续重试发消息（默认 `false`，防止重复发送）
 
 ## 接口
 

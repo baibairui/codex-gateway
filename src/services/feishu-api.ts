@@ -6,6 +6,7 @@ interface FeishuApiOptions {
   appId: string;
   appSecret: string;
   timeoutMs?: number;
+  retryOnTimeout?: boolean;
 }
 
 interface TokenCache {
@@ -55,6 +56,7 @@ export class FeishuApi {
   private readonly appId: string;
   private readonly appSecret: string;
   private readonly timeoutMs: number;
+  private readonly retryOnTimeout: boolean;
   private tokenCache?: TokenCache;
   private tokenInFlight?: Promise<string>;
 
@@ -62,9 +64,11 @@ export class FeishuApi {
     this.appId = options.appId;
     this.appSecret = options.appSecret;
     this.timeoutMs = options.timeoutMs ?? 15_000;
+    this.retryOnTimeout = options.retryOnTimeout ?? false;
     log.debug('FeishuApi 构造完成', {
       appId: this.appId,
       timeoutMs: this.timeoutMs,
+      retryOnTimeout: this.retryOnTimeout,
     });
   }
 
@@ -109,6 +113,9 @@ export class FeishuApi {
         lastError = new Error(`feishu send failed: ${response.status} ${body.code ?? 'unknown'} ${body.msg ?? 'unknown'}`);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+        if (isAbortError(lastError) && !this.retryOnTimeout) {
+          throw lastError;
+        }
       }
 
       if (attempt < 3) {
@@ -183,4 +190,8 @@ export class FeishuApi {
       clearTimeout(timer);
     }
   }
+}
+
+function isAbortError(error: Error): boolean {
+  return error.name === 'AbortError';
 }

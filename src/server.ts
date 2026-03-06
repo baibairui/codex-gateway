@@ -11,7 +11,7 @@ import { SessionStore } from './stores/session-store.js';
 import { MessageDedupStore } from './stores/message-dedup-store.js';
 import { RateLimitStore } from './stores/rate-limit-store.js';
 import { createLogger } from './utils/logger.js';
-import { handleUserCommand, maskThreadId } from './features/user-command.js';
+import { commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from './features/user-command.js';
 
 const log = createLogger('Server');
 
@@ -19,13 +19,17 @@ log.info('服务启动初始化...', {
   port: config.port,
   codexBin: config.codexBin,
   codexWorkdir: config.codexWorkdir,
-  commandTimeoutMs: config.commandTimeoutMs,
+  commandTimeoutMs: config.commandTimeoutMs ?? '(adaptive)',
+  commandTimeoutMinMs: config.commandTimeoutMinMs,
+  commandTimeoutMaxMs: config.commandTimeoutMaxMs,
+  commandTimeoutPerCharMs: config.commandTimeoutPerCharMs,
   runnerEnabled: config.runnerEnabled,
   allowFrom: config.allowFrom,
   dedupWindowSeconds: config.dedupWindowSeconds,
   rateLimitMaxMessages: config.rateLimitMaxMessages,
   rateLimitWindowSeconds: config.rateLimitWindowSeconds,
   apiTimeoutMs: config.apiTimeoutMs,
+  apiRetryOnTimeout: config.apiRetryOnTimeout,
   feishuEnabled: config.feishuEnabled,
   feishuApiTimeoutMs: config.feishuApiTimeoutMs,
 });
@@ -48,6 +52,9 @@ const codexRunner = new CodexRunner({
   codexBin: config.codexBin,
   workdir: config.codexWorkdir,
   timeoutMs: config.commandTimeoutMs,
+  timeoutMinMs: config.commandTimeoutMinMs,
+  timeoutMaxMs: config.commandTimeoutMaxMs,
+  timeoutPerCharMs: config.commandTimeoutPerCharMs,
   sandbox: config.codexSandbox,
 });
 log.debug('CodexRunner 已初始化');
@@ -57,6 +64,7 @@ const weComApi = new WeComApi({
   secret: config.corpSecret,
   agentId: config.agentId,
   timeoutMs: config.apiTimeoutMs,
+  retryOnTimeout: config.apiRetryOnTimeout,
 });
 log.debug('WeComApi 已初始化');
 
@@ -65,6 +73,7 @@ const feishuApi = config.feishuEnabled && config.feishuAppId && config.feishuApp
       appId: config.feishuAppId,
       appSecret: config.feishuAppSecret,
       timeoutMs: config.feishuApiTimeoutMs,
+      retryOnTimeout: config.apiRetryOnTimeout,
     })
   : undefined;
 if (feishuApi) {
@@ -86,6 +95,7 @@ function clipMessage(message: string, maxLength = 1500): string {
 }
 
 const userTaskQueue = new Map<string, Promise<void>>();
+const outboundSendQueue = new Map<string, Promise<void>>();
 
 function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void> {
   const previous = userTaskQueue.get(userId) ?? Promise.resolve();
@@ -99,6 +109,25 @@ function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void
     });
 
   userTaskQueue.set(userId, next);
+  return next;
+}
+
+function enqueueOutboundSend(
+  channel: 'wecom' | 'feishu',
+  userId: string,
+  task: () => Promise<void>,
+): Promise<void> {
+  const key = `${channel}:${userId}`;
+  const previous = outboundSendQueue.get(key) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(task)
+    .finally(() => {
+      if (outboundSendQueue.get(key) === next) {
+        outboundSendQueue.delete(key);
+      }
+    });
+  outboundSendQueue.set(key, next);
   return next;
 }
 
@@ -124,7 +153,11 @@ ${clipMessage(prompt, 500)}
 ════════════════════════════════════════════════════════════`);
 
       const existingThreadId = sessionStore.get(sessionUserKey);
-      const commandResult = handleUserCommand(prompt, existingThreadId, sessionStore.listDetailed(sessionUserKey));
+      const commandResult = handleUserCommand(
+        prompt,
+        existingThreadId,
+        commandNeedsDetailedSessions(prompt) ? sessionStore.listDetailed(sessionUserKey) : [],
+      );
       if (commandResult.handled) {
         if (commandResult.clearSession) {
           sessionStore.clear(sessionUserKey);
@@ -169,6 +202,7 @@ ${clipMessage(prompt, 500)}
 
       try {
         const threadId = sessionStore.get(sessionUserKey);
+        let lastStreamSend: Promise<void> = Promise.resolve();
         log.debug('handleText 查询 session', {
           userId,
           existingThreadId: threadId ?? '(无，新会话)',
@@ -186,12 +220,13 @@ ${clipMessage(prompt, 500)}
 ────────────────────────────────────────────────────────────
 ${clipMessage(text, 500)}
 ════════════════════════════════════════════════════════════`);
-            sendText(channel, userId, text).catch((err) => {
+            lastStreamSend = enqueueSendText(channel, userId, text).catch((err) => {
               log.error('handleText onMessage 推送失败', err);
             });
           },
         });
         const elapsed = Date.now() - startTime;
+        await lastStreamSend;
 
         log.info('<<< handleText Codex 执行完成', {
           userId,
@@ -217,14 +252,20 @@ ${clipMessage(text, 500)}
 });
 
 async function sendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
-  if (channel === 'wecom') {
-    await weComApi.sendText(userId, content);
-    return;
-  }
-  if (!feishuApi) {
-    throw new Error('feishu api not configured');
-  }
-  await feishuApi.sendText(userId, content);
+  await enqueueSendText(channel, userId, content);
+}
+
+async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
+  await enqueueOutboundSend(channel, userId, async () => {
+    if (channel === 'wecom') {
+      await weComApi.sendText(userId, content);
+      return;
+    }
+    if (!feishuApi) {
+      throw new Error('feishu api not configured');
+    }
+    await feishuApi.sendText(userId, content);
+  });
 }
 
 app.listen(config.port, () => {
