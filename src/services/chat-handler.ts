@@ -1,6 +1,7 @@
 import { commandNeedsAgentList, commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from '../features/user-command.js';
 import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/session-store.js';
 import { formatCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
+import { ReminderScheduler, type ReminderTask, type ScheduleReminderInput } from './reminder-scheduler.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('ChatHandler');
@@ -78,6 +79,9 @@ interface ChatHandlerDeps {
   defaultModel?: string;
   defaultSearch: boolean;
   sendText: (channel: Channel, userId: string, content: string) => Promise<void>;
+  reminderScheduler?: {
+    schedule(input: ScheduleReminderInput, onTrigger: (task: ReminderTask) => Promise<void> | void): ReminderTask;
+  };
 }
 
 function clipMessage(message: string, maxLength = 1500): string {
@@ -85,6 +89,23 @@ function clipMessage(message: string, maxLength = 1500): string {
     return message;
   }
   return `${message.slice(0, maxLength)}\n...(截断)`;
+}
+
+function formatDelay(delayMs: number): string {
+  const totalSeconds = Math.floor(delayMs / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds} 秒`;
+  }
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes} 分钟`;
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remainMinutes = totalMinutes % 60;
+  if (remainMinutes === 0) {
+    return `${totalHours} 小时`;
+  }
+  return `${totalHours} 小时 ${remainMinutes} 分钟`;
 }
 
 const MEMORY_ONBOARDING_AGENT_ID = 'memory-onboarding';
@@ -161,22 +182,11 @@ function sanitizeOnboardingText(text: string): string {
     .replace(/shared-memory|memory\/|AGENTS\.md|agent\.md|profile\.md|preferences\.md|projects\.md|relationships\.md|decisions\.md|open-loops\.md/gi, '长期记忆');
 }
 
-function buildRuntimePrompt(userPrompt: string): string {
-  return [
-    '执行规范（每次回复都要先完成）：',
-    '- 先读取 `./AGENTS.md`。',
-    '- 严格执行其中“开始任何任务前，先阅读这些记忆文件”的要求。',
-    '- 如果某个记忆文件不存在，请明确说明后继续，不要编造已读取内容。',
-    '',
-    '用户消息：',
-    userPrompt,
-  ].join('\n');
-}
-
 export function createChatHandler(deps: ChatHandlerDeps) {
   const userModelOverrides = new Map<string, string>();
   const userSearchOverrides = new Map<string, boolean>();
   const onboardingKickoffInFlight = new Set<string>();
+  const reminderScheduler = deps.reminderScheduler ?? new ReminderScheduler();
 
   return async function handleText(input: { channel: Channel; userId: string; content: string }): Promise<void> {
     const { channel, userId, content } = input;
@@ -524,6 +534,23 @@ ${clipMessage(text, 500)}
         await deps.sendText(channel, userId, `✅ 已${commandResult.setSearchEnabled ? '开启' : '关闭'}联网搜索`);
         return;
       }
+      if (typeof commandResult.scheduleReminderDelayMs === 'number' && commandResult.scheduleReminderMessage) {
+        const task = reminderScheduler.schedule({
+          channel,
+          userId,
+          delayMs: commandResult.scheduleReminderDelayMs,
+          message: commandResult.scheduleReminderMessage,
+        }, async (triggeredTask) => {
+          await deps.sendText(channel, userId, `⏰ 定时提醒：${triggeredTask.message}`);
+        });
+        const dueAt = new Date(task.dueAt).toLocaleString('zh-CN', { hour12: false });
+        await deps.sendText(
+          channel,
+          userId,
+          `✅ 已创建提醒：${formatDelay(commandResult.scheduleReminderDelayMs)}后（约 ${dueAt}）我会提醒你：${commandResult.scheduleReminderMessage}\n提示：该提醒为进程内定时任务，服务重启后不会保留。`,
+        );
+        return;
+      }
       if (commandResult.openUrl) {
         if (!deps.browserOpenEnabled || !deps.browserOpener) {
           await deps.sendText(channel, userId, '⚠️ 当前服务未开启浏览器打开能力，请联系管理员。');
@@ -678,9 +705,8 @@ ${clipMessage(text, 500)}
       });
 
       const startTime = Date.now();
-      const runtimePrompt = buildRuntimePrompt(prompt);
       const result = await deps.codexRunner.run({
-        prompt: runtimePrompt,
+        prompt,
         threadId: runtimeThreadId,
         model: currentModel,
         search: runtimeSearch,

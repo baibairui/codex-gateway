@@ -146,6 +146,13 @@ describe('handleUserCommand', () => {
     expect(handleUserCommand('/review', context).reviewMode).toBe('uncommitted');
     expect(handleUserCommand('/review base main', context).reviewTarget).toBe('main');
   });
+
+  it('supports /remind command', () => {
+    const result = handleUserCommand('/remind 5min 喝水', context);
+    expect(result.handled).toBe(true);
+    expect(result.scheduleReminderDelayMs).toBe(5 * 60 * 1000);
+    expect(result.scheduleReminderMessage).toBe('喝水');
+  });
 });
 
 describe('commandNeedsDetailedSessions', () => {

@@ -20,6 +20,8 @@ export interface UserCommandResult {
   clearModel?: boolean;
   querySearch?: boolean;
   setSearchEnabled?: boolean;
+  scheduleReminderDelayMs?: number;
+  scheduleReminderMessage?: string;
   reviewMode?: 'uncommitted' | 'base' | 'commit';
   reviewTarget?: string;
   reviewPrompt?: string;
@@ -33,6 +35,42 @@ export interface UserCommandResult {
   initSkillAgent?: boolean;
   useAgentTarget?: string;
   initLogin?: boolean;
+}
+
+const MAX_REMINDER_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
+
+function parseReminderDelayMs(input: string): number | undefined {
+  const value = input.trim().toLowerCase();
+  const match = value.match(/^(\d+)(秒钟?|秒|s|sec|secs|second|seconds|分钟?|分|m|min|mins|minute|minutes|小时?|时|h|hr|hrs|hour|hours|天|d|day|days)$/i);
+  if (!match) {
+    return undefined;
+  }
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return undefined;
+  }
+  const unit = (match[2] ?? '').toLowerCase();
+  const secondsUnits = ['秒', '秒钟', 's', 'sec', 'secs', 'second', 'seconds'];
+  const minutesUnits = ['分', '分钟', 'm', 'min', 'mins', 'minute', 'minutes'];
+  const hoursUnits = ['时', '小时', 'h', 'hr', 'hrs', 'hour', 'hours'];
+  const daysUnits = ['天', 'd', 'day', 'days'];
+
+  let delayMs = 0;
+  if (secondsUnits.includes(unit)) {
+    delayMs = amount * 1000;
+  } else if (minutesUnits.includes(unit)) {
+    delayMs = amount * 60 * 1000;
+  } else if (hoursUnits.includes(unit)) {
+    delayMs = amount * 60 * 60 * 1000;
+  } else if (daysUnits.includes(unit)) {
+    delayMs = amount * 24 * 60 * 60 * 1000;
+  } else {
+    return undefined;
+  }
+  if (delayMs > MAX_REMINDER_DELAY_MS) {
+    return undefined;
+  }
+  return delayMs;
 }
 
 export function maskThreadId(threadId?: string): string {
@@ -114,12 +152,14 @@ export function handleUserCommand(content: string, context: UserCommandContext =
           '/models - 查看当前 Codex 支持的模型',
           '/search - 查看联网搜索状态',
           '/search on|off - 开启/关闭联网搜索',
+          '/remind <时长> <内容> - 创建定时提醒（建议由 skill 脚本触发）',
           '/open <URL> - 在宿主机打开浏览器',
           '/deploy-workspace - 发布当前 workspace 到网关运行目录',
           '/review - 审查当前 agent 工作区变更',
           '/review base <分支> - 审查相对分支的变更',
           '/review commit <SHA> - 审查指定提交',
           '/login - 使用设备码登录 Codex',
+          '建议通过 skill 脚本调用 /remind 命令触发提醒，而不是自然语言匹配。',
         ].join('\n'),
       };
     case '/new':
@@ -290,6 +330,29 @@ export function handleUserCommand(content: string, context: UserCommandContext =
       return {
         handled: true,
         message: '用法：/search on|off',
+      };
+    }
+    case '/remind':
+    case '/reminder': {
+      const duration = parts[1] ?? '';
+      const message = parts.slice(2).join(' ').trim();
+      if (!duration || !message) {
+        return {
+          handled: true,
+          message: '用法：/remind <时长> <内容>，例如 /remind 5min 喝水',
+        };
+      }
+      const delayMs = parseReminderDelayMs(duration);
+      if (!delayMs) {
+        return {
+          handled: true,
+          message: '时长格式无效，支持：30s / 5min / 2h / 1d（最长 30 天）',
+        };
+      }
+      return {
+        handled: true,
+        scheduleReminderDelayMs: delayMs,
+        scheduleReminderMessage: message,
       };
     }
     case '/open': {

@@ -86,11 +86,13 @@ npm start
 - `/models`：查看当前 Codex 支持模型（读取本机 `~/.codex/models_cache.json`）
 - `/search`：查看联网搜索状态
 - `/search on|off`：开启/关闭联网搜索（按用户生效）
+- `/remind <时长> <内容>`：创建定时提醒（建议由 skill 脚本触发）
 - `/open <URL>`：在宿主机打开浏览器
 - `/deploy-workspace`：一键执行 workspace 发布（等价于在 `/opt/gateway` 执行 `npm run publish:workspace`）
 - `/review`：审查当前工作区改动（`codex exec review --uncommitted`）
 - `/review base <分支>`：审查相对分支改动
 - `/review commit <SHA>`：审查指定提交改动
+- 不再通过自然语言字符串匹配触发提醒；请使用 `/remind` 命令
 
 推荐使用：
 - 先输入 `/sessions` 查看编号

@@ -329,6 +329,58 @@ describe('createChatHandler', () => {
     expect(sessionStore.getSession('wecom:u1', 'frontend')).toBe('thread_new');
   });
 
+  it('creates reminder task from /remind command', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
+    const schedule = vi.fn((input: { channel: 'wecom' | 'feishu'; userId: string; delayMs: number; message: string }, _onTrigger: (task: {
+      id: string;
+      channel: 'wecom' | 'feishu';
+      userId: string;
+      message: string;
+      createdAt: number;
+      dueAt: number;
+    }) => Promise<void> | void) => ({
+      id: 'task_1',
+      channel: input.channel,
+      userId: input.userId,
+      message: input.message,
+      createdAt: 10,
+      dueAt: 10 + input.delayMs,
+    }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      reminderScheduler: { schedule },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/remind 5min 喝水' });
+
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'wecom',
+        userId: 'u1',
+        delayMs: 5 * 60 * 1000,
+        message: '喝水',
+      }),
+      expect.any(Function),
+    );
+    expect(run).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('已创建提醒'));
+  });
+
   it('opens browser for /open when enabled', async () => {
     const sendText = vi.fn(async () => undefined);
     const open = vi.fn(async () => undefined);
@@ -452,7 +504,7 @@ describe('createChatHandler', () => {
     await handler({ channel: 'wecom', userId: 'u1', content: '我叫 Alice' });
 
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      prompt: expect.stringContaining('用户消息：\n我叫 Alice'),
+      prompt: '我叫 Alice',
       threadId: 'thread_onboarding',
       workdir: '/tmp/memory-onboarding',
     }));
