@@ -8,6 +8,7 @@ export function installReminderToolSkill(workspaceDir: string): void {
   fs.mkdirSync(path.join(skillDir, 'agents'), { recursive: true });
   writeIfChanged(path.join(skillDir, 'SKILL.md'), renderReminderToolSkill());
   writeIfChanged(path.join(skillDir, 'agents', 'openai.yaml'), renderReminderToolOpenAiYaml());
+  ensureAgentsReminderRule(workspaceDir);
 }
 
 export function renderReminderToolSkill(): string {
@@ -61,4 +62,23 @@ function writeIfChanged(filePath: string, content: string): void {
   }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, 'utf8');
+}
+
+function ensureAgentsReminderRule(workspaceDir: string): void {
+  const agentsPath = path.join(workspaceDir, 'AGENTS.md');
+  if (!fs.existsSync(agentsPath)) {
+    return;
+  }
+  const content = fs.readFileSync(agentsPath, 'utf8');
+  if (content.includes('./skills/reminder-tool/SKILL.md') || content.includes('$reminder-tool')) {
+    return;
+  }
+  const reminderSection = [
+    '',
+    '提醒规则：',
+    '- 用户提出“稍后提醒我”或定时任务需求时，优先使用 `./skills/reminder-tool/SKILL.md`。',
+    '- 必须调用 `create_reminder` 工具创建提醒，不要要求用户输入 `/remind`。',
+    '',
+  ].join('\n');
+  fs.writeFileSync(agentsPath, `${content.trimEnd()}\n${reminderSection}`, 'utf8');
 }
