@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('CodexRunner');
+// Use an isolated MCP server id so gateway runtime config never collides with user-level ~/.codex config.
+const PLAYWRIGHT_MCP_SERVER_NAME = 'gateway_playwright';
 
 export interface CodexRunInput {
   prompt: string;
@@ -413,7 +415,7 @@ export function buildCodexArgs(
     args.unshift(...buildReminderMcpConfigArgs(input.reminderToolContext));
   }
   if (playwrightMcpUrl?.trim()) {
-    args.unshift('-c', `mcp_servers.playwright.url=${tomlString(playwrightMcpUrl.trim())}`);
+    args.unshift(...buildPlaywrightMcpConfigArgs(playwrightMcpUrl.trim()));
   }
   args.push(input.prompt);
   return args;
@@ -447,12 +449,19 @@ export function buildCodexReviewArgs(
     args.unshift('--search');
   }
   if (playwrightMcpUrl?.trim()) {
-    args.unshift('-c', `mcp_servers.playwright.url=${tomlString(playwrightMcpUrl.trim())}`);
+    args.unshift(...buildPlaywrightMcpConfigArgs(playwrightMcpUrl.trim()));
   }
   if (input.prompt) {
     args.push(input.prompt);
   }
   return args;
+}
+
+function buildPlaywrightMcpConfigArgs(url: string): string[] {
+  return [
+    '-c',
+    `mcp_servers.${PLAYWRIGHT_MCP_SERVER_NAME}.url=${tomlString(url)}`,
+  ];
 }
 
 function buildReminderMcpConfigArgs(context: NonNullable<CodexRunInput['reminderToolContext']>): string[] {

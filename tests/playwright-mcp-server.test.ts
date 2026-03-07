@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildLocalPlaywrightMcpArgs,
+  classifyPlaywrightMcpStderrText,
+  drainPlaywrightMcpStderrBuffer,
   resolvePlaywrightMcpRuntime,
 } from '../src/services/playwright-mcp-server.js';
 
@@ -34,7 +36,7 @@ describe('resolvePlaywrightMcpRuntime', () => {
     });
 
     expect(runtime).toEqual({
-      url: 'http://127.0.0.1:8931/mcp',
+      url: 'http://localhost:8931/mcp',
       port: 8931,
       profileDir: '/tmp/profile',
       outputDir: '/tmp/artifacts',
@@ -64,5 +66,66 @@ describe('buildLocalPlaywrightMcpArgs', () => {
       '--output-dir',
       '/tmp/artifacts',
     ]);
+  });
+});
+
+describe('classifyPlaywrightMcpStderrText', () => {
+  it('ignores the startup banner because gateway already logs readiness separately', () => {
+    const classification = classifyPlaywrightMcpStderrText(`Listening on http://localhost:8931
+Put this in your client config:
+{
+  "mcpServers": {
+    "playwright": {
+      "url": "http://localhost:8931/mcp"
+    }
+  }
+}
+For legacy SSE transport support, you can use the /sse endpoint instead.
+`);
+
+    expect(classification).toBeUndefined();
+  });
+
+  it('keeps real stderr content as warnings', () => {
+    expect(classifyPlaywrightMcpStderrText('browser launch failed')).toEqual({
+      level: 'warn',
+      text: 'browser launch failed',
+    });
+  });
+
+  it('ignores blank stderr chunks', () => {
+    expect(classifyPlaywrightMcpStderrText(' \n\t ')).toBeUndefined();
+  });
+});
+
+describe('drainPlaywrightMcpStderrBuffer', () => {
+  it('waits for the full startup banner before deciding to ignore it', () => {
+    const partial = drainPlaywrightMcpStderrBuffer(`Listening on http://localhost:8931
+Put this in your client config:
+{
+  "mcpServers": {
+`);
+
+    expect(partial).toEqual({
+      remaining: `Listening on http://localhost:8931
+Put this in your client config:
+{
+  "mcpServers": {
+`,
+    });
+
+    const complete = drainPlaywrightMcpStderrBuffer(
+      `${partial.remaining}    "playwright": {
+      "url": "http://localhost:8931/mcp"
+    }
+  }
+}
+For legacy SSE transport support, you can use the /sse endpoint instead.
+`,
+    );
+
+    expect(complete).toEqual({
+      remaining: '',
+    });
   });
 });

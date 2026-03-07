@@ -8,6 +8,10 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('PlaywrightMcpServer');
 const STARTUP_TIMEOUT_MS = 15_000;
 const CONNECT_RETRY_MS = 100;
+const STARTUP_BANNER_PREFIX = 'Listening on http';
+const STARTUP_BANNER_CONFIG_MARKER = 'Put this in your client config:';
+const STARTUP_BANNER_END_MARKER =
+  'For legacy SSE transport support, you can use the /sse endpoint instead.';
 
 export interface PlaywrightMcpRuntime {
   url: string;
@@ -25,6 +29,11 @@ export interface ResolvePlaywrightMcpRuntimeInput {
   outputDir: string;
 }
 
+export interface PlaywrightMcpStderrClassification {
+  level: 'warn';
+  text: string;
+}
+
 export function resolvePlaywrightMcpRuntime(
   input: ResolvePlaywrightMcpRuntimeInput,
 ): PlaywrightMcpRuntime | undefined {
@@ -32,7 +41,7 @@ export function resolvePlaywrightMcpRuntime(
     return undefined;
   }
 
-  const url = input.url?.trim() || `http://127.0.0.1:${input.port}/mcp`;
+  const url = input.url?.trim() || `http://localhost:${input.port}/mcp`;
   return {
     url,
     port: input.port,
@@ -85,13 +94,23 @@ export async function startPlaywrightMcpServer(
     command: `node ${args.join(' ')}`,
   });
 
+  let stderrBuffer = '';
   proc.stdout.on('data', (chunk: Buffer) => {
     log.debug('Playwright MCP stdout', { text: chunk.toString('utf8').substring(0, 300) });
   });
   proc.stderr.on('data', (chunk: Buffer) => {
-    log.warn('Playwright MCP stderr', { text: chunk.toString('utf8').substring(0, 300) });
+    const drained = drainPlaywrightMcpStderrBuffer(`${stderrBuffer}${chunk.toString('utf8')}`);
+    stderrBuffer = drained.remaining;
+    if (drained.entry) {
+      log.warn('Playwright MCP stderr', { text: drained.entry.text.substring(0, 300) });
+    }
   });
   proc.on('exit', (code, signal) => {
+    const drained = drainPlaywrightMcpStderrBuffer(stderrBuffer, true);
+    stderrBuffer = drained.remaining;
+    if (drained.entry) {
+      log.warn('Playwright MCP stderr', { text: drained.entry.text.substring(0, 300) });
+    }
     log.warn('Playwright MCP 进程退出', { code, signal });
   });
 
@@ -102,6 +121,39 @@ export async function startPlaywrightMcpServer(
     pid: proc.pid,
     url: runtime.url,
   });
+}
+
+export function classifyPlaywrightMcpStderrText(
+  rawText: string,
+): PlaywrightMcpStderrClassification | undefined {
+  const text = rawText.trim();
+  if (!text || isStartupBanner(text)) {
+    return undefined;
+  }
+  return {
+    level: 'warn',
+    text,
+  };
+}
+
+export function drainPlaywrightMcpStderrBuffer(
+  buffer: string,
+  flushAll = false,
+): {
+  remaining: string;
+  entry?: PlaywrightMcpStderrClassification;
+} {
+  const text = buffer.trim();
+  if (!text) {
+    return { remaining: '' };
+  }
+  if (!flushAll && shouldWaitForMoreStderr(buffer, text)) {
+    return { remaining: buffer };
+  }
+  return {
+    remaining: '',
+    entry: classifyPlaywrightMcpStderrText(buffer),
+  };
 }
 
 function resolvePlaywrightMcpCliPath(): string {
@@ -160,4 +212,20 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function isStartupBanner(text: string): boolean {
+  return (
+    text.startsWith(STARTUP_BANNER_PREFIX) &&
+    text.includes(STARTUP_BANNER_CONFIG_MARKER) &&
+    text.includes(STARTUP_BANNER_END_MARKER) &&
+    text.includes('/mcp')
+  );
+}
+
+function shouldWaitForMoreStderr(buffer: string, text: string): boolean {
+  if (text.startsWith(STARTUP_BANNER_PREFIX) && !text.includes(STARTUP_BANNER_END_MARKER)) {
+    return true;
+  }
+  return !buffer.includes('\n');
 }
