@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('FeishuApi');
@@ -7,6 +10,7 @@ interface FeishuApiOptions {
   appSecret: string;
   timeoutMs?: number;
   retryOnTimeout?: boolean;
+  imageCacheDir?: string;
 }
 
 interface TokenCache {
@@ -62,6 +66,7 @@ export class FeishuApi {
   private readonly appSecret: string;
   private readonly timeoutMs: number;
   private readonly retryOnTimeout: boolean;
+  private readonly imageCacheDir: string;
   private tokenCache?: TokenCache;
   private tokenInFlight?: Promise<string>;
 
@@ -70,10 +75,13 @@ export class FeishuApi {
     this.appSecret = options.appSecret;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.retryOnTimeout = options.retryOnTimeout ?? false;
+    this.imageCacheDir = options.imageCacheDir ?? path.resolve(process.cwd(), '.data', 'feishu-images');
+    fs.mkdirSync(this.imageCacheDir, { recursive: true });
     log.debug('FeishuApi 构造完成', {
       appId: this.appId,
       timeoutMs: this.timeoutMs,
       retryOnTimeout: this.retryOnTimeout,
+      imageCacheDir: this.imageCacheDir,
     });
   }
 
@@ -106,6 +114,72 @@ export class FeishuApi {
     }
 
     await this.sendSingleMessage(openId, message);
+  }
+
+  async downloadImage(imageKey: string): Promise<string> {
+    const key = imageKey.trim();
+    if (!key) {
+      throw new Error('feishu image download failed: imageKey is required');
+    }
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const token = await this.getTenantAccessToken();
+        const response = await this.fetchWithTimeout(
+          `https://open.feishu.cn/open-apis/im/v1/images/${encodeURIComponent(key)}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
+        if (!response.ok) {
+          const text = await response.text();
+          if (response.status === 401 || response.status === 403) {
+            this.tokenCache = undefined;
+          }
+          throw new Error(`feishu image download failed: ${response.status} ${clipText(text, 200)}`);
+        }
+        return await writeFeishuBinaryToFile(this.imageCacheDir, key, response, 'image');
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    throw lastError ?? new Error('feishu image download failed: unknown');
+  }
+
+  async downloadFile(fileKey: string): Promise<string> {
+    const key = fileKey.trim();
+    if (!key) {
+      throw new Error('feishu file download failed: fileKey is required');
+    }
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const token = await this.getTenantAccessToken();
+        const response = await this.fetchWithTimeout(
+          `https://open.feishu.cn/open-apis/im/v1/files/${encodeURIComponent(key)}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
+        if (!response.ok) {
+          const text = await response.text();
+          if (response.status === 401 || response.status === 403) {
+            this.tokenCache = undefined;
+          }
+          throw new Error(`feishu file download failed: ${response.status} ${clipText(text, 200)}`);
+        }
+        return await writeFeishuBinaryToFile(this.imageCacheDir, key, response, 'file');
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    throw lastError ?? new Error('feishu file download failed: unknown');
   }
 
   private async sendSingleMessage(openId: string, message: FeishuOutgoingMessage): Promise<void> {
@@ -265,4 +339,70 @@ function resolveSimpleContent(msgType: string, value: string): Record<string, st
     return { file_key: value };
   }
   return { text: value };
+}
+
+function sanitizeKey(key: string): string {
+  return key.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60) || 'image';
+}
+
+function clipText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function resolveImageExtension(contentType: string): string {
+  if (contentType.includes('image/png')) {
+    return 'png';
+  }
+  if (contentType.includes('image/jpeg') || contentType.includes('image/jpg')) {
+    return 'jpg';
+  }
+  if (contentType.includes('image/webp')) {
+    return 'webp';
+  }
+  if (contentType.includes('image/gif')) {
+    return 'gif';
+  }
+  return 'bin';
+}
+
+function resolveGenericExtension(contentType: string): string {
+  if (contentType.includes('image/')) {
+    return resolveImageExtension(contentType);
+  }
+  if (contentType.includes('audio/mpeg')) {
+    return 'mp3';
+  }
+  if (contentType.includes('audio/wav')) {
+    return 'wav';
+  }
+  if (contentType.includes('audio/ogg')) {
+    return 'ogg';
+  }
+  if (contentType.includes('video/mp4')) {
+    return 'mp4';
+  }
+  if (contentType.includes('application/pdf')) {
+    return 'pdf';
+  }
+  if (contentType.includes('text/plain')) {
+    return 'txt';
+  }
+  return 'bin';
+}
+
+async function writeFeishuBinaryToFile(
+  dir: string,
+  key: string,
+  response: Response,
+  fallbackPrefix: string,
+): Promise<string> {
+  const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+  const ext = resolveGenericExtension(contentType);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const filePath = path.join(dir, `${Date.now()}-${fallbackPrefix}-${sanitizeKey(key)}.${ext}`);
+  fs.writeFileSync(filePath, bytes);
+  return filePath;
 }

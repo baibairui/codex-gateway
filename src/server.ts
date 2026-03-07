@@ -50,6 +50,8 @@ log.info('服务启动初始化...', {
 const dataDir = path.resolve(process.cwd(), '.data');
 fs.mkdirSync(dataDir, { recursive: true });
 log.debug('数据目录已就绪', { dataDir });
+const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
+fs.mkdirSync(feishuImageCacheDir, { recursive: true });
 
 const agentsDir = path.resolve(config.codexAgentsDir ?? path.join(dataDir, 'agents'));
 fs.mkdirSync(agentsDir, { recursive: true });
@@ -115,6 +117,7 @@ const feishuApi = config.feishuEnabled && config.feishuAppId && config.feishuApp
       appSecret: config.feishuAppSecret,
       timeoutMs: config.feishuApiTimeoutMs,
       retryOnTimeout: config.apiRetryOnTimeout,
+      imageCacheDir: feishuImageCacheDir,
     })
   : undefined;
 if (feishuApi) {
@@ -232,9 +235,10 @@ const app = createApp({
   feishuVerificationToken: config.feishuVerificationToken,
   isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
   handleText: async ({ channel, userId, content }) => {
+    const enrichedContent = await enrichInboundContent(channel, content);
     const sessionUserKey = resolveUserKey(userId);
     await runInUserQueue(sessionUserKey, async () => {
-      await handleChatText({ channel, userId, content });
+      await handleChatText({ channel, userId, content: enrichedContent });
     });
   },
 });
@@ -306,6 +310,53 @@ function parseStructuredMessage(content: string): GatewayStructuredMessage | und
   } catch {
     return undefined;
   }
+}
+
+async function enrichInboundContent(channel: 'wecom' | 'feishu', content: string): Promise<string> {
+  if (channel !== 'feishu' || !feishuApi) {
+    return content;
+  }
+  const inboundRef = extractFeishuBinaryRef(content);
+  if (!inboundRef) {
+    return content;
+  }
+  try {
+    const localPath = inboundRef.kind === 'image'
+      ? await feishuApi.downloadImage(inboundRef.key)
+      : await feishuApi.downloadFile(inboundRef.key);
+    return `${content}\nlocal_${inboundRef.kind}_path=${localPath}`;
+  } catch (error) {
+    log.warn('飞书二进制消息下载失败，继续仅使用 key 处理', {
+      kind: inboundRef.kind,
+      key: inboundRef.key,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return content;
+  }
+}
+
+function extractFeishuBinaryRef(content: string): { kind: 'image' | 'file' | 'audio' | 'media' | 'sticker'; key: string } | undefined {
+  const image = content.match(/^\[飞书图片]\s+image_key=([^\s]+)/);
+  if (image?.[1]) {
+    return { kind: 'image', key: image[1] };
+  }
+  const file = content.match(/^\[飞书文件]\s+file_key=([^\s]+)/);
+  if (file?.[1]) {
+    return { kind: 'file', key: file[1] };
+  }
+  const audio = content.match(/^\[飞书语音]\s+file_key=([^\s]+)/);
+  if (audio?.[1]) {
+    return { kind: 'audio', key: audio[1] };
+  }
+  const media = content.match(/^\[飞书媒体]\s+file_key=([^\s]+)/);
+  if (media?.[1]) {
+    return { kind: 'media', key: media[1] };
+  }
+  const sticker = content.match(/^\[飞书表情]\s+file_key=([^\s]+)/);
+  if (sticker?.[1]) {
+    return { kind: 'sticker', key: sticker[1] };
+  }
+  return undefined;
 }
 
 app.listen(config.port, () => {

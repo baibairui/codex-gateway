@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FeishuApi, splitFeishuTextByUtf8Bytes } from '../src/services/feishu-api.js';
@@ -192,5 +196,80 @@ describe('FeishuApi token cache', () => {
     const payload = JSON.parse(capturedBody) as { msg_type?: string; content?: string };
     expect(payload.msg_type).toBe('interactive');
     expect(payload.content).toContain('template_id');
+  });
+
+  it('downloads image by image_key and stores to local file', async () => {
+    const imageCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-image-'));
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+            tenant_access_token: 'tenant-token',
+            expire: 7200,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/im/v1/images/')) {
+        return new Response(Buffer.from('fake-image-bytes'), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      imageCacheDir,
+    });
+
+    const filePath = await api.downloadImage('img_v3_foo');
+    expect(filePath.startsWith(imageCacheDir)).toBe(true);
+    expect(fs.existsSync(filePath)).toBe(true);
+    expect(fs.readFileSync(filePath).toString('utf8')).toBe('fake-image-bytes');
+  });
+
+  it('downloads file by file_key and stores to local file', async () => {
+    const imageCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-file-'));
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+            tenant_access_token: 'tenant-token',
+            expire: 7200,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/im/v1/files/')) {
+        return new Response(Buffer.from('fake-file-bytes'), {
+          status: 200,
+          headers: { 'content-type': 'application/pdf' },
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      imageCacheDir,
+    });
+
+    const filePath = await api.downloadFile('file_v3_foo');
+    expect(filePath.startsWith(imageCacheDir)).toBe(true);
+    expect(filePath.endsWith('.pdf')).toBe(true);
+    expect(fs.existsSync(filePath)).toBe(true);
+    expect(fs.readFileSync(filePath).toString('utf8')).toBe('fake-file-bytes');
   });
 });
