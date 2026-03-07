@@ -294,6 +294,332 @@ function buildOutboundMessageProtocolPrompt(channel: Channel, userPrompt: string
   return buildWeComOutboundMessageProtocolPrompt(userPrompt);
 }
 
+function buildGatewayStructuredMessage(msgType: string, content: Record<string, unknown> | string): string {
+  return JSON.stringify({
+    __gateway_message__: true,
+    msg_type: msgType,
+    content,
+  });
+}
+
+type FeishuCardTemplate = 'blue' | 'wathet' | 'turquoise' | 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'grey';
+
+function resolveCommandLabel(commandName: string): string {
+  const normalized = commandName.toLowerCase();
+  const labels: Record<string, string> = {
+    '/help': '命令帮助',
+    '/new': '会话管理',
+    '/clear': '会话管理',
+    '/session': '当前会话',
+    '/sessions': '会话列表',
+    '/agents': 'Agent 列表',
+    '/agent': 'Agent 管理',
+    '/skill-agent': '技能扩展助手',
+    '/skillagent': '技能扩展助手',
+    '/skill': '技能扩展助手',
+    '/login': '登录授权',
+    '/rename': '会话重命名',
+    '/switch': '会话切换',
+    '/model': '模型管理',
+    '/models': '模型列表',
+    '/skills': 'Skill 管理',
+    '/search': '联网搜索',
+    '/deploy-workspace': 'Workspace 发布',
+    '/publish-workspace': 'Workspace 发布',
+    '/review': '代码审查',
+  };
+  return labels[normalized] ?? '命令结果';
+}
+
+function resolveCardTemplate(text: string): FeishuCardTemplate {
+  const normalized = text.trim();
+  if (normalized.startsWith('✅')) {
+    return 'green';
+  }
+  if (normalized.startsWith('❌')) {
+    return 'red';
+  }
+  if (normalized.startsWith('⚠️')) {
+    return 'orange';
+  }
+  if (normalized.startsWith('⏳')) {
+    return 'wathet';
+  }
+  if (normalized.startsWith('可用命令：') || normalized.startsWith('用法：')) {
+    return 'blue';
+  }
+  return 'grey';
+}
+
+interface CommandQuickAction {
+  label: string;
+  cmd: string;
+  type?: 'default' | 'primary' | 'danger';
+}
+
+function resolveSearchState(text: string): 'on' | 'off' | 'unknown' {
+  const normalized = text.trim();
+  if (normalized.includes('联网搜索：on') || normalized.includes('已开启联网搜索')) {
+    return 'on';
+  }
+  if (normalized.includes('联网搜索：off') || normalized.includes('已关闭联网搜索')) {
+    return 'off';
+  }
+  return 'unknown';
+}
+
+function resolveCommandQuickActions(commandName: string, text: string): CommandQuickAction[] {
+  const normalized = commandName.toLowerCase();
+  if (normalized === '/help') {
+    return [
+      { label: 'Agent 列表', cmd: '/agents', type: 'primary' },
+      { label: 'Skill 列表', cmd: '/skills' },
+      { label: '模型状态', cmd: '/model' },
+      { label: '搜索状态', cmd: '/search' },
+    ];
+  }
+  if (normalized === '/agents' || normalized === '/agent') {
+    return [
+      { label: '查看 Agents', cmd: '/agents', type: 'primary' },
+      { label: '当前 Agent', cmd: '/agent' },
+      { label: '切换会话', cmd: '/sessions' },
+    ];
+  }
+  if (normalized === '/skills') {
+    return [
+      { label: '生效 Skills', cmd: '/skills', type: 'primary' },
+      { label: '全局 Skills', cmd: '/skills global' },
+      { label: 'Agent Skills', cmd: '/skills agent' },
+    ];
+  }
+  if (normalized === '/model' || normalized === '/models') {
+    return [
+      { label: '当前模型', cmd: '/model', type: 'primary' },
+      { label: '模型列表', cmd: '/models' },
+      { label: '重置模型', cmd: '/model reset' },
+    ];
+  }
+  if (normalized === '/search') {
+    const state = resolveSearchState(text);
+    return [
+      { label: '查看状态', cmd: '/search', type: state === 'unknown' ? 'primary' : 'default' },
+      { label: '开启', cmd: '/search on', type: state === 'off' ? 'primary' : 'default' },
+      { label: '关闭', cmd: '/search off', type: state === 'on' ? 'danger' : 'default' },
+    ];
+  }
+  if (normalized === '/review') {
+    return [
+      { label: '审查当前改动', cmd: '/review', type: 'primary' },
+      { label: '按分支审查', cmd: '/review base main' },
+      { label: '按提交审查', cmd: '/review commit <SHA>' },
+    ];
+  }
+  if (normalized === '/session' || normalized === '/sessions' || normalized === '/switch' || normalized === '/rename') {
+    return [
+      { label: '当前会话', cmd: '/session', type: 'primary' },
+      { label: '会话列表', cmd: '/sessions' },
+      { label: '切换会话', cmd: '/switch <编号|threadId>' },
+    ];
+  }
+  if (normalized === '/login') {
+    return [
+      { label: '重新登录', cmd: '/login', type: 'primary' },
+      { label: '查看帮助', cmd: '/help' },
+    ];
+  }
+  return [
+    { label: '命令帮助', cmd: '/help', type: 'primary' },
+  ];
+}
+
+function buildFeishuTextBlock(content: string): Record<string, unknown> {
+  return {
+    tag: 'markdown',
+    content,
+  };
+}
+
+function extractIndexedLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^\d+\.\s+/.test(line) || /^👉\s+\d+\.\s+/.test(line));
+}
+
+function buildSessionsCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const indexed = extractIndexedLines(text);
+  const usage = lines.find((line) => line.startsWith('使用 /switch '));
+  const summary = lines[0] ?? text;
+  const elements: Array<Record<string, unknown>> = [buildFeishuTextBlock(summary)];
+  if (indexed.length > 0) {
+    elements.push(buildFeishuTextBlock(`**会话项**\n${indexed.join('\n')}`));
+  }
+  if (usage) {
+    elements.push(buildFeishuTextBlock(`💡 ${usage}`));
+  }
+  return elements;
+}
+
+function buildSkillsCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const indexed = extractIndexedLines(text);
+  const summary = lines[0] ?? text;
+  const elements: Array<Record<string, unknown>> = [buildFeishuTextBlock(summary)];
+  if (indexed.length > 0) {
+    elements.push(buildFeishuTextBlock(`**Skills**\n${indexed.join('\n')}`));
+  } else if (lines.length > 1) {
+    elements.push(buildFeishuTextBlock(lines.slice(1).join('\n')));
+  }
+  elements.push(buildFeishuTextBlock('💡 可用按钮快速切换范围或重新查询。'));
+  return elements;
+}
+
+function buildAgentCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const elements: Array<Record<string, unknown>> = [];
+  const agentLine = lines.find((line) => line.startsWith('当前 agent：') || line.startsWith('✅ 已切换到 agent：') || line.startsWith('✅ 已创建并切换到 agent：'));
+  const workspaceLine = lines.find((line) => line.startsWith('工作区：'));
+  const sessionLine = lines.find((line) => line.startsWith('当前会话：'));
+  if (agentLine) {
+    elements.push(buildFeishuTextBlock(`**Agent**\n${agentLine}`));
+  }
+  if (workspaceLine || sessionLine) {
+    const detail = [workspaceLine, sessionLine].filter(Boolean).join('\n');
+    if (detail) {
+      elements.push(buildFeishuTextBlock(`**状态**\n${detail}`));
+    }
+  }
+  if (elements.length === 0) {
+    elements.push(buildFeishuTextBlock(text));
+  }
+  return elements;
+}
+
+function buildModelCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const elements: Array<Record<string, unknown>> = [];
+  const currentLine = lines.find((line) => line.startsWith('当前模型：') || line.startsWith('✅ 已切换模型为：') || line.startsWith('✅ 已重置模型：'));
+  if (currentLine) {
+    elements.push(buildFeishuTextBlock(`**当前模型**\n${currentLine}`));
+  }
+  const warnings = lines.filter((line) => line.startsWith('⚠️'));
+  if (warnings.length > 0) {
+    elements.push(buildFeishuTextBlock(`**提示**\n${warnings.join('\n')}`));
+  }
+  const numbered = extractIndexedLines(text);
+  if (numbered.length > 0) {
+    elements.push(buildFeishuTextBlock(`**模型候选**\n${numbered.join('\n')}`));
+  } else if (lines.length > 1) {
+    const rest = lines.filter((line) => line !== currentLine && !line.startsWith('⚠️'));
+    if (rest.length > 0) {
+      elements.push(buildFeishuTextBlock(rest.join('\n')));
+    }
+  }
+  if (elements.length === 0) {
+    elements.push(buildFeishuTextBlock(text));
+  }
+  return elements;
+}
+
+function buildSearchCardElements(text: string): Array<Record<string, unknown>> {
+  const state = resolveSearchState(text);
+  const stateLine = state === 'on'
+    ? '🟢 已开启'
+    : state === 'off'
+    ? '⚪ 已关闭'
+    : '🟡 状态未知';
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTextBlock(`**当前状态**\n${stateLine}`),
+  ];
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length > 0) {
+    elements.push(buildFeishuTextBlock(lines.join('\n')));
+  }
+  elements.push(buildFeishuTextBlock('💡 建议：默认关闭，按需临时开启。'));
+  return elements;
+}
+
+function buildGenericCardElements(text: string): Array<Record<string, unknown>> {
+  return [buildFeishuTextBlock(text)];
+}
+
+function resolveCommandCardElements(commandName: string, text: string): Array<Record<string, unknown>> {
+  const normalized = commandName.toLowerCase();
+  if (normalized === '/sessions' || normalized === '/session' || normalized === '/switch' || normalized === '/rename') {
+    return buildSessionsCardElements(text);
+  }
+  if (normalized === '/skills') {
+    return buildSkillsCardElements(text);
+  }
+  if (normalized === '/agent' || normalized === '/agents') {
+    return buildAgentCardElements(text);
+  }
+  if (normalized === '/model' || normalized === '/models') {
+    return buildModelCardElements(text);
+  }
+  if (normalized === '/search') {
+    return buildSearchCardElements(text);
+  }
+  return buildGenericCardElements(text);
+}
+
+function buildFeishuInteractiveCommandCard(commandName: string, text: string): Record<string, unknown> {
+  const title = resolveCommandLabel(commandName);
+  const actions = resolveCommandQuickActions(commandName, text);
+  const elements = resolveCommandCardElements(commandName, text);
+  return {
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+    },
+    header: {
+      template: resolveCardTemplate(text),
+      title: {
+        tag: 'plain_text',
+        content: `${title} · ${commandName}`,
+      },
+    },
+    elements: [
+      ...elements,
+      {
+        tag: 'note',
+        elements: [
+          {
+            tag: 'plain_text',
+            content: '可直接点击按钮继续执行命令；若平台未启用卡片回调，也可手动发送命令文本。',
+          },
+        ],
+      },
+      {
+        tag: 'action',
+        actions: actions.map((item) => ({
+          tag: 'button',
+          type: item.type ?? 'default',
+          text: {
+            tag: 'plain_text',
+            content: item.label,
+          },
+          value: {
+            gateway_cmd: item.cmd,
+          },
+        })),
+      },
+    ],
+  };
+}
+
+function formatCommandOutboundMessage(channel: Channel, commandName: string, text: string): string {
+  if (channel !== 'feishu') {
+    return text;
+  }
+  const normalized = text.trim();
+  if (!normalized) {
+    return text;
+  }
+  return buildGatewayStructuredMessage('interactive', buildFeishuInteractiveCommandCard(commandName, normalized));
+}
+
 function buildInboundNonTextAck(prompt: string): string | undefined {
   const patterns: Array<{ regex: RegExp; label: string }> = [
     { regex: /^\[飞书图片]/, label: '飞书图片' },
@@ -682,17 +1008,21 @@ ${clipMessage(prompt, 500)}
     }
 
     if (commandResult.handled) {
+      const commandName = (prompt.split(/\s+/, 1)[0] ?? '').toLowerCase() || '/unknown';
+      async function sendCommandText(text: string): Promise<void> {
+        await deps.sendText(channel, userId, formatCommandOutboundMessage(channel, commandName, text));
+      }
       if (commandResult.clearSession) {
         deps.sessionStore.clearSession(sessionUserKey, currentAgent.agentId);
       }
       if (commandResult.renameTarget && commandResult.renameName) {
         const resolved = deps.sessionStore.resolveSwitchTarget(sessionUserKey, currentAgent.agentId, commandResult.renameTarget);
         if (!resolved) {
-          await deps.sendText(channel, userId, '❌ 未找到目标会话，请先发送 /sessions 查看编号。');
+          await sendCommandText('❌ 未找到目标会话，请先发送 /sessions 查看编号。');
           return;
         }
         deps.sessionStore.renameSession(resolved, commandResult.renameName);
-        await deps.sendText(channel, userId, `✅ 已重命名会话：${commandResult.renameName}`);
+        await sendCommandText(`✅ 已重命名会话：${commandResult.renameName}`);
         return;
       }
       if (commandResult.createAgentName) {
@@ -708,9 +1038,7 @@ ${clipMessage(prompt, 500)}
           workspaceDir: workspace.workspaceDir,
         });
         deps.sessionStore.setCurrentAgent(sessionUserKey, agent.agentId);
-        await deps.sendText(
-          channel,
-          userId,
+        await sendCommandText(
           [
             `✅ 已创建并切换到 agent：${agent.name} (${agent.agentId})`,
             `工作区：${agent.workspaceDir}`,
@@ -722,15 +1050,15 @@ ${clipMessage(prompt, 500)}
       if (commandResult.initMemoryAgent) {
         const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, MEMORY_ONBOARDING_AGENT_ID);
         if (onboardingKickoffInFlight.has(sessionUserKey) && !onboardingThreadId) {
-          await deps.sendText(channel, userId, renderMemoryOnboardingPendingMessage());
+          await sendCommandText(renderMemoryOnboardingPendingMessage());
           return;
         }
         if (onboardingThreadId) {
-          await deps.sendText(channel, userId, renderMemoryOnboardingResumeMessage());
+          await sendCommandText(renderMemoryOnboardingResumeMessage());
           return;
         }
         const agent = ensureMemoryOnboardingAgent();
-        await deps.sendText(channel, userId, renderMemoryOnboardingStartMessage('manual'));
+        await sendCommandText(renderMemoryOnboardingStartMessage('manual'));
         await startMemoryOnboarding(agent, currentModel, {
           reason: 'manual',
           targetAgent: currentAgent,
@@ -742,18 +1070,18 @@ ${clipMessage(prompt, 500)}
         deps.sessionStore.setCurrentAgent(sessionUserKey, agent.agentId);
         const skillThreadId = deps.sessionStore.getSession(sessionUserKey, agent.agentId);
         if (skillThreadId) {
-          await deps.sendText(channel, userId, renderSkillOnboardingResumeMessage(agent));
+          await sendCommandText(renderSkillOnboardingResumeMessage(agent));
           return;
         }
         if (!deps.rateLimitStore.allow(sessionUserKey)) {
-          await deps.sendText(channel, userId, '⏳ 请求过于频繁，请稍后再试。');
+          await sendCommandText('⏳ 请求过于频繁，请稍后再试。');
           return;
         }
         if (!deps.runnerEnabled) {
-          await deps.sendText(channel, userId, '⚠️ 当前服务已禁用命令执行，暂时无法启动技能扩展助手。');
+          await sendCommandText('⚠️ 当前服务已禁用命令执行，暂时无法启动技能扩展助手。');
           return;
         }
-        await deps.sendText(channel, userId, renderSkillOnboardingStartMessage(agent));
+        await sendCommandText(renderSkillOnboardingStartMessage(agent));
         try {
           let lastStreamSend: Promise<void> = Promise.resolve();
           const result = await deps.codexRunner.run({
@@ -769,7 +1097,7 @@ ${clipMessage(prompt, 500)}
             },
             onMessage: (text) => {
               const sanitized = sanitizeOnboardingText(text);
-              lastStreamSend = deps.sendText(channel, userId, sanitized).catch((err) => {
+              lastStreamSend = sendCommandText(sanitized).catch((err) => {
                 log.error('initSkillAgent onMessage 推送失败', err);
               });
             },
@@ -782,16 +1110,16 @@ ${clipMessage(prompt, 500)}
             error: error instanceof Error ? error.message : String(error),
             stack: error instanceof Error ? error.stack : undefined,
           });
-          await deps.sendText(channel, userId, '❌ 技能扩展助手启动失败，请稍后重试。');
+          await sendCommandText('❌ 技能扩展助手启动失败，请稍后重试。');
         }
         return;
       }
       if (commandResult.initLogin) {
         if (!deps.runnerEnabled) {
-          await deps.sendText(channel, userId, '⚠️ 当前服务已禁用命令执行，无法进行登录。');
+          await sendCommandText('⚠️ 当前服务已禁用命令执行，无法进行登录。');
           return;
         }
-        await deps.sendText(channel, userId, '⏳ 正在请求设备登录码，请稍候...');
+        await sendCommandText('⏳ 正在请求设备登录码，请稍候...');
         try {
           let lastStreamSend: Promise<void> = Promise.resolve();
           await deps.codexRunner.login({
@@ -802,34 +1130,32 @@ ${clipMessage(prompt, 500)}
 ────────────────────────────────────────────────────────────
 ${clipMessage(text, 500)}
 ════════════════════════════════════════════════════════════`);
-              lastStreamSend = deps.sendText(channel, userId, `【登录授权】\n${text}`).catch((err) => {
+              lastStreamSend = sendCommandText(`【登录授权】\n${text}`).catch((err) => {
                 log.error('handleText login onMessage 推送失败', err);
               });
             },
           });
           await lastStreamSend;
-          await deps.sendText(channel, userId, '✅ 登录成功！Codex CLI 已获得授权。');
+          await sendCommandText('✅ 登录成功！Codex CLI 已获得授权。');
         } catch (error) {
           log.error('handleText /login 失败或超时', {
             userId,
             error: error instanceof Error ? error.message : String(error),
           });
-          await deps.sendText(channel, userId, '❌ 登录超时或遇到错误。请重试 /login 命令。');
+          await sendCommandText('❌ 登录超时或遇到错误。请重试 /login 命令。');
         }
         return;
       }
       if (commandResult.useAgentTarget) {
         const resolved = deps.sessionStore.resolveAgentTarget(sessionUserKey, commandResult.useAgentTarget);
         if (!resolved) {
-          await deps.sendText(channel, userId, '❌ 未找到目标 agent，请先发送 /agents 查看编号。');
+          await sendCommandText('❌ 未找到目标 agent，请先发送 /agents 查看编号。');
           return;
         }
         deps.sessionStore.setCurrentAgent(sessionUserKey, resolved);
         const nextAgent = deps.sessionStore.getCurrentAgent(sessionUserKey);
         const nextThreadId = deps.sessionStore.getSession(sessionUserKey, nextAgent.agentId);
-        await deps.sendText(
-          channel,
-          userId,
+        await sendCommandText(
           [
             `✅ 已切换到 agent：${nextAgent.name} (${nextAgent.agentId})`,
             `工作区：${nextAgent.workspaceDir}`,
@@ -841,25 +1167,25 @@ ${clipMessage(text, 500)}
       if (commandResult.switchTarget) {
         const resolved = deps.sessionStore.resolveSwitchTarget(sessionUserKey, currentAgent.agentId, commandResult.switchTarget);
         if (!resolved) {
-          await deps.sendText(channel, userId, '❌ 未找到目标会话，请先发送 /sessions 查看编号。');
+          await sendCommandText('❌ 未找到目标会话，请先发送 /sessions 查看编号。');
           return;
         }
         deps.sessionStore.setSession(sessionUserKey, currentAgent.agentId, resolved);
-        await deps.sendText(channel, userId, `✅ 已切换到会话：${maskThreadId(resolved)}`);
+        await sendCommandText(`✅ 已切换到会话：${maskThreadId(resolved)}`);
         return;
       }
       if (commandResult.queryAgent || commandResult.queryAgents) {
         if (commandResult.message) {
-          await deps.sendText(channel, userId, commandResult.message);
+          await sendCommandText(commandResult.message);
         }
         return;
       }
       if (commandResult.queryModel) {
-        await deps.sendText(channel, userId, `当前模型：${currentModel ?? '(codex cli 默认模型)'}`);
+        await sendCommandText(`当前模型：${currentModel ?? '(codex cli 默认模型)'}`);
         return;
       }
       if (commandResult.queryModels) {
-        await deps.sendText(channel, userId, formatCodexModelsText(loadCodexModels()));
+        await sendCommandText(formatCodexModelsText(loadCodexModels()));
         return;
       }
       if (commandResult.querySkills) {
@@ -870,16 +1196,14 @@ ${clipMessage(text, 500)}
           ? skillManager.listAgentLocalSkills(currentAgent.workspaceDir)
           : skillManager.listEffectiveSkills(currentAgent.workspaceDir);
         if (skillList.length === 0) {
-          await deps.sendText(channel, userId, '当前未发现可用 skill。');
+          await sendCommandText('当前未发现可用 skill。');
           return;
         }
         const lines = skillList.map((item, index) => {
           const desc = item.description ? ` - ${item.description}` : '';
           return `${index + 1}. ${item.name} [${item.source}]${desc}`;
         });
-        await deps.sendText(
-          channel,
-          userId,
+        await sendCommandText(
           [
             `当前会话可用 skill（范围：${scope}，agent：${currentAgent.name} / ${currentAgent.agentId}）`,
             ...lines,
@@ -890,87 +1214,87 @@ ${clipMessage(text, 500)}
       if (commandResult.disableGlobalSkillName) {
         const result = skillManager.disableGlobalSkill(currentAgent.workspaceDir, commandResult.disableGlobalSkillName);
         if (!result.ok) {
-          await deps.sendText(channel, userId, `❌ ${result.reason ?? '禁用全局 skill 失败'}`);
+          await sendCommandText(`❌ ${result.reason ?? '禁用全局 skill 失败'}`);
           return;
         }
-        await deps.sendText(channel, userId, `✅ 已禁用全局 skill（仅当前 agent）：${commandResult.disableGlobalSkillName}`);
+        await sendCommandText(`✅ 已禁用全局 skill（仅当前 agent）：${commandResult.disableGlobalSkillName}`);
         return;
       }
       if (commandResult.enableGlobalSkillName) {
         const result = skillManager.enableGlobalSkill(currentAgent.workspaceDir, commandResult.enableGlobalSkillName);
         if (!result.ok) {
-          await deps.sendText(channel, userId, `❌ ${result.reason ?? '添加全局 skill 失败'}`);
+          await sendCommandText(`❌ ${result.reason ?? '添加全局 skill 失败'}`);
           return;
         }
-        await deps.sendText(channel, userId, `✅ 已添加全局 skill（仅当前 agent）：${commandResult.enableGlobalSkillName}`);
+        await sendCommandText(`✅ 已添加全局 skill（仅当前 agent）：${commandResult.enableGlobalSkillName}`);
         return;
       }
       if (commandResult.disableAgentSkillName) {
         const result = skillManager.disableAgentSkill(currentAgent.workspaceDir, commandResult.disableAgentSkillName);
         if (!result.ok) {
-          await deps.sendText(channel, userId, `❌ ${result.reason ?? '禁用当前 agent skill 失败'}`);
+          await sendCommandText(`❌ ${result.reason ?? '禁用当前 agent skill 失败'}`);
           return;
         }
-        await deps.sendText(channel, userId, `✅ 已禁用当前 agent skill：${commandResult.disableAgentSkillName}`);
+        await sendCommandText(`✅ 已禁用当前 agent skill：${commandResult.disableAgentSkillName}`);
         return;
       }
       if (commandResult.clearModel) {
         userModelOverrides.delete(sessionUserKey);
-        await deps.sendText(channel, userId, `✅ 已重置模型：${deps.defaultModel ?? '(codex cli 默认模型)'}`);
+        await sendCommandText(`✅ 已重置模型：${deps.defaultModel ?? '(codex cli 默认模型)'}`);
         return;
       }
       if (commandResult.setModel) {
         const snapshot = loadCodexModels();
         const resolved = resolveModelFromSnapshot(commandResult.setModel, snapshot);
         if (!resolved.ok || !resolved.model) {
-          await deps.sendText(channel, userId, `❌ ${resolved.reason ?? '模型校验失败'}`);
+          await sendCommandText(`❌ ${resolved.reason ?? '模型校验失败'}`);
           return;
         }
         userModelOverrides.set(sessionUserKey, resolved.model);
         const note = resolved.reason ? `\n⚠️ ${resolved.reason}` : '';
-        await deps.sendText(channel, userId, `✅ 已切换模型为：${resolved.model}${note}`);
+        await sendCommandText(`✅ 已切换模型为：${resolved.model}${note}`);
         return;
       }
       if (commandResult.querySearch) {
-        await deps.sendText(channel, userId, `联网搜索：${currentSearch ? 'on' : 'off'}`);
+        await sendCommandText(`联网搜索：${currentSearch ? 'on' : 'off'}`);
         return;
       }
       if (typeof commandResult.setSearchEnabled === 'boolean') {
         userSearchOverrides.set(sessionUserKey, commandResult.setSearchEnabled);
-        await deps.sendText(channel, userId, `✅ 已${commandResult.setSearchEnabled ? '开启' : '关闭'}联网搜索`);
+        await sendCommandText(`✅ 已${commandResult.setSearchEnabled ? '开启' : '关闭'}联网搜索`);
         return;
       }
       if (commandResult.publishWorkspace) {
         if (!deps.workspacePublisher) {
-          await deps.sendText(channel, userId, '⚠️ 当前服务未开启 workspace 发布命令，请联系管理员。');
+          await sendCommandText('⚠️ 当前服务未开启 workspace 发布命令，请联系管理员。');
           return;
         }
-        await deps.sendText(channel, userId, '⏳ 正在发布 workspace，请稍候...');
+        await sendCommandText('⏳ 正在发布 workspace，请稍候...');
         try {
           const result = await deps.workspacePublisher.publish();
           const preview = result.output
             ? `\n\n发布输出（末尾）：\n${clipMessage(result.output, 600)}`
             : '';
-          await deps.sendText(channel, userId, `✅ workspace 发布完成。${preview}`);
+          await sendCommandText(`✅ workspace 发布完成。${preview}`);
         } catch (error) {
           log.error('handleText /deploy-workspace 执行失败', {
             userId,
             error: error instanceof Error ? error.message : String(error),
             stack: error instanceof Error ? error.stack : undefined,
           });
-          await deps.sendText(channel, userId, '❌ workspace 发布失败，请检查日志后重试。');
+          await sendCommandText('❌ workspace 发布失败，请检查日志后重试。');
         }
         return;
       }
       if (commandResult.reviewMode) {
         if (!deps.rateLimitStore.allow(sessionUserKey)) {
           log.warn('handleText /review 命中限流，拒绝执行', { userId });
-          await deps.sendText(channel, userId, '⏳ 请求过于频繁，请稍后再试。');
+          await sendCommandText('⏳ 请求过于频繁，请稍后再试。');
           return;
         }
         if (!deps.runnerEnabled) {
           log.warn('handleText /review runnerEnabled=false，拒绝执行', { userId });
-          await deps.sendText(channel, userId, '⚠️ 当前服务已禁用命令执行，请联系管理员。');
+          await sendCommandText('⚠️ 当前服务已禁用命令执行，请联系管理员。');
           return;
         }
         try {
@@ -990,7 +1314,7 @@ ${clipMessage(text, 500)}
 ────────────────────────────────────────────────────────────
 ${clipMessage(text, 500)}
 ════════════════════════════════════════════════════════════`);
-              lastStreamSend = deps.sendText(channel, userId, text).catch((err) => {
+              lastStreamSend = sendCommandText(text).catch((err) => {
                 log.error('handleText review onMessage 推送失败', err);
               });
             },
@@ -1012,12 +1336,12 @@ ${clipMessage(text, 500)}
             error: error instanceof Error ? error.message : String(error),
             stack: error instanceof Error ? error.stack : undefined,
           });
-          await deps.sendText(channel, userId, '❌ review 执行失败，请稍后重试。');
+          await sendCommandText('❌ review 执行失败，请稍后重试。');
         }
         return;
       }
       if (commandResult.message) {
-        await deps.sendText(channel, userId, commandResult.message);
+        await sendCommandText(commandResult.message);
       }
       return;
     }

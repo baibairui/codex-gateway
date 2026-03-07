@@ -85,6 +85,36 @@ export function dispatchFeishuMessageReceiveEvent(
   return 'success';
 }
 
+export function dispatchFeishuCardActionEvent(
+  deps: FeishuEventDeps,
+  event: Record<string, unknown>,
+): 'success' | 'ignored' {
+  const operator = (event.operator ?? {}) as Record<string, unknown>;
+  const operatorId = (operator.operator_id ?? {}) as Record<string, unknown>;
+  const openId = typeof operatorId.open_id === 'string'
+    ? operatorId.open_id
+    : (typeof operator.open_id === 'string' ? operator.open_id : '');
+  const action = (event.action ?? {}) as Record<string, unknown>;
+  const value = (action.value ?? {}) as Record<string, unknown>;
+  const command = typeof value.gateway_cmd === 'string' ? value.gateway_cmd.trim() : '';
+  const openMessageId = typeof event.open_message_id === 'string' ? event.open_message_id : undefined;
+  if (!openId || !command) {
+    return 'ignored';
+  }
+  if (!allowList(deps.allowFrom, openId)) {
+    return 'success';
+  }
+  deps.handleText({
+    channel: 'feishu',
+    userId: openId,
+    content: command,
+    sourceMessageId: openMessageId,
+  }).catch((err) => {
+    log.error('飞书卡片回调异步处理失败', err);
+  });
+  return 'success';
+}
+
 export function createApp(deps: AppDeps) {
   const app = express();
 
@@ -314,6 +344,16 @@ export function createApp(deps: AppDeps) {
         }
 
         const eventType = typeof header.event_type === 'string' ? header.event_type : '';
+        if (eventType === 'card.action.trigger') {
+          const event = (body.event ?? {}) as Record<string, unknown>;
+          const result = dispatchFeishuCardActionEvent({
+            allowFrom: deps.allowFrom,
+            isDuplicateMessage: deps.isDuplicateMessage,
+            handleText: deps.handleText,
+          }, event);
+          res.json({ code: 0, msg: result });
+          return;
+        }
         if (eventType !== 'im.message.receive_v1') {
           res.json({ code: 0, msg: 'ignored' });
           return;

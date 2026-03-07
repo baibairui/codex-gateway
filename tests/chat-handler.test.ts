@@ -272,6 +272,265 @@ describe('createChatHandler', () => {
     expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('frontend');
   });
 
+  it('formats built-in command response as feishu interactive card', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/help' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as {
+      __gateway_message__?: boolean;
+      msg_type?: string;
+      content?: unknown;
+    };
+    expect(parsed.__gateway_message__).toBe(true);
+    expect(parsed.msg_type).toBe('interactive');
+    expect(typeof parsed.content).toBe('object');
+    const card = parsed.content as {
+      header?: { title?: { content?: string } };
+      elements?: Array<{ content?: string }>;
+    };
+    expect(card.header?.title?.content).toContain('/help');
+    expect(card.elements?.[0]?.content).toContain('可用命令：');
+    expect(card.elements?.[0]?.content).toContain('/help - 查看帮助');
+  });
+
+  it('formats short command response as feishu interactive card', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/search' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as {
+      __gateway_message__?: boolean;
+      msg_type?: string;
+      content?: unknown;
+    };
+    expect(parsed.__gateway_message__).toBe(true);
+    expect(parsed.msg_type).toBe('interactive');
+    const card = parsed.content as {
+      header?: { title?: { content?: string } };
+      elements?: Array<{ content?: string; tag?: string; actions?: Array<{ value?: { gateway_cmd?: string } }> }>;
+    };
+    expect(card.header?.title?.content).toContain('/search');
+    const markdownContents = (card.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String(item.content ?? ''));
+    expect(markdownContents.join('\n')).toContain('**当前状态**');
+    expect(markdownContents.join('\n')).toContain('联网搜索：');
+    const actionElement = (card.elements ?? []).find((item) => item.tag === 'action');
+    const cmds = (actionElement?.actions ?? []).map((item) => item.value?.gateway_cmd);
+    expect(cmds).toContain('/search on');
+    expect(cmds).toContain('/search off');
+  });
+
+  it('renders search toggle card with dynamic button emphasis', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/search on' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as {
+      content?: { elements?: Array<{ tag?: string; actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }> }> };
+    };
+    const actionElement = parsed.content?.elements?.find((item) => item.tag === 'action');
+    const offAction = (actionElement?.actions ?? []).find((item) => item.value?.gateway_cmd === '/search off');
+    expect(offAction?.type).toBe('danger');
+  });
+
+  it('renders skills command card with quick action buttons', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const skillManager = {
+      listEffectiveSkills: vi.fn(() => ([
+        { name: 'using-superpowers', source: 'global' as const, skillDir: '/root/.agents/skills/using-superpowers' },
+      ])),
+      listGlobalSkills: vi.fn(() => []),
+      listAgentLocalSkills: vi.fn(() => []),
+      disableGlobalSkill: vi.fn(() => ({ ok: true })),
+      enableGlobalSkill: vi.fn(() => ({ ok: true })),
+      disableAgentSkill: vi.fn(() => ({ ok: true })),
+    };
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      skillManager,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/skills' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    expect(markdownContents.join('\n')).toContain('**Skills**');
+    const actionElement = parsed.content?.elements?.find((item) => item.tag === 'action') as { actions?: Array<{ value?: { gateway_cmd?: string } }> } | undefined;
+    const cmds = (actionElement?.actions ?? []).map((item) => item.value?.gateway_cmd);
+    expect(cmds).toContain('/skills');
+    expect(cmds).toContain('/skills global');
+    expect(cmds).toContain('/skills agent');
+  });
+
+  it('renders sessions command card with session item section', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.setSession('local-owner', 'default', 'thread_1');
+    sessionStore.listDetailed = () => ([
+      { threadId: 'thread_1', name: '当前会话', lastPrompt: 'hello', updatedAt: Date.now() },
+      { threadId: 'thread_2', name: '历史会话', lastPrompt: 'world', updatedAt: Date.now() - 1 },
+    ]);
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/sessions' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    expect(markdownContents.join('\n')).toContain('**会话项**');
+  });
+
+  it('renders agent command card with agent status sections', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/agent' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    expect(markdownContents.join('\n')).toContain('**Agent**');
+    expect(markdownContents.join('\n')).toContain('**状态**');
+  });
+
+  it('renders model command card with current model section', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    expect(markdownContents.join('\n')).toContain('**当前模型**');
+  });
+
   it('lists merged skills for current agent by /skills command', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();

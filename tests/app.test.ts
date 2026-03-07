@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { createApp, dispatchFeishuMessageReceiveEvent } from '../src/app.js';
+import { createApp, dispatchFeishuCardActionEvent, dispatchFeishuMessageReceiveEvent } from '../src/app.js';
 
 const serverRefs: Array<{ close: () => void }> = [];
 
@@ -166,6 +166,50 @@ describe('createApp feishu callback', () => {
       sourceMessageId: 'om_1',
     });
   });
+
+  it('accepts card.action.trigger and forwards gateway command', async () => {
+    const handleText = vi.fn(async () => undefined);
+    const baseUrl = await startTestServer({
+      feishuVerificationToken: 'expected-token',
+      handleText,
+    });
+
+    const response = await fetch(`${baseUrl}/feishu/callback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        schema: '2.0',
+        header: {
+          token: 'expected-token',
+          event_type: 'card.action.trigger',
+        },
+        event: {
+          open_message_id: 'om_card_1',
+          operator: {
+            operator_id: {
+              open_id: 'ou_card_1',
+            },
+          },
+          action: {
+            value: {
+              gateway_cmd: '/skills global',
+            },
+          },
+        },
+      }),
+    });
+    const payload = await response.json() as { code?: number; msg?: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.code).toBe(0);
+    expect(payload.msg).toBe('success');
+    expect(handleText).toHaveBeenCalledWith({
+      channel: 'feishu',
+      userId: 'ou_card_1',
+      content: '/skills global',
+      sourceMessageId: 'om_card_1',
+    });
+  });
 });
 
 describe('dispatchFeishuMessageReceiveEvent', () => {
@@ -191,6 +235,36 @@ describe('dispatchFeishuMessageReceiveEvent', () => {
       userId: 'ou_ws_1',
       content: 'hello from ws',
       sourceMessageId: 'om_ws_1',
+    });
+  });
+});
+
+describe('dispatchFeishuCardActionEvent', () => {
+  it('forwards card command to chat handler', async () => {
+    const handleText = vi.fn(async () => undefined);
+    const result = dispatchFeishuCardActionEvent({
+      allowFrom: '*',
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      open_message_id: 'om_2',
+      operator: {
+        operator_id: {
+          open_id: 'ou_2',
+        },
+      },
+      action: {
+        value: {
+          gateway_cmd: '/agents',
+        },
+      },
+    });
+    expect(result).toBe('success');
+    expect(handleText).toHaveBeenCalledWith({
+      channel: 'feishu',
+      userId: 'ou_2',
+      content: '/agents',
+      sourceMessageId: 'om_2',
     });
   });
 });

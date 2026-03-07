@@ -18,6 +18,7 @@ import { WeComApi } from './services/wecom-api.js';
 import { FeishuApi } from './services/feishu-api.js';
 import { WeComCrypto } from './utils/wecom-crypto.js';
 import { appendFeishuAttachmentMetadata, extractFeishuBinaryRef } from './utils/feishu-inbound.js';
+import { isGatewayMessageTypeSupported, parseGatewayStructuredMessage } from './utils/gateway-message.js';
 import { SessionStore } from './stores/session-store.js';
 import { MessageDedupStore } from './stores/message-dedup-store.js';
 import { RateLimitStore } from './stores/rate-limit-store.js';
@@ -150,12 +151,6 @@ if (wecomCrypto) {
 const userTaskQueue = new Map<string, Promise<void>>();
 const outboundSendQueue = new Map<string, Promise<void>>();
 const inboundReplyContext = new Map<string, { messageId?: string }>();
-
-interface GatewayStructuredMessage {
-  __gateway_message__: true;
-  msg_type: string;
-  content: Record<string, unknown> | string;
-}
 
 interface InboundEnrichResult {
   content: string;
@@ -333,10 +328,27 @@ async function sendText(channel: 'wecom' | 'feishu', userId: string, content: st
 }
 
 async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
-  const structured = parseStructuredMessage(content);
+  const structured = parseGatewayStructuredMessage(content);
   await enqueueOutboundSend(channel, userId, async () => {
     const replyContext = inboundReplyContext.get(`${channel}:${userId}`);
     if (structured) {
+      if (!isGatewayMessageTypeSupported(channel, structured.msg_type)) {
+        const message = `❌ 不支持的 ${channel === 'feishu' ? '飞书' : '企微'} msg_type：${structured.msg_type}`;
+        if (channel === 'wecom') {
+          if (!weComApi) {
+            throw new Error('wecom api not configured');
+          }
+          await weComApi.sendText(userId, message);
+          return;
+        }
+        if (!feishuApi) {
+          throw new Error('feishu api not configured');
+        }
+        await feishuApi.sendText(userId, message, {
+          replyToMessageId: replyContext?.messageId,
+        });
+        return;
+      }
       if (channel === 'wecom') {
         if (!weComApi) {
           throw new Error('wecom api not configured');
@@ -372,33 +384,6 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       replyToMessageId: replyContext?.messageId,
     });
   });
-}
-
-function parseStructuredMessage(content: string): GatewayStructuredMessage | undefined {
-  const trimmed = content.trim();
-  if (!trimmed.startsWith('{')) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    if (parsed.__gateway_message__ !== true) {
-      return undefined;
-    }
-    if (typeof parsed.msg_type !== 'string') {
-      return undefined;
-    }
-    const payload = parsed.content;
-    if (!(typeof payload === 'string' || (payload && typeof payload === 'object' && !Array.isArray(payload)))) {
-      return undefined;
-    }
-    return {
-      __gateway_message__: true,
-      msg_type: parsed.msg_type,
-      content: payload as Record<string, unknown> | string,
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 async function enrichInboundContent(channel: 'wecom' | 'feishu', content: string): Promise<InboundEnrichResult> {
