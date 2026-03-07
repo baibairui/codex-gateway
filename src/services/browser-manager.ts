@@ -1,10 +1,16 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
 
 export interface BrowserLocatorLike {
   click(options?: Record<string, unknown>): Promise<void>;
+  hover?(): Promise<void>;
+  dragTo?(target: BrowserLocatorLike): Promise<void>;
   fill(value: string): Promise<void>;
   pressSequentially?(value: string): Promise<void>;
   selectOption?(value: string | string[]): Promise<void>;
+  setInputFiles?(files: string | string[]): Promise<void>;
+  setChecked?(checked: boolean): Promise<void>;
 }
 
 export interface BrowserKeyboardLike {
@@ -16,10 +22,14 @@ export interface BrowserPageLike {
   url(): string;
   title(): Promise<string>;
   goto(url: string): Promise<void>;
+  goBack?(): Promise<void>;
   close(): Promise<void>;
   bringToFront(): Promise<void>;
   locator(selector: string): BrowserLocatorLike;
   keyboard: BrowserKeyboardLike;
+  setViewportSize?(size: { width: number; height: number }): Promise<void>;
+  screenshot?(options: Record<string, unknown>): Promise<Buffer>;
+  once?(event: string, listener: (...args: unknown[]) => void): void;
   waitForTimeout(ms: number): Promise<void>;
   waitForSelector(selector: string, options?: Record<string, unknown>): Promise<void>;
   waitForFunction(fn: (arg: unknown) => boolean, arg?: unknown): Promise<void>;
@@ -49,6 +59,7 @@ export interface BrowserSnapshotResult {
 interface BrowserManagerOptions {
   launcher?: BrowserLauncher;
   profileDir?: string;
+  screenshotDir?: string;
 }
 
 const DEFAULT_REF_ATTR = 'data-gateway-ref';
@@ -59,9 +70,11 @@ export class BrowserManager {
   private currentTabId?: number;
   private nextTabId = 0;
   private contextPromise?: Promise<BrowserContextLike>;
+  private readonly screenshotDir: string;
 
   constructor(options: BrowserManagerOptions = {}) {
     this.launcher = options.launcher ?? createDefaultLauncher(options.profileDir);
+    this.screenshotDir = path.resolve(options.screenshotDir ?? '.data/browser/screenshots');
   }
 
   async ensureCurrentTab(): Promise<BrowserPageLike> {
@@ -130,6 +143,25 @@ export class BrowserManager {
     }
     const remaining = [...this.tabs.keys()].sort((a, b) => a - b);
     this.currentTabId = remaining.at(-1);
+  }
+
+  async hover(ref: string): Promise<void> {
+    const page = await this.ensureCurrentTab();
+    const locator = page.locator(selectorForRef(ref));
+    if (!locator.hover) {
+      throw new Error('hover is not supported for this locator');
+    }
+    await locator.hover();
+  }
+
+  async drag(startRef: string, endRef: string): Promise<void> {
+    const page = await this.ensureCurrentTab();
+    const source = page.locator(selectorForRef(startRef));
+    const target = page.locator(selectorForRef(endRef));
+    if (!source.dragTo) {
+      throw new Error('drag is not supported for this locator');
+    }
+    await source.dragTo(target);
   }
 
   async snapshot(): Promise<BrowserSnapshotResult> {
@@ -202,6 +234,107 @@ export class BrowserManager {
   async pressKey(key: string): Promise<void> {
     const page = await this.ensureCurrentTab();
     await page.keyboard.press(key);
+  }
+
+  async navigateBack(): Promise<void> {
+    const page = await this.ensureCurrentTab();
+    if (!page.goBack) {
+      throw new Error('navigateBack is not supported for this page');
+    }
+    await page.goBack();
+  }
+
+  async evaluate(functionCode: string, ref?: string): Promise<unknown> {
+    const page = await this.ensureCurrentTab();
+    if (ref) {
+      return page.evaluate((payload: unknown) => {
+        const { attr, targetRef, code } = payload as { attr: string; targetRef: string; code: string };
+        const selector = `[${String(attr)}="${String(targetRef)}"]`;
+        const element = document.querySelector(selector);
+        const fn = (0, eval)(`(${String(code)})`) as (node: Element | null) => unknown;
+        return fn(element);
+      }, { attr: DEFAULT_REF_ATTR, targetRef: ref, code: functionCode });
+    }
+    return page.evaluate((code) => {
+      const fn = (0, eval)(`(${String(code)})`) as () => unknown;
+      return fn();
+    }, functionCode);
+  }
+
+  async fileUpload(ref: string, paths: string[] = []): Promise<void> {
+    const page = await this.ensureCurrentTab();
+    const locator = page.locator(selectorForRef(ref));
+    if (!locator.setInputFiles) {
+      throw new Error('file upload is not supported for this locator');
+    }
+    await locator.setInputFiles(paths);
+  }
+
+  async fillForm(fields: Array<{ ref: string; type: string; value: string }>): Promise<void> {
+    const page = await this.ensureCurrentTab();
+    for (const field of fields) {
+      const locator = page.locator(selectorForRef(field.ref));
+      const fieldType = field.type.toLowerCase();
+      if (fieldType === 'checkbox') {
+        if (!locator.setChecked) {
+          throw new Error('checkbox operation is not supported for this locator');
+        }
+        await locator.setChecked(field.value === 'true');
+        continue;
+      }
+      if (fieldType === 'combobox' || fieldType === 'select') {
+        if (!locator.selectOption) {
+          throw new Error('select operation is not supported for this locator');
+        }
+        await locator.selectOption(field.value);
+        continue;
+      }
+      await locator.fill(field.value);
+    }
+  }
+
+  async handleDialog(options: { accept: boolean; promptText?: string }): Promise<void> {
+    const page = await this.ensureCurrentTab();
+    if (!page.once) {
+      throw new Error('dialog handler is not supported for this page');
+    }
+    page.once('dialog', (dialog) => {
+      const maybeDialog = dialog as { accept: (text?: string) => Promise<void>; dismiss: () => Promise<void> };
+      if (options.accept) {
+        void maybeDialog.accept(options.promptText);
+      } else {
+        void maybeDialog.dismiss();
+      }
+    });
+  }
+
+  async resize(size: { width: number; height: number }): Promise<void> {
+    const page = await this.ensureCurrentTab();
+    if (!page.setViewportSize) {
+      throw new Error('resize is not supported for this page');
+    }
+    await page.setViewportSize(size);
+  }
+
+  async takeScreenshot(input: {
+    filename?: string;
+    fullPage?: boolean;
+    type?: 'png' | 'jpeg';
+  }): Promise<string> {
+    const page = await this.ensureCurrentTab();
+    if (!page.screenshot) {
+      throw new Error('screenshot is not supported for this page');
+    }
+    fs.mkdirSync(this.screenshotDir, { recursive: true });
+    const ext = input.type === 'jpeg' ? 'jpeg' : 'png';
+    const filename = input.filename?.trim() || `page-${Date.now()}.${ext}`;
+    const filePath = path.isAbsolute(filename) ? filename : path.join(this.screenshotDir, filename);
+    const buffer = await page.screenshot({
+      type: ext,
+      fullPage: input.fullPage === true,
+    });
+    fs.writeFileSync(filePath, buffer);
+    return filePath;
   }
 
   async waitFor(input: { time?: number; text?: string; textGone?: string }): Promise<void> {
@@ -288,6 +421,9 @@ function adaptPage(page: Page): BrowserPageLike {
     goto: async (url) => {
       await page.goto(url);
     },
+    goBack: async () => {
+      await page.goBack();
+    },
     close: async () => {
       await page.close();
     },
@@ -296,6 +432,11 @@ function adaptPage(page: Page): BrowserPageLike {
     },
     locator: (selector: string): BrowserLocatorLike => adaptLocator(page.locator(selector)),
     keyboard: page.keyboard,
+    setViewportSize: async (size) => {
+      await page.setViewportSize(size);
+    },
+    screenshot: async (options) => page.screenshot(options as never),
+    once: (event, listener) => page.once(event as never, listener as never),
     waitForTimeout: async (ms) => {
       await page.waitForTimeout(ms);
     },
@@ -314,6 +455,13 @@ function adaptLocator(locator: Locator): BrowserLocatorLike {
     click: async (options) => {
       await locator.click(options);
     },
+    hover: async () => {
+      await locator.hover();
+    },
+    dragTo: async (target) => {
+      const targetLocator = target as unknown as Locator;
+      await locator.dragTo(targetLocator);
+    },
     fill: async (value) => {
       await locator.fill(value);
     },
@@ -322,6 +470,12 @@ function adaptLocator(locator: Locator): BrowserLocatorLike {
     },
     selectOption: async (value) => {
       await locator.selectOption(value);
+    },
+    setInputFiles: async (files) => {
+      await locator.setInputFiles(files);
+    },
+    setChecked: async (checked) => {
+      await locator.setChecked(checked);
     },
   };
 }

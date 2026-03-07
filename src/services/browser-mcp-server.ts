@@ -42,7 +42,26 @@ export function resolveBrowserMcpRuntime(input: {
 
 export function createBrowserMcpBackend(manager: Pick<
   BrowserManager,
-  'snapshot' | 'navigate' | 'click' | 'type' | 'selectOption' | 'pressKey' | 'waitFor' | 'listTabs' | 'selectTab' | 'newTab'
+  | 'snapshot'
+  | 'navigate'
+  | 'navigateBack'
+  | 'click'
+  | 'hover'
+  | 'drag'
+  | 'type'
+  | 'selectOption'
+  | 'pressKey'
+  | 'waitFor'
+  | 'evaluate'
+  | 'fileUpload'
+  | 'fillForm'
+  | 'handleDialog'
+  | 'resize'
+  | 'takeScreenshot'
+  | 'listTabs'
+  | 'selectTab'
+  | 'newTab'
+  | 'closeCurrentTab'
 >): {
   listTools(): Promise<Array<Record<string, unknown>>>;
   callTool(name: string, args: Record<string, unknown>): Promise<{ content: Array<{ type: 'text'; text: string }> }>;
@@ -57,6 +76,13 @@ export function createBrowserMcpBackend(manager: Pick<
           required: ['url'],
         }),
         tool('browser_click', 'Click an element by ref', requiredProps({ ref: stringProp(), element: stringPropOptional() })),
+        tool('browser_hover', 'Hover an element by ref', requiredProps({ ref: stringProp(), element: stringPropOptional() })),
+        tool('browser_drag', 'Drag from start ref to end ref', requiredProps({
+          startRef: stringProp(),
+          endRef: stringProp(),
+          startElement: stringPropOptional(),
+          endElement: stringPropOptional(),
+        }, ['startRef', 'endRef'])),
         tool('browser_type', 'Type into an element by ref', requiredProps({
           ref: stringProp(),
           text: stringProp(),
@@ -74,10 +100,52 @@ export function createBrowserMcpBackend(manager: Pick<
           type: 'object',
           properties: { time: { type: 'number' }, text: { type: 'string' }, textGone: { type: 'string' } },
         }),
+        tool('browser_evaluate', 'Evaluate JavaScript expression on page or element', requiredProps({
+          function: stringProp(),
+          ref: stringPropOptional(),
+          element: stringPropOptional(),
+        }, ['function'])),
+        tool('browser_file_upload', 'Upload file(s) to a file input', requiredProps({
+          ref: stringProp(),
+          paths: { type: 'array', items: { type: 'string' } },
+          element: stringPropOptional(),
+        }, ['ref'])),
+        tool('browser_fill_form', 'Fill multiple form fields', requiredProps({
+          fields: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                ref: stringProp(),
+                type: stringProp(),
+                value: stringProp(),
+              },
+              required: ['ref', 'type', 'value'],
+            },
+          },
+        }, ['fields'])),
+        tool('browser_handle_dialog', 'Accept or dismiss the next dialog', requiredProps({
+          accept: boolPropOptional(),
+          promptText: stringPropOptional(),
+        }, ['accept'])),
+        tool('browser_resize', 'Resize viewport', requiredProps({
+          width: { type: 'number' },
+          height: { type: 'number' },
+        }, ['width', 'height'])),
+        tool('browser_take_screenshot', 'Take screenshot of current page', {
+          type: 'object',
+          properties: {
+            filename: { type: 'string' },
+            fullPage: { type: 'boolean' },
+            type: { type: 'string', enum: ['png', 'jpeg'] },
+          },
+        }),
+        tool('browser_navigate_back', 'Navigate back in history', {}),
+        tool('browser_close', 'Close current tab', {}),
         tool('browser_tabs', 'List, create, or select tabs', {
           type: 'object',
           properties: {
-            action: { type: 'string', enum: ['list', 'new', 'select'] },
+            action: { type: 'string', enum: ['list', 'new', 'select', 'close'] },
             index: { type: 'number' },
           },
           required: ['action'],
@@ -103,6 +171,12 @@ export function createBrowserMcpBackend(manager: Pick<
         case 'browser_click':
           await manager.click(String(args.ref ?? ''));
           return textResult('OK');
+        case 'browser_hover':
+          await manager.hover(String(args.ref ?? ''));
+          return textResult('OK');
+        case 'browser_drag':
+          await manager.drag(String(args.startRef ?? ''), String(args.endRef ?? ''));
+          return textResult('OK');
         case 'browser_type':
           await manager.type(String(args.ref ?? ''), String(args.text ?? ''), {
             slowly: args.slowly === true,
@@ -121,6 +195,53 @@ export function createBrowserMcpBackend(manager: Pick<
             text: typeof args.text === 'string' ? args.text : undefined,
             textGone: typeof args.textGone === 'string' ? args.textGone : undefined,
           });
+          return textResult('OK');
+        case 'browser_evaluate': {
+          const output = await manager.evaluate(String(args.function ?? ''), typeof args.ref === 'string' ? args.ref : undefined);
+          return textResult(typeof output === 'string' ? output : JSON.stringify(output));
+        }
+        case 'browser_file_upload':
+          await manager.fileUpload(
+            String(args.ref ?? ''),
+            Array.isArray(args.paths) ? args.paths.map(String) : [],
+          );
+          return textResult('OK');
+        case 'browser_fill_form':
+          await manager.fillForm(
+            Array.isArray(args.fields)
+              ? args.fields.map((field) => ({
+                  ref: String((field as Record<string, unknown>).ref ?? ''),
+                  type: String((field as Record<string, unknown>).type ?? ''),
+                  value: String((field as Record<string, unknown>).value ?? ''),
+                }))
+              : [],
+          );
+          return textResult('OK');
+        case 'browser_handle_dialog':
+          await manager.handleDialog({
+            accept: args.accept === true,
+            promptText: typeof args.promptText === 'string' ? args.promptText : undefined,
+          });
+          return textResult('OK');
+        case 'browser_resize':
+          await manager.resize({
+            width: Number(args.width ?? 0),
+            height: Number(args.height ?? 0),
+          });
+          return textResult('OK');
+        case 'browser_take_screenshot': {
+          const filePath = await manager.takeScreenshot({
+            filename: typeof args.filename === 'string' ? args.filename : undefined,
+            fullPage: args.fullPage === true,
+            type: args.type === 'jpeg' ? 'jpeg' : 'png',
+          });
+          return textResult(filePath);
+        }
+        case 'browser_navigate_back':
+          await manager.navigateBack();
+          return textResult('OK');
+        case 'browser_close':
+          await manager.closeCurrentTab();
           return textResult('OK');
         case 'browser_tabs':
           return textResult(await handleTabsTool(manager, args));
@@ -341,7 +462,7 @@ function requiredProps(
 }
 
 async function handleTabsTool(
-  manager: Pick<BrowserManager, 'listTabs' | 'selectTab' | 'newTab'>,
+  manager: Pick<BrowserManager, 'listTabs' | 'selectTab' | 'newTab' | 'closeCurrentTab'>,
   args: Record<string, unknown>,
 ): Promise<string> {
   const action = String(args.action ?? 'list');
@@ -354,6 +475,10 @@ async function handleTabsTool(
   }
   if (action === 'select') {
     await manager.selectTab(Number(args.index));
+    return renderTabs(await manager.listTabs());
+  }
+  if (action === 'close') {
+    await manager.closeCurrentTab();
     return renderTabs(await manager.listTabs());
   }
   throw new Error(`Unsupported browser_tabs action: ${action}`);
@@ -426,7 +551,26 @@ function normalizeListenHost(hostname: string | undefined): string {
 function createSdkBrowserServer(
   manager: Pick<
     BrowserManager,
-    'snapshot' | 'navigate' | 'click' | 'type' | 'selectOption' | 'pressKey' | 'waitFor' | 'listTabs' | 'selectTab' | 'newTab'
+    | 'snapshot'
+    | 'navigate'
+    | 'navigateBack'
+    | 'click'
+    | 'hover'
+    | 'drag'
+    | 'type'
+    | 'selectOption'
+    | 'pressKey'
+    | 'waitFor'
+    | 'evaluate'
+    | 'fileUpload'
+    | 'fillForm'
+    | 'handleDialog'
+    | 'resize'
+    | 'takeScreenshot'
+    | 'listTabs'
+    | 'selectTab'
+    | 'newTab'
+    | 'closeCurrentTab'
   >,
 ): McpServer {
   const backend = createBrowserMcpBackend(manager);
@@ -454,6 +598,29 @@ function createSdkBrowserServer(
       element: z.string().optional(),
     },
   }, async ({ ref, element }) => backend.callTool('browser_click', { ref, element }));
+
+  server.registerTool('browser_hover', {
+    description: 'Hover an element by ref',
+    inputSchema: {
+      ref: z.string(),
+      element: z.string().optional(),
+    },
+  }, async ({ ref, element }) => backend.callTool('browser_hover', { ref, element }));
+
+  server.registerTool('browser_drag', {
+    description: 'Drag from start ref to end ref',
+    inputSchema: {
+      startRef: z.string(),
+      endRef: z.string(),
+      startElement: z.string().optional(),
+      endElement: z.string().optional(),
+    },
+  }, async ({ startRef, endRef, startElement, endElement }) => backend.callTool('browser_drag', {
+    startRef,
+    endRef,
+    startElement,
+    endElement,
+  }));
 
   server.registerTool('browser_type', {
     description: 'Type into an element by ref',
@@ -497,10 +664,78 @@ function createSdkBrowserServer(
     },
   }, async ({ time, text, textGone }) => backend.callTool('browser_wait_for', { time, text, textGone }));
 
+  server.registerTool('browser_evaluate', {
+    description: 'Evaluate JavaScript expression on page or element',
+    inputSchema: {
+      function: z.string(),
+      ref: z.string().optional(),
+      element: z.string().optional(),
+    },
+  }, async ({ function: functionCode, ref, element }) => backend.callTool('browser_evaluate', {
+    function: functionCode,
+    ref,
+    element,
+  }));
+
+  server.registerTool('browser_file_upload', {
+    description: 'Upload file(s) to a file input',
+    inputSchema: {
+      ref: z.string(),
+      paths: z.array(z.string()).optional(),
+      element: z.string().optional(),
+    },
+  }, async ({ ref, paths, element }) => backend.callTool('browser_file_upload', { ref, paths, element }));
+
+  server.registerTool('browser_fill_form', {
+    description: 'Fill multiple form fields',
+    inputSchema: {
+      fields: z.array(z.object({
+        ref: z.string(),
+        type: z.string(),
+        value: z.string(),
+      })),
+    },
+  }, async ({ fields }) => backend.callTool('browser_fill_form', { fields }));
+
+  server.registerTool('browser_handle_dialog', {
+    description: 'Accept or dismiss the next dialog',
+    inputSchema: {
+      accept: z.boolean(),
+      promptText: z.string().optional(),
+    },
+  }, async ({ accept, promptText }) => backend.callTool('browser_handle_dialog', { accept, promptText }));
+
+  server.registerTool('browser_resize', {
+    description: 'Resize viewport',
+    inputSchema: {
+      width: z.number(),
+      height: z.number(),
+    },
+  }, async ({ width, height }) => backend.callTool('browser_resize', { width, height }));
+
+  server.registerTool('browser_take_screenshot', {
+    description: 'Take screenshot of current page',
+    inputSchema: {
+      filename: z.string().optional(),
+      fullPage: z.boolean().optional(),
+      type: z.enum(['png', 'jpeg']).optional(),
+    },
+  }, async ({ filename, fullPage, type }) => backend.callTool('browser_take_screenshot', { filename, fullPage, type }));
+
+  server.registerTool('browser_navigate_back', {
+    description: 'Navigate back in history',
+    inputSchema: {},
+  }, async () => backend.callTool('browser_navigate_back', {}));
+
+  server.registerTool('browser_close', {
+    description: 'Close current tab',
+    inputSchema: {},
+  }, async () => backend.callTool('browser_close', {}));
+
   server.registerTool('browser_tabs', {
     description: 'List, create, or select tabs',
     inputSchema: {
-      action: z.enum(['list', 'new', 'select']),
+      action: z.enum(['list', 'new', 'select', 'close']),
       index: z.number().optional(),
     },
   }, async ({ action, index }) => backend.callTool('browser_tabs', { action, index }));
