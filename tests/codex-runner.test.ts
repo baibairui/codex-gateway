@@ -114,12 +114,9 @@ describe('buildCodexArgs', () => {
     );
 
     expect(args).toContain('-c');
-    expect(args).toContain('mcp_servers.playwright.command="node"');
-    expect(args.find((item) => item.includes('mcp_servers.playwright.args='))).toContain(
-      '--save-session',
-    );
-    expect(args.find((item) => item.includes('mcp_servers.playwright.args='))).toContain(
-      '/tmp/playwright-profile',
+    expect(args).toContain('mcp_servers.playwright.command="npx"');
+    expect(args).toContain(
+      'mcp_servers.playwright.args=["-y","@playwright/mcp@latest","--save-session","--user-data-dir","/tmp/playwright-profile","--output-dir","/tmp/playwright-profile"]',
     );
   });
 });
@@ -172,12 +169,9 @@ describe('buildCodexReviewArgs', () => {
     );
 
     expect(args).toContain('-c');
-    expect(args).toContain('mcp_servers.playwright.command="node"');
-    expect(args.find((item) => item.includes('mcp_servers.playwright.args='))).toContain(
-      '--save-session',
-    );
-    expect(args.find((item) => item.includes('mcp_servers.playwright.args='))).toContain(
-      '/tmp/playwright-profile',
+    expect(args).toContain('mcp_servers.playwright.command="npx"');
+    expect(args).toContain(
+      'mcp_servers.playwright.args=["-y","@playwright/mcp@latest","--save-session","--user-data-dir","/tmp/playwright-profile","--output-dir","/tmp/playwright-profile"]',
     );
   });
 });
