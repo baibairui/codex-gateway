@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from '../utils/logger.js';
 
@@ -456,13 +457,13 @@ export function buildCodexReviewArgs(
 }
 
 function buildPlaywrightMcpConfigArgs(playwrightMcpSessionDir: string): string[] {
+  const cliPath = resolvePlaywrightMcpCliPath();
   return [
     '-c',
-    'mcp_servers.playwright.command="npx"',
+    'mcp_servers.playwright.command="node"',
     '-c',
     `mcp_servers.playwright.args=${tomlStringArray([
-      '-y',
-      '@playwright/mcp@latest',
+      cliPath,
       '--save-session',
       '--user-data-dir',
       playwrightMcpSessionDir,
@@ -470,6 +471,10 @@ function buildPlaywrightMcpConfigArgs(playwrightMcpSessionDir: string): string[]
       playwrightMcpSessionDir,
     ])}`,
   ];
+}
+
+function resolvePlaywrightMcpCliPath(): string {
+  return path.resolve(process.cwd(), 'node_modules', '@playwright', 'mcp', 'cli.js');
 }
 
 function buildReminderMcpConfigArgs(context: NonNullable<CodexRunInput['reminderToolContext']>): string[] {
