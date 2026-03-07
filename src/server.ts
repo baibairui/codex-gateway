@@ -54,6 +54,8 @@ fs.mkdirSync(dataDir, { recursive: true });
 log.debug('数据目录已就绪', { dataDir });
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
 fs.mkdirSync(feishuImageCacheDir, { recursive: true });
+const playwrightMcpSessionDir = path.join(dataDir, 'playwright-mcp');
+fs.mkdirSync(playwrightMcpSessionDir, { recursive: true });
 
 const agentsDir = resolveAgentsDir({
   configuredDir: config.codexAgentsDir,
@@ -84,6 +86,7 @@ const codexRunner = new CodexRunner({
   timeoutMinMs: config.commandTimeoutMinMs,
   timeoutMaxMs: config.commandTimeoutMaxMs,
   timeoutPerCharMs: config.commandTimeoutPerCharMs,
+  playwrightMcpSessionDir,
   sandbox: config.codexSandbox,
 });
 log.debug('CodexRunner 已初始化');

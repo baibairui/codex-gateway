@@ -120,7 +120,7 @@ CODEX_SEARCH=false
 - `CODEX_SANDBOX`：Codex 执行沙箱模式，通常用 `full-auto`
 - `RUNNER_ENABLED`：是否允许网关实际调用 Codex
 - `CODEX_SEARCH`：默认是否开启联网搜索
-- 浏览器操作建议走 skill（如 `playwright-explore-website`），不在网关注入 Playwright MCP
+- 浏览器状态复用采用内置 Playwright MCP `stdio` 配置（`--save-session` + 固定 `--user-data-dir`）
 
 如果你不接企业微信，可以这样关掉：
 

@@ -103,6 +103,25 @@ describe('buildCodexArgs', () => {
     expect(args).toContain('mcp_servers.gateway_reminder.env.REMINDER_AGENT_ID="assistant"');
   });
 
+  it('injects playwright MCP stdio config with persistent profile args', () => {
+    const args = buildCodexArgs(
+      {
+        prompt: 'open browser',
+        workdir: '/tmp/agent-e',
+      },
+      'full-auto',
+      '/tmp/playwright-profile',
+    );
+
+    expect(args).toContain('-c');
+    expect(args).toContain('mcp_servers.playwright.command="node"');
+    expect(args.find((item) => item.includes('mcp_servers.playwright.args='))).toContain(
+      '--save-session',
+    );
+    expect(args.find((item) => item.includes('mcp_servers.playwright.args='))).toContain(
+      '/tmp/playwright-profile',
+    );
+  });
 });
 
 describe('buildCodexReviewArgs', () => {
@@ -145,4 +164,20 @@ describe('buildCodexReviewArgs', () => {
     ]);
   });
 
+  it('injects playwright MCP stdio config for review runs', () => {
+    const args = buildCodexReviewArgs(
+      { mode: 'uncommitted', workdir: '/tmp/agent-f' },
+      'full-auto',
+      '/tmp/playwright-profile',
+    );
+
+    expect(args).toContain('-c');
+    expect(args).toContain('mcp_servers.playwright.command="node"');
+    expect(args.find((item) => item.includes('mcp_servers.playwright.args='))).toContain(
+      '--save-session',
+    );
+    expect(args.find((item) => item.includes('mcp_servers.playwright.args='))).toContain(
+      '/tmp/playwright-profile',
+    );
+  });
 });
