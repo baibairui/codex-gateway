@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventDispatcher as LarkEventDispatcher, LoggerLevel as LarkSdkLoggerLevel, WSClient as LarkWSClient } from '@larksuiteoapi/node-sdk';
 
 import { createApp, dispatchFeishuMessageReceiveEvent } from './app.js';
@@ -47,6 +48,9 @@ log.info('服务启动初始化...', {
   feishuEnabled: config.feishuEnabled,
   feishuLongConnection: config.feishuLongConnection,
   feishuApiTimeoutMs: config.feishuApiTimeoutMs,
+  playwrightMcpUrl: config.playwrightMcpUrl ?? '(builtin)',
+  playwrightMcpAutoStart: config.playwrightMcpAutoStart,
+  playwrightMcpPort: config.playwrightMcpPort,
 });
 
 const dataDir = path.resolve(process.cwd(), '.data');
@@ -54,6 +58,14 @@ fs.mkdirSync(dataDir, { recursive: true });
 log.debug('数据目录已就绪', { dataDir });
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
 fs.mkdirSync(feishuImageCacheDir, { recursive: true });
+const resolvedPlaywrightMcpUrl = resolvePlaywrightMcpUrl();
+const playwrightMcpProcess = config.playwrightMcpAutoStart
+  ? startPlaywrightMcpServer({
+      dataDir,
+      url: resolvedPlaywrightMcpUrl,
+      port: config.playwrightMcpPort,
+    })
+  : undefined;
 
 const agentsDir = resolveAgentsDir({
   configuredDir: config.codexAgentsDir,
@@ -84,6 +96,7 @@ const codexRunner = new CodexRunner({
   timeoutMinMs: config.commandTimeoutMinMs,
   timeoutMaxMs: config.commandTimeoutMaxMs,
   timeoutPerCharMs: config.commandTimeoutPerCharMs,
+  playwrightMcpUrl: resolvedPlaywrightMcpUrl,
   sandbox: config.codexSandbox,
 });
 log.debug('CodexRunner 已初始化');
@@ -160,6 +173,67 @@ interface InboundEnrichResult {
 function resolveUserKey(userId: string): string {
   void userId;
   return 'local-owner';
+}
+
+function resolvePlaywrightMcpUrl(): string | undefined {
+  if (config.playwrightMcpUrl?.trim()) {
+    return config.playwrightMcpUrl.trim();
+  }
+  if (!config.playwrightMcpAutoStart) {
+    return undefined;
+  }
+  return `http://127.0.0.1:${config.playwrightMcpPort}/mcp`;
+}
+
+function startPlaywrightMcpServer(input: {
+  dataDir: string;
+  url?: string;
+  port: number;
+}): ChildProcessWithoutNullStreams | undefined {
+  if (!input.url) {
+    return undefined;
+  }
+  const expected = `http://127.0.0.1:${input.port}/mcp`;
+  if (input.url !== expected) {
+    log.warn('PLAYWRIGHT_MCP_AUTO_START=true 时仅支持本地 URL，已跳过自动启动', {
+      expected,
+      actual: input.url,
+    });
+    return undefined;
+  }
+
+  const outputDir = path.join(input.dataDir, 'playwright-mcp');
+  fs.mkdirSync(outputDir, { recursive: true });
+  const args = [
+    '-y',
+    '@playwright/mcp@latest',
+    '--host',
+    '127.0.0.1',
+    '--port',
+    String(input.port),
+    '--output-dir',
+    outputDir,
+    '--save-session',
+  ];
+  const proc = spawn('npx', args, {
+    cwd: process.cwd(),
+    env: process.env,
+  });
+  log.info('Playwright MCP 常驻服务已启动', {
+    pid: proc.pid,
+    url: input.url,
+    command: `npx ${args.join(' ')}`,
+  });
+  proc.stdout.on('data', (chunk: Buffer) => {
+    log.debug('Playwright MCP stdout', { text: chunk.toString('utf8').substring(0, 300) });
+  });
+  proc.stderr.on('data', (chunk: Buffer) => {
+    log.warn('Playwright MCP stderr', { text: chunk.toString('utf8').substring(0, 300) });
+  });
+  proc.on('exit', (code, signal) => {
+    log.warn('Playwright MCP 进程退出', { code, signal });
+  });
+  return proc;
 }
 
 function canUseDir(targetDir: string): boolean {
@@ -497,6 +571,26 @@ app.listen(config.port, () => {
   }
   memorySteward.start();
   reminderDispatcher.start();
+});
+
+process.on('SIGINT', () => {
+  if (playwrightMcpProcess && !playwrightMcpProcess.killed) {
+    try {
+      playwrightMcpProcess.kill('SIGTERM');
+    } catch {
+      // noop
+    }
+  }
+});
+
+process.on('SIGTERM', () => {
+  if (playwrightMcpProcess && !playwrightMcpProcess.killed) {
+    try {
+      playwrightMcpProcess.kill('SIGTERM');
+    } catch {
+      // noop
+    }
+  }
 });
 
 async function appDepsHandleText(input: {
