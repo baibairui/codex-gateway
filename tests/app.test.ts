@@ -12,7 +12,12 @@ afterAll(() => {
 
 async function startTestServer(options?: {
   feishuVerificationToken?: string;
-  handleText?: (input: { channel: 'wecom' | 'feishu'; userId: string; content: string }) => Promise<void>;
+  handleText?: (input: {
+    channel: 'wecom' | 'feishu';
+    userId: string;
+    content: string;
+    sourceMessageId?: string;
+  }) => Promise<void>;
 }) {
   const app = createApp({
     wecomEnabled: true,
@@ -141,6 +146,7 @@ describe('createApp feishu callback', () => {
       channel: 'feishu',
       userId: 'ou_1',
       content: '[飞书图片] image_key=img_1\nmessage_id=om_1',
+      sourceMessageId: 'om_1',
     });
   });
 });

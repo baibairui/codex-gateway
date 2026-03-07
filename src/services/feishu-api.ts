@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { Client as LarkClient, Domain as LarkDomain, LoggerLevel as LarkLoggerLevel } from '@larksuiteoapi/node-sdk';
 
 import { createLogger } from '../utils/logger.js';
@@ -23,10 +24,59 @@ interface TokenCache {
 export interface FeishuOutgoingMessage {
   msgType: string;
   content: Record<string, unknown> | string;
+  replyToMessageId?: string;
 }
 
 interface FeishuSdkClient {
   im: {
+    message: {
+      create: (payload: {
+        params: { receive_id_type: 'open_id' };
+        data: {
+          receive_id: string;
+          msg_type: string;
+          content: string;
+          uuid?: string;
+        };
+      }) => Promise<{
+        code?: number;
+        msg?: string;
+      }>;
+      reply: (payload: {
+        path: { message_id: string };
+        data: {
+          content: string;
+          msg_type: string;
+          reply_in_thread?: boolean;
+          uuid?: string;
+        };
+      }) => Promise<{
+        code?: number;
+        msg?: string;
+      }>;
+    };
+    image: {
+      create: (payload: {
+        data: {
+          image_type: 'message' | 'avatar';
+          image: Buffer | fs.ReadStream;
+        };
+      }) => Promise<{
+        image_key?: string;
+      } | null>;
+    };
+    file: {
+      create: (payload: {
+        data: {
+          file_type: 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream';
+          file_name: string;
+          duration?: number;
+          file: Buffer | fs.ReadStream;
+        };
+      }) => Promise<{
+        file_key?: string;
+      } | null>;
+    };
     messageResource: {
       get: (payload: {
         params: { type: string };
@@ -108,12 +158,13 @@ export class FeishuApi {
     });
   }
 
-  async sendText(openId: string, content: string): Promise<void> {
+  async sendText(openId: string, content: string, options?: { replyToMessageId?: string }): Promise<void> {
     const chunks = splitFeishuTextByUtf8Bytes(content);
     for (const chunk of chunks) {
       await this.sendSingleMessage(openId, {
         msgType: 'text',
         content: { text: chunk },
+        replyToMessageId: options?.replyToMessageId,
       });
     }
   }
@@ -131,6 +182,7 @@ export class FeishuApi {
         await this.sendSingleMessage(openId, {
           msgType: 'text',
           content: { text: chunk },
+          replyToMessageId: message.replyToMessageId,
         });
       }
       return;
@@ -248,38 +300,49 @@ export class FeishuApi {
   }
 
   private async sendSingleMessage(openId: string, message: FeishuOutgoingMessage): Promise<void> {
-    const content = resolveFeishuContentPayload(message.msgType, message.content);
-    const requestBody = {
-      receive_id: openId,
-      msg_type: message.msgType,
-      content,
-    };
-
     let lastError: Error | undefined;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const token = await this.getTenantAccessToken();
-        const response = await this.fetchWithTimeout(
-          'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'content-type': 'application/json; charset=utf-8',
-            },
-            body: JSON.stringify(requestBody),
+        const content = await this.resolveOutgoingContentPayload(message.msgType, message.content);
+        if (message.replyToMessageId) {
+          try {
+            const response = await this.sdkClient.im.message.reply({
+              path: { message_id: message.replyToMessageId },
+              data: {
+                content,
+                msg_type: message.msgType,
+                reply_in_thread: false,
+                uuid: randomUUID(),
+              },
+            });
+            if (response.code === 0) {
+              return;
+            }
+            lastError = new Error(`feishu send failed: reply ${response.code ?? 'unknown'} ${response.msg ?? 'unknown'}`);
+          } catch (replyError) {
+            lastError = toError(replyError);
+            log.warn('feishu reply failed, fallback to create', {
+              msgType: message.msgType,
+              replyToMessageId: message.replyToMessageId,
+              error: lastError.message,
+            });
+          }
+        }
+        const response = await this.sdkClient.im.message.create({
+          params: {
+            receive_id_type: 'open_id',
           },
-        );
-
-        const body = (await response.json()) as { code?: number; msg?: string };
-        if (response.ok && body.code === 0) {
+          data: {
+            receive_id: openId,
+            msg_type: message.msgType,
+            content,
+            uuid: randomUUID(),
+          },
+        });
+        if (response.code === 0) {
           return;
         }
-
-        if (body.code === 99991663) {
-          this.tokenCache = undefined;
-        }
-        lastError = new Error(`feishu send failed: ${response.status} ${body.code ?? 'unknown'} ${body.msg ?? 'unknown'}`);
+        lastError = new Error(`feishu send failed: create ${response.code ?? 'unknown'} ${response.msg ?? 'unknown'}`);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         if (isAbortError(lastError) && !this.retryOnTimeout) {
@@ -293,6 +356,93 @@ export class FeishuApi {
     }
 
     throw lastError ?? new Error('feishu send failed: unknown');
+  }
+
+  private async resolveOutgoingContentPayload(
+    msgType: string,
+    content: FeishuOutgoingMessage['content'],
+  ): Promise<string> {
+    if (typeof content === 'string') {
+      if (msgType === 'text') {
+        return JSON.stringify({ text: content });
+      }
+      const trimmed = content.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        return content;
+      }
+      return JSON.stringify(resolveSimpleContent(msgType, content));
+    }
+    const uploaded = await this.resolveUploadBackedContent(msgType, content);
+    return JSON.stringify(uploaded);
+  }
+
+  private async resolveUploadBackedContent(
+    msgType: string,
+    content: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (msgType === 'image') {
+      const localPath = firstString(content.local_image_path, content.local_file_path);
+      if (localPath) {
+        const imageKey = await this.uploadImageFromPath(localPath);
+        return omitLocalPaths({
+          ...content,
+          image_key: imageKey,
+        });
+      }
+      return content;
+    }
+
+    if (msgType === 'file' || msgType === 'audio' || msgType === 'media') {
+      const localPath = resolveFeishuLocalUploadPath(msgType, content);
+      if (localPath) {
+        const fileKey = await this.uploadFileFromPath(msgType, localPath, content);
+        return omitLocalPaths({
+          ...content,
+          file_key: fileKey,
+        });
+      }
+      return content;
+    }
+
+    return content;
+  }
+
+  private async uploadImageFromPath(localPath: string): Promise<string> {
+    const normalizedPath = validateLocalPath(localPath);
+    const response = await this.sdkClient.im.image.create({
+      data: {
+        image_type: 'message',
+        image: fs.createReadStream(normalizedPath),
+      },
+    });
+    const imageKey = response?.image_key;
+    if (!imageKey) {
+      throw new Error(`feishu image upload failed: missing image_key for ${normalizedPath}`);
+    }
+    return imageKey;
+  }
+
+  private async uploadFileFromPath(
+    msgType: string,
+    localPath: string,
+    content: Record<string, unknown>,
+  ): Promise<string> {
+    const normalizedPath = validateLocalPath(localPath);
+    const fileName = firstString(content.file_name) ?? path.basename(normalizedPath);
+    const duration = toOptionalNumber(content.duration);
+    const response = await this.sdkClient.im.file.create({
+      data: {
+        file_type: inferFeishuUploadFileType(msgType, normalizedPath, fileName),
+        file_name: fileName,
+        duration,
+        file: fs.createReadStream(normalizedPath),
+      },
+    });
+    const fileKey = response?.file_key;
+    if (!fileKey) {
+      throw new Error(`feishu file upload failed: missing file_key for ${normalizedPath}`);
+    }
+    return fileKey;
   }
 
   private async getTenantAccessToken(): Promise<string> {
@@ -373,20 +523,6 @@ function extractTextContent(content: FeishuOutgoingMessage['content']): string {
   return typeof text === 'string' ? text : '';
 }
 
-function resolveFeishuContentPayload(msgType: string, content: FeishuOutgoingMessage['content']): string {
-  if (typeof content === 'string') {
-    if (msgType === 'text') {
-      return JSON.stringify({ text: content });
-    }
-    const trimmed = content.trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      return content;
-    }
-    return JSON.stringify(resolveSimpleContent(msgType, content));
-  }
-  return JSON.stringify(content);
-}
-
 function resolveSimpleContent(msgType: string, value: string): Record<string, string> {
   if (msgType === 'image') {
     return { image_key: value };
@@ -404,6 +540,87 @@ function resolveSimpleContent(msgType: string, value: string): Record<string, st
     return { file_key: value };
   }
   return { text: value };
+}
+
+function resolveFeishuLocalUploadPath(msgType: string, content: Record<string, unknown>): string | undefined {
+  if (msgType === 'audio') {
+    return firstString(content.local_audio_path, content.local_file_path);
+  }
+  if (msgType === 'media') {
+    return firstString(content.local_media_path, content.local_file_path);
+  }
+  if (msgType === 'file') {
+    return firstString(content.local_file_path, content.local_media_path, content.local_audio_path);
+  }
+  return undefined;
+}
+
+function validateLocalPath(localPath: string): string {
+  const normalizedPath = localPath.trim();
+  if (!normalizedPath) {
+    throw new Error('feishu upload failed: local path is required');
+  }
+  if (!fs.existsSync(normalizedPath)) {
+    throw new Error(`feishu upload failed: local path not found: ${normalizedPath}`);
+  }
+  return normalizedPath;
+}
+
+function omitLocalPaths(content: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...content };
+  delete next.local_image_path;
+  delete next.local_file_path;
+  delete next.local_audio_path;
+  delete next.local_media_path;
+  delete next.local_sticker_path;
+  return next;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function inferFeishuUploadFileType(
+  msgType: string,
+  localPath: string,
+  fileName: string,
+): 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream' {
+  const ext = path.extname(fileName || localPath).toLowerCase();
+  if (msgType === 'audio' || ext === '.opus' || ext === '.ogg') {
+    return 'opus';
+  }
+  if (msgType === 'media' || ext === '.mp4') {
+    return 'mp4';
+  }
+  if (ext === '.pdf') {
+    return 'pdf';
+  }
+  if (ext === '.doc' || ext === '.docx') {
+    return 'doc';
+  }
+  if (ext === '.xls' || ext === '.xlsx') {
+    return 'xls';
+  }
+  if (ext === '.ppt' || ext === '.pptx') {
+    return 'ppt';
+  }
+  return 'stream';
 }
 
 function normalizeResourceTypes(type: 'image' | 'file' | ReadonlyArray<'image' | 'file'>): Array<'image' | 'file'> {
