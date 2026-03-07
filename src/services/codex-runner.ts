@@ -458,8 +458,6 @@ export function buildCodexReviewArgs(
 
 function buildPlaywrightMcpConfigArgs(playwrightMcpSessionDir: string): string[] {
   const cliPath = resolvePlaywrightMcpCliPath();
-  const profileDir = path.join(playwrightMcpSessionDir, 'profile');
-  const outputDir = path.join(playwrightMcpSessionDir, 'output');
   return [
     '-c',
     'mcp_servers.playwright.command="node"',
@@ -468,9 +466,9 @@ function buildPlaywrightMcpConfigArgs(playwrightMcpSessionDir: string): string[]
       cliPath,
       '--save-session',
       '--user-data-dir',
-      profileDir,
+      playwrightMcpSessionDir,
       '--output-dir',
-      outputDir,
+      playwrightMcpSessionDir,
     ])}`,
   ];
 }
