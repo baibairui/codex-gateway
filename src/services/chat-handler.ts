@@ -243,10 +243,11 @@ function buildOutboundMessageProtocolPrompt(userPrompt: string): string {
   return [
     '你必须遵循以下回发协议：',
     '1. 默认输出普通文本，不要输出 JSON。',
-    '2. 只有当用户明确要求发送非文本消息（如图片/文件/卡片/分享名片等）时，才输出单个 JSON 对象。',
+    '2. 只有当用户明确要求“请发送/回发某种非文本消息”时，才输出单个 JSON 对象。',
     '3. 输出 JSON 时禁止使用 markdown 代码块，禁止附加解释文字，只输出 JSON 本体。',
     '4. JSON 格式必须为：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
     '5. 飞书常用 msg_type：text、post、image、file、audio、media、sticker、interactive、share_chat、share_user。',
+    '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
     '',
     '用户输入如下：',
     userPrompt,
@@ -1101,8 +1102,13 @@ ${clipMessage(userVisibleOutput, 500)}
           if (!userVisibleOutput) {
             return;
           }
-          lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch((err) => {
+          lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch(async (err) => {
             log.error('handleText onMessage 推送失败', err);
+            try {
+              await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+            } catch (fallbackErr) {
+              log.error('handleText onMessage fallback 推送失败', fallbackErr);
+            }
           });
         },
       });

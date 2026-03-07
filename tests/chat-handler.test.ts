@@ -206,6 +206,44 @@ describe('createChatHandler', () => {
     expect(run).toHaveBeenCalled();
   });
 
+  it('sends fallback error text when stream push fails', async () => {
+    const sendText = vi
+      .fn<(
+        channel: 'wecom' | 'feishu',
+        userId: string,
+        content: string
+      ) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('send failed'))
+      .mockResolvedValue(undefined);
+    const run = vi.fn(async (input: { onMessage?: (text: string) => void }) => {
+      input.onMessage?.('第一条回复');
+      return { threadId: 't1', rawOutput: '' };
+    });
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '第一条回复');
+    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+  });
+
   it('creates and switches agent by command', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
