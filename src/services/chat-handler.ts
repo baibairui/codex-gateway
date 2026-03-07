@@ -357,6 +357,12 @@ interface CommandQuickAction {
   type?: 'default' | 'primary' | 'danger';
 }
 
+interface FeishuCardButton {
+  label: string;
+  cmd: string;
+  type?: 'default' | 'primary' | 'danger';
+}
+
 function resolveSearchState(text: string): 'on' | 'off' | 'unknown' {
   const normalized = text.trim();
   if (normalized.includes('联网搜索：on') || normalized.includes('已开启联网搜索')) {
@@ -393,11 +399,8 @@ function resolveCommandQuickActions(commandName: string, text: string): CommandQ
     const prev = Math.max(1, page - 1);
     const next = Math.min(total, page + 1);
     return [
-      { label: `上一页 (${prev})`, cmd: `/help ${prev}`, type: page > 1 ? 'primary' : 'default' },
-      { label: `下一页 (${next})`, cmd: `/help ${next}`, type: page < total ? 'primary' : 'default' },
-      { label: 'Agent 列表', cmd: '/agents' },
-      { label: 'Skill 列表', cmd: '/skills' },
-      { label: '模型状态', cmd: '/model' },
+      { label: '⬅️ 上一页', cmd: `/help ${prev}`, type: page > 1 ? 'primary' : 'default' },
+      { label: '下一页 ➡️', cmd: `/help ${next}`, type: page < total ? 'primary' : 'default' },
     ];
   }
   if (normalized === '/agents' || normalized === '/agent') {
@@ -570,15 +573,102 @@ function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
   const header = lines[0] ?? '可用命令';
   const pager = lines.find((line) => line.startsWith('翻页：'));
-  const body = lines.filter((line) => line !== header && line !== pager).join('\n');
-  const elements: Array<Record<string, unknown>> = [buildFeishuTextBlock(`**帮助目录**\n${header}`)];
-  if (body) {
-    elements.push(buildFeishuTextBlock(body));
-  }
+  const commandLines = lines.filter((line) => line.startsWith('/'));
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTextBlock(`**帮助目录**\n${header}`),
+    buildFeishuTextBlock('💡 点击下方命令选项可直接执行；带参数命令已填入可运行示例。'),
+  ];
+  const buttons = toHelpCommandButtons(commandLines);
+  elements.push(...buildCommandButtonRows(buttons));
   if (pager) {
     elements.push(buildFeishuTextBlock(`💡 ${pager}`));
   }
   return elements;
+}
+
+function normalizeHelpCommand(raw: string): string {
+  return raw
+    .replace(/\s+\[[^\]]+]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveHelpButtonMeta(commandPart: string): FeishuCardButton {
+  const normalized = commandPart.trim();
+  const normalizedKey = normalized.replace(/\s+/g, ' ');
+  const mapping: Record<string, FeishuCardButton> = {
+    '/help': { label: '查看帮助', cmd: '/help' },
+    '/new': { label: '新建会话', cmd: '/new' },
+    '/clear': { label: '清空会话', cmd: '/clear' },
+    '/session': { label: '当前会话', cmd: '/session' },
+    '/sessions': { label: '会话列表', cmd: '/sessions' },
+    '/rename [编号|threadId] [名称]': { label: '重命名会话', cmd: '/rename 1 新名称' },
+    '/switch [编号|threadId]': { label: '切换会话', cmd: '/switch 1' },
+    '/agents': { label: 'Agent 列表', cmd: '/agents' },
+    '/agent': { label: '当前 Agent', cmd: '/agent' },
+    '/agent create [名称]': { label: '创建 Agent', cmd: '/agent create 前端工作区' },
+    '/agent use [编号|agentId]': { label: '切换 Agent', cmd: '/agent use 1' },
+    '/skill-agent': { label: '技能助手', cmd: '/skill-agent' },
+    '/model': { label: '当前模型', cmd: '/model' },
+    '/model [模型名]': { label: '切换模型', cmd: '/model gpt-5-codex' },
+    '/model reset': { label: '重置模型', cmd: '/model reset' },
+    '/models': { label: '模型列表', cmd: '/models' },
+    '/skills': { label: '生效 Skills', cmd: '/skills' },
+    '/skills global': { label: '全局 Skills', cmd: '/skills global' },
+    '/skills agent': { label: 'Agent Skills', cmd: '/skills agent' },
+    '/skills disable global [skillName]': { label: '禁用全局 Skill', cmd: '/skills disable global using-superpowers' },
+    '/skills add global [skillName]': { label: '启用全局 Skill', cmd: '/skills add global using-superpowers' },
+    '/skills disable agent [skillName]': { label: '禁用 Agent Skill', cmd: '/skills disable agent reminder-tool' },
+    '/search': { label: '搜索状态', cmd: '/search' },
+    '/search on|off': { label: '搜索开关', cmd: '/search on' },
+    '/review': { label: '审查改动', cmd: '/review' },
+    '/review base [分支]': { label: '按分支审查', cmd: '/review base main' },
+    '/review commit [SHA]': { label: '按提交审查', cmd: '/review commit HEAD' },
+    '/login': { label: '登录授权', cmd: '/login' },
+  };
+  const mapped = mapping[normalizedKey];
+  if (mapped) {
+    return mapped;
+  }
+  const normalizedCmd = normalizeHelpCommand(normalized);
+  return {
+    label: normalizedCmd || normalized,
+    cmd: normalizedCmd || normalized,
+  };
+}
+
+function toHelpCommandButtons(lines: string[]): FeishuCardButton[] {
+  return lines
+    .map((line) => {
+      const commandPart = line.split(' - ')[0]?.trim() ?? '';
+      if (!commandPart.startsWith('/')) {
+        return undefined;
+      }
+      return resolveHelpButtonMeta(commandPart);
+    })
+    .filter((item): item is FeishuCardButton => Boolean(item));
+}
+
+function buildCommandButtonRows(buttons: FeishuCardButton[]): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < buttons.length; i += 2) {
+    const chunk = buttons.slice(i, i + 2);
+    rows.push({
+      tag: 'action',
+      actions: chunk.map((item) => ({
+        tag: 'button',
+        type: item.type ?? 'default',
+        text: {
+          tag: 'plain_text',
+          content: item.label,
+        },
+        value: {
+          gateway_cmd: item.cmd,
+        },
+      })),
+    });
+  }
+  return rows;
 }
 
 function buildGenericCardElements(text: string): Array<Record<string, unknown>> {
