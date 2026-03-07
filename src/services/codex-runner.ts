@@ -413,7 +413,7 @@ export function buildCodexArgs(
     args.unshift(...buildReminderMcpConfigArgs(input.reminderToolContext));
   }
   if (playwrightMcpUrl?.trim()) {
-    args.unshift('-c', `mcp_servers.playwright.url=${tomlString(playwrightMcpUrl.trim())}`);
+    args.unshift(...buildPlaywrightMcpConfigArgs(playwrightMcpUrl));
   }
   args.push(input.prompt);
   return args;
@@ -447,12 +447,19 @@ export function buildCodexReviewArgs(
     args.unshift('--search');
   }
   if (playwrightMcpUrl?.trim()) {
-    args.unshift('-c', `mcp_servers.playwright.url=${tomlString(playwrightMcpUrl.trim())}`);
+    args.unshift(...buildPlaywrightMcpConfigArgs(playwrightMcpUrl));
   }
   if (input.prompt) {
     args.push(input.prompt);
   }
   return args;
+}
+
+function buildPlaywrightMcpConfigArgs(playwrightMcpUrl: string): string[] {
+  return [
+    '-c',
+    `mcp_servers.playwright={ url = ${tomlString(playwrightMcpUrl.trim())} }`,
+  ];
 }
 
 function buildReminderMcpConfigArgs(context: NonNullable<CodexRunInput['reminderToolContext']>): string[] {
