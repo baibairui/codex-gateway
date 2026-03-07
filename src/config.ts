@@ -86,7 +86,7 @@ export const config = {
   browserOpenEnabled: process.env.BROWSER_OPEN_ENABLED === 'true',
   browserOpenCommand: optionalStringUndefined('BROWSER_OPEN_COMMAND'),
   playwrightMcpUrl: optionalStringUndefined('PLAYWRIGHT_MCP_URL'),
-  playwrightMcpAutoStart: process.env.PLAYWRIGHT_MCP_AUTO_START === 'true',
+  playwrightMcpAutoStart: true,
   playwrightMcpPort: optionalNumber('PLAYWRIGHT_MCP_PORT', 8931),
   runnerEnabled: process.env.RUNNER_ENABLED !== 'false',
   memoryStewardEnabled: process.env.MEMORY_STEWARD_ENABLED !== 'false',

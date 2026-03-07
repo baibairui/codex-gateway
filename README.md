@@ -121,7 +121,7 @@ CODEX_SEARCH=false
 - `RUNNER_ENABLED`：是否允许网关实际调用 Codex
 - `CODEX_SEARCH`：默认是否开启联网搜索
 - `PLAYWRIGHT_MCP_URL`：可选。指定后，Codex 会连接这个常驻 Playwright MCP，跨消息复用浏览器会话
-- `PLAYWRIGHT_MCP_AUTO_START`：可选。设为 `true` 后网关会自动启动本地 Playwright MCP
+- `PLAYWRIGHT_MCP_AUTO_START`：默认始终开启（内置常驻浏览器会话能力）
 - `PLAYWRIGHT_MCP_PORT`：可选。本地 Playwright MCP 端口，默认 `8931`
 
 如果你不接企业微信，可以这样关掉：
