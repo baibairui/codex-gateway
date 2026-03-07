@@ -15,8 +15,7 @@ export function listSkillsForAgentWorkspace(workspaceDir: string): SkillCatalogE
   for (const root of GLOBAL_SKILL_ROOTS) {
     result.push(...listSkillsInRoot(root, 'global'));
   }
-  result.push(...listSkillsInRoot(path.join(workspaceDir, '.agent', 'skills'), 'agent-local'));
-  result.push(...listSkillsInRoot(path.join(workspaceDir, 'skills'), 'agent-local'));
+  result.push(...listSkillsInRoot(path.join(workspaceDir, '.codex', 'skills'), 'agent-local'));
   return dedupeSkillEntries(result);
 }
 

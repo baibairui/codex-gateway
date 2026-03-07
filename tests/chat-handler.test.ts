@@ -231,7 +231,7 @@ describe('createChatHandler', () => {
       sendText,
       listSkills: () => ([
         { name: 'using-superpowers', source: 'global', skillDir: '/root/.agents/skills/using-superpowers' },
-        { name: 'reminder-tool', source: 'agent-local', skillDir: '/tmp/agent/.agent/skills/reminder-tool' },
+        { name: 'reminder-tool', source: 'agent-local', skillDir: '/tmp/agent/.codex/skills/reminder-tool' },
       ]),
     });
 

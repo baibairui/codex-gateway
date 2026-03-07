@@ -28,10 +28,8 @@ describe('AgentWorkspaceManager', () => {
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'open-loops.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'daily', 'README.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'browser-playbook.md'))).toBe(true);
-    expect(fs.existsSync(path.join(result.workspaceDir, '.agent', 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
-    expect(fs.existsSync(path.join(result.workspaceDir, '.agent', 'skills', 'reminder-tool', 'agents', 'openai.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(result.workspaceDir, 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
-    expect(fs.existsSync(path.join(result.workspaceDir, 'skills', 'reminder-tool', 'agents', 'openai.yaml'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'agents', 'openai.yaml'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'shared-context.md'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'house-rules.md'))).toBe(true);
   });
@@ -82,12 +80,12 @@ describe('AgentWorkspaceManager', () => {
 
     const agentsMd = fs.readFileSync(path.join(result.workspaceDir, 'AGENTS.md'), 'utf8');
     const checklist = fs.readFileSync(path.join(result.workspaceDir, 'skill-install-checklist.md'), 'utf8');
-    const reminderSkill = fs.readFileSync(path.join(result.workspaceDir, '.agent', 'skills', 'reminder-tool', 'SKILL.md'), 'utf8');
+    const reminderSkill = fs.readFileSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'SKILL.md'), 'utf8');
 
     expect(result.agentId).toBe('skill-onboarding');
     expect(agentsMd).toContain('技能扩展职责');
     expect(agentsMd).toContain('定时提醒职责');
-    expect(agentsMd).toContain('./.agent/skills/reminder-tool/SKILL.md');
+    expect(agentsMd).toContain('./.codex/skills/reminder-tool/SKILL.md');
     expect(checklist).toContain('Skill Install Checklist');
     expect(reminderSkill).toContain('create_reminder');
   });

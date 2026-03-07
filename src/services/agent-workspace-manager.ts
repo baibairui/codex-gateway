@@ -289,7 +289,7 @@ function renderWorkspaceAgentsMd(
     '',
     '定时提醒职责：',
     '- 当用户提出“稍后提醒我”这类需求时，不要要求用户输入 `/remind` 命令。',
-    '- 优先使用 `./.agent/skills/reminder-tool/SKILL.md`，并调用 `create_reminder` 工具创建提醒。',
+    '- 优先使用 `./.codex/skills/reminder-tool/SKILL.md`，并调用 `create_reminder` 工具创建提醒。',
     '- 不要输出 reminder-action 文本块，也不要要求用户输入 `/remind`。',
     '',
     '开始任何任务前，先阅读这些记忆文件：',
