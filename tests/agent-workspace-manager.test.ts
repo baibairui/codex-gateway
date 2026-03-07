@@ -34,6 +34,9 @@ describe('AgentWorkspaceManager', () => {
     expect(identity).toContain('- Agent name: Frontend Pair');
     expect(identity).toContain('- Agent ID: frontend-pair');
     expect(identity).toContain('- Agent role: Frontend Pair');
+    expect(identity).toContain('- Mission:');
+    expect(identity).toContain('- Decision principles:');
+    expect(identity).toContain('- Success criteria:');
     expect(identity).toContain('- Language style:');
     expect(fs.existsSync(path.join(result.workspaceDir, 'browser-playbook.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
