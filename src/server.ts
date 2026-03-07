@@ -207,7 +207,6 @@ const handleChatText = createChatHandler({
   defaultSearch: config.codexSearch,
   reminderDbPath,
   sendText,
-  sendStreamingText,
 });
 
 const reminderStore = new ReminderStore(reminderDbPath);
