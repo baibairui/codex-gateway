@@ -90,6 +90,64 @@ function createSessionStore() {
 }
 
 describe('createChatHandler', () => {
+  it('runs agent again when reminder trigger arrives', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.createAgent('wecom:u1', {
+      agentId: 'test',
+      name: '测试Agent',
+      workspaceDir: '/tmp/test',
+    });
+    const run = vi.fn(async (input: {
+      prompt: string;
+      onMessage?: (text: string) => void;
+      workdir?: string;
+    }) => {
+      input.onMessage?.('提醒时间到了，我来继续跟进。');
+      return { threadId: 'thread_reminder', rawOutput: '' };
+    });
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({
+      channel: 'wecom',
+      userId: 'u1',
+      content: '喝水',
+      reminderTrigger: {
+        reminderId: 'r1',
+        message: '喝水',
+        sourceAgentId: 'test',
+      },
+    });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      workdir: '/tmp/test',
+      search: false,
+      reminderToolContext: expect.objectContaining({
+        channel: 'wecom',
+        userId: 'u1',
+        agentId: 'test',
+      }),
+    }));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '提醒时间到了，我来继续跟进。');
+    expect(sessionStore.getSession('wecom:u1', 'test')).toBe('thread_reminder');
+  });
+
   it('sends a visible error message when codex run fails', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();

@@ -8,13 +8,15 @@ import { ReminderDispatcher } from '../src/services/reminder-dispatcher.js';
 import { ReminderStore } from '../src/services/reminder-store.js';
 
 describe('ReminderDispatcher', () => {
-  it('sends due reminders and marks them as sent', async () => {
+  it('triggers agent callback for due reminders and marks them as sent', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reminder-dispatcher-'));
     const store = new ReminderStore(path.join(dir, 'reminders.db'));
     const sendText = vi.fn(async () => undefined);
+    const onTriggerAgent = vi.fn(async () => undefined);
     const dispatcher = new ReminderDispatcher({
       store,
       sendText,
+      onTriggerAgent,
       pollIntervalMs: 1000,
     });
 
@@ -28,19 +30,27 @@ describe('ReminderDispatcher', () => {
 
     await dispatcher.flushDueReminders();
 
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '⏰ 定时提醒：喝水');
+    expect(onTriggerAgent).toHaveBeenCalledWith(expect.objectContaining({
+      id: reminder.id,
+      channel: 'wecom',
+      userId: 'u1',
+      message: '喝水',
+    }));
+    expect(sendText).not.toHaveBeenCalled();
     expect(store.listPending().some((item) => item.id === reminder.id)).toBe(false);
   });
 
-  it('keeps reminder pending when sending fails', async () => {
+  it('keeps reminder pending when agent trigger fails', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reminder-dispatcher-'));
     const store = new ReminderStore(path.join(dir, 'reminders.db'));
-    const sendText = vi.fn(async () => {
-      throw new Error('send failed');
+    const sendText = vi.fn(async () => undefined);
+    const onTriggerAgent = vi.fn(async () => {
+      throw new Error('trigger failed');
     });
     const dispatcher = new ReminderDispatcher({
       store,
       sendText,
+      onTriggerAgent,
       pollIntervalMs: 1000,
     });
 
@@ -54,5 +64,27 @@ describe('ReminderDispatcher', () => {
     await dispatcher.flushDueReminders();
 
     expect(store.listPending().map((item) => item.id)).toContain(reminder.id);
+  });
+
+  it('falls back to direct send when agent trigger callback is not configured', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reminder-dispatcher-'));
+    const store = new ReminderStore(path.join(dir, 'reminders.db'));
+    const sendText = vi.fn(async () => undefined);
+    const dispatcher = new ReminderDispatcher({
+      store,
+      sendText,
+      pollIntervalMs: 1000,
+    });
+
+    store.createReminder({
+      channel: 'wecom',
+      userId: 'u1',
+      message: '站起来活动',
+      dueAt: Date.now() - 1,
+    });
+
+    await dispatcher.flushDueReminders();
+
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '⏰ 定时提醒：站起来活动');
   });
 });

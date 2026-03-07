@@ -1,17 +1,19 @@
 import { createLogger } from '../utils/logger.js';
-import { ReminderStore, type ReminderChannel } from './reminder-store.js';
+import { ReminderStore, type ReminderChannel, type ReminderRecord } from './reminder-store.js';
 
 const log = createLogger('ReminderDispatcher');
 
 interface ReminderDispatcherOptions {
   store: ReminderStore;
   sendText: (channel: ReminderChannel, userId: string, content: string) => Promise<void>;
+  onTriggerAgent?: (reminder: ReminderRecord) => Promise<void>;
   pollIntervalMs?: number;
 }
 
 export class ReminderDispatcher {
   private readonly store: ReminderStore;
   private readonly sendText: (channel: ReminderChannel, userId: string, content: string) => Promise<void>;
+  private readonly onTriggerAgent?: (reminder: ReminderRecord) => Promise<void>;
   private readonly pollIntervalMs: number;
   private timer: NodeJS.Timeout | undefined;
   private running = false;
@@ -19,6 +21,7 @@ export class ReminderDispatcher {
   constructor(options: ReminderDispatcherOptions) {
     this.store = options.store;
     this.sendText = options.sendText;
+    this.onTriggerAgent = options.onTriggerAgent;
     this.pollIntervalMs = Math.max(250, Math.floor(options.pollIntervalMs ?? 1000));
   }
 
@@ -50,7 +53,11 @@ export class ReminderDispatcher {
       const dueReminders = this.store.listDuePending(now);
       for (const reminder of dueReminders) {
         try {
-          await this.sendText(reminder.channel, reminder.userId, `⏰ 定时提醒：${reminder.message}`);
+          if (this.onTriggerAgent) {
+            await this.onTriggerAgent(reminder);
+          } else {
+            await this.sendText(reminder.channel, reminder.userId, `⏰ 定时提醒：${reminder.message}`);
+          }
           this.store.markSent(reminder.id, now);
         } catch (error) {
           log.error('ReminderDispatcher 发送提醒失败', {

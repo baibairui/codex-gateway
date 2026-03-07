@@ -179,6 +179,21 @@ const reminderStore = new ReminderStore(reminderDbPath);
 const reminderDispatcher = new ReminderDispatcher({
   store: reminderStore,
   sendText,
+  onTriggerAgent: async (reminder) => {
+    const sessionUserKey = `${reminder.channel}:${reminder.userId}`;
+    await runInUserQueue(sessionUserKey, async () => {
+      await handleChatText({
+        channel: reminder.channel,
+        userId: reminder.userId,
+        content: reminder.message,
+        reminderTrigger: {
+          reminderId: reminder.id,
+          message: reminder.message,
+          sourceAgentId: reminder.sourceAgentId,
+        },
+      });
+    });
+  },
 });
 
 const memorySteward = new MemorySteward({

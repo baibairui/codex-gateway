@@ -87,6 +87,12 @@ interface ChatHandlerDeps {
   sendText: (channel: Channel, userId: string, content: string) => Promise<void>;
 }
 
+interface ReminderTriggerInput {
+  reminderId: string;
+  message: string;
+  sourceAgentId?: string;
+}
+
 function clipMessage(message: string, maxLength = 1500): string {
   if (message.length <= maxLength) {
     return message;
@@ -173,7 +179,84 @@ export function createChatHandler(deps: ChatHandlerDeps) {
   const userSearchOverrides = new Map<string, boolean>();
   const onboardingKickoffInFlight = new Set<string>();
 
-  return async function handleText(input: { channel: Channel; userId: string; content: string }): Promise<void> {
+  async function runReminderTrigger(input: {
+    channel: Channel;
+    userId: string;
+    reminder: ReminderTriggerInput;
+  }): Promise<void> {
+    const { channel, userId, reminder } = input;
+    const sessionUserKey = `${channel}:${userId}`;
+    const currentModel = userModelOverrides.get(sessionUserKey) ?? deps.defaultModel;
+    const listedAgents = deps.sessionStore.listAgents(sessionUserKey, { includeHidden: true });
+    const targetAgent = reminder.sourceAgentId
+      ? listedAgents.find((item) => item.agentId === reminder.sourceAgentId)
+      : undefined;
+    const runtimeAgent = targetAgent ?? deps.sessionStore.getCurrentAgent(sessionUserKey);
+
+    if (!deps.runnerEnabled) {
+      await deps.sendText(channel, userId, `⏰ 定时提醒：${reminder.message}`);
+      return;
+    }
+
+    const runtimeThreadId = deps.sessionStore.getSession(sessionUserKey, runtimeAgent.agentId);
+    const triggerPrompt = [
+      `系统定时提醒已到期（id: ${reminder.reminderId}）。`,
+      `提醒内容：${reminder.message}`,
+      '请基于当前会话上下文给出提醒回复，并可附 1-2 条下一步建议。',
+    ].join('\n');
+
+    let lastStreamSend: Promise<void> = Promise.resolve();
+    try {
+      const result = await deps.codexRunner.run({
+        prompt: triggerPrompt,
+        threadId: runtimeThreadId,
+        model: currentModel,
+        search: false,
+        workdir: runtimeAgent.workspaceDir,
+        reminderToolContext: {
+          channel,
+          userId,
+          agentId: runtimeAgent.agentId,
+          dbPath: deps.reminderDbPath,
+        },
+        onMessage: (text) => {
+          const output = text.trim();
+          if (!output) {
+            return;
+          }
+          lastStreamSend = deps.sendText(channel, userId, output).catch((err) => {
+            log.error('runReminderTrigger onMessage 推送失败', err);
+          });
+        },
+      });
+      await lastStreamSend;
+      deps.sessionStore.setSession(sessionUserKey, runtimeAgent.agentId, result.threadId, `⏰ ${reminder.message}`);
+    } catch (error) {
+      log.error('runReminderTrigger 执行失败，回退固定提醒消息', {
+        channel,
+        userId,
+        reminderId: reminder.reminderId,
+        agentId: runtimeAgent.agentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await deps.sendText(channel, userId, `⏰ 定时提醒：${reminder.message}`);
+    }
+  }
+
+  return async function handleText(input: {
+    channel: Channel;
+    userId: string;
+    content: string;
+    reminderTrigger?: ReminderTriggerInput;
+  }): Promise<void> {
+    if (input.reminderTrigger) {
+      await runReminderTrigger({
+        channel: input.channel,
+        userId: input.userId,
+        reminder: input.reminderTrigger,
+      });
+      return;
+    }
     const { channel, userId, content } = input;
     const sessionUserKey = `${channel}:${userId}`;
     const prompt = content.trim();

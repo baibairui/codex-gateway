@@ -4,10 +4,8 @@ import path from 'node:path';
 export const REMINDER_TOOL_SKILL_NAME = 'reminder-tool';
 
 export function installReminderToolSkill(workspaceDir: string): void {
-  const skillDir = path.join(workspaceDir, 'skills', REMINDER_TOOL_SKILL_NAME);
-  fs.mkdirSync(path.join(skillDir, 'agents'), { recursive: true });
-  writeIfChanged(path.join(skillDir, 'SKILL.md'), renderReminderToolSkill());
-  writeIfChanged(path.join(skillDir, 'agents', 'openai.yaml'), renderReminderToolOpenAiYaml());
+  installToSkillRoot(path.join(workspaceDir, 'skills'));
+  installToSkillRoot(path.join(workspaceDir, '.agent', 'skills'));
   ensureAgentsReminderRule(workspaceDir);
 }
 
@@ -70,15 +68,26 @@ function ensureAgentsReminderRule(workspaceDir: string): void {
     return;
   }
   const content = fs.readFileSync(agentsPath, 'utf8');
-  if (content.includes('./skills/reminder-tool/SKILL.md') || content.includes('$reminder-tool')) {
+  if (
+    content.includes('./.agent/skills/reminder-tool/SKILL.md')
+    || content.includes('./skills/reminder-tool/SKILL.md')
+    || content.includes('$reminder-tool')
+  ) {
     return;
   }
   const reminderSection = [
     '',
     '提醒规则：',
-    '- 用户提出“稍后提醒我”或定时任务需求时，优先使用 `./skills/reminder-tool/SKILL.md`。',
+    '- 用户提出“稍后提醒我”或定时任务需求时，优先使用 `./.agent/skills/reminder-tool/SKILL.md`。',
     '- 必须调用 `create_reminder` 工具创建提醒，不要要求用户输入 `/remind`。',
     '',
   ].join('\n');
   fs.writeFileSync(agentsPath, `${content.trimEnd()}\n${reminderSection}`, 'utf8');
+}
+
+function installToSkillRoot(skillRootDir: string): void {
+  const skillDir = path.join(skillRootDir, REMINDER_TOOL_SKILL_NAME);
+  fs.mkdirSync(path.join(skillDir, 'agents'), { recursive: true });
+  writeIfChanged(path.join(skillDir, 'SKILL.md'), renderReminderToolSkill());
+  writeIfChanged(path.join(skillDir, 'agents', 'openai.yaml'), renderReminderToolOpenAiYaml());
 }
