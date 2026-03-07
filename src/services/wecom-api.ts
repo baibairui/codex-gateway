@@ -15,6 +15,11 @@ interface TokenCache {
   expiresAt: number;
 }
 
+export interface WeComOutgoingMessage {
+  msgType: string;
+  content: Record<string, unknown> | string;
+}
+
 const DEFAULT_TEXT_CHUNK_BYTES = 1600;
 
 function sleep(ms: number): Promise<void> {
@@ -95,6 +100,27 @@ export class WeComApi {
     }
   }
 
+  async sendMessage(toUser: string, message: WeComOutgoingMessage): Promise<void> {
+    const msgType = message.msgType.trim().toLowerCase();
+    if (!msgType) {
+      throw new Error('wecom send failed: msgType is required');
+    }
+    if (msgType === 'text') {
+      const text = extractWeComText(message.content);
+      await this.sendText(toUser, text);
+      return;
+    }
+
+    const requestBody = {
+      touser: toUser,
+      msgtype: msgType,
+      agentid: this.agentId,
+      ...resolveWeComPayload(msgType, message.content),
+      safe: 0,
+    };
+    await this.sendRequest(toUser, requestBody);
+  }
+
   private async sendSingleText(toUser: string, content: string): Promise<void> {
     const requestBody = {
       touser: toUser,
@@ -105,7 +131,10 @@ export class WeComApi {
       },
       safe: 0,
     };
+    await this.sendRequest(toUser, requestBody);
+  }
 
+  private async sendRequest(toUser: string, requestBody: Record<string, unknown>): Promise<void> {
     let lastError: Error | undefined;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -252,4 +281,46 @@ export class WeComApi {
 
 function isAbortError(error: Error): boolean {
   return error.name === 'AbortError';
+}
+
+function extractWeComText(content: WeComOutgoingMessage['content']): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  const text = content.text as { content?: unknown } | undefined;
+  if (text && typeof text.content === 'string') {
+    return text.content;
+  }
+  const rawText = content.text;
+  if (typeof rawText === 'string') {
+    return rawText;
+  }
+  return '';
+}
+
+function resolveWeComPayload(
+  msgType: string,
+  content: WeComOutgoingMessage['content'],
+): Record<string, unknown> {
+  if (typeof content === 'string') {
+    if (msgType === 'image' || msgType === 'voice' || msgType === 'video' || msgType === 'file') {
+      return { [msgType]: { media_id: content } };
+    }
+    if (msgType === 'markdown') {
+      return { markdown: { content } };
+    }
+    return { text: { content } };
+  }
+  if (msgType === 'image' || msgType === 'voice' || msgType === 'video' || msgType === 'file') {
+    const mediaId = content.media_id;
+    if (typeof mediaId === 'string') {
+      return { [msgType]: { media_id: mediaId } };
+    }
+  }
+  if (msgType === 'markdown') {
+    if (typeof content.content === 'string') {
+      return { markdown: { content: content.content } };
+    }
+  }
+  return { [msgType]: content };
 }

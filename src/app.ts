@@ -4,6 +4,7 @@ import { WeComCrypto } from './utils/wecom-crypto.js';
 import { parseWeComXml } from './utils/wecom-xml.js';
 import { createLogger } from './utils/logger.js';
 import { allowList } from './utils/allow-list.js';
+import { normalizeFeishuIncomingMessage, normalizeWeComIncomingMessage } from './utils/message-normalizer.js';
 
 const log = createLogger('App');
 
@@ -207,18 +208,19 @@ export function createApp(deps: AppDeps) {
           return;
         }
 
-        if (msg.msgType === 'text' && msg.content.trim()) {
-          log.info('POST /wecom/callback 开始异步处理文本消息', {
+        const normalizedContent = normalizeWeComIncomingMessage(msg);
+        if (normalizedContent) {
+          log.info('POST /wecom/callback 开始异步处理消息', {
             userId: msg.fromUserName,
-            contentLength: msg.content.length,
+            msgType: msg.msgType,
+            contentLength: normalizedContent.length,
           });
-          deps.handleText({ channel: 'wecom', userId: msg.fromUserName, content: msg.content }).catch((err) => {
+          deps.handleText({ channel: 'wecom', userId: msg.fromUserName, content: normalizedContent }).catch((err) => {
             log.error('POST /wecom/callback handleText 异步处理失败', err);
           });
         } else {
-          log.debug('POST /wecom/callback 跳过非文本消息或空消息', {
+          log.debug('POST /wecom/callback 跳过无法解析的消息', {
             msgType: msg.msgType,
-            hasContent: !!msg.content.trim(),
           });
         }
       } catch (error) {
@@ -265,18 +267,12 @@ export function createApp(deps: AppDeps) {
       const messageType = typeof message.message_type === 'string' ? message.message_type : '';
       const rawContent = typeof message.content === 'string' ? message.content : '';
 
-      if (!openId || !messageId || messageType !== 'text' || !rawContent) {
+      if (!openId || !messageId || !messageType || !rawContent) {
         res.json({ code: 0, msg: 'ignored' });
         return;
       }
 
-      let content = '';
-      try {
-        const contentObj = JSON.parse(rawContent) as { text?: unknown };
-        content = typeof contentObj.text === 'string' ? contentObj.text.trim() : '';
-      } catch {
-        content = '';
-      }
+      const content = normalizeFeishuIncomingMessage(messageType, rawContent);
       if (!content) {
         res.json({ code: 0, msg: 'ignored' });
         return;

@@ -14,6 +14,11 @@ interface TokenCache {
   expiresAt: number;
 }
 
+export interface FeishuOutgoingMessage {
+  msgType: string;
+  content: Record<string, unknown> | string;
+}
+
 const DEFAULT_TEXT_CHUNK_BYTES = 2000;
 
 function sleep(ms: number): Promise<void> {
@@ -75,15 +80,40 @@ export class FeishuApi {
   async sendText(openId: string, content: string): Promise<void> {
     const chunks = splitFeishuTextByUtf8Bytes(content);
     for (const chunk of chunks) {
-      await this.sendSingleText(openId, chunk);
+      await this.sendSingleMessage(openId, {
+        msgType: 'text',
+        content: { text: chunk },
+      });
     }
   }
 
-  private async sendSingleText(openId: string, content: string): Promise<void> {
+  async sendMessage(openId: string, message: FeishuOutgoingMessage): Promise<void> {
+    const msgType = message.msgType.trim();
+    if (!msgType) {
+      throw new Error('feishu send failed: msgType is required');
+    }
+
+    if (msgType === 'text') {
+      const textContent = extractTextContent(message.content);
+      const chunks = splitFeishuTextByUtf8Bytes(textContent);
+      for (const chunk of chunks) {
+        await this.sendSingleMessage(openId, {
+          msgType: 'text',
+          content: { text: chunk },
+        });
+      }
+      return;
+    }
+
+    await this.sendSingleMessage(openId, message);
+  }
+
+  private async sendSingleMessage(openId: string, message: FeishuOutgoingMessage): Promise<void> {
+    const content = resolveFeishuContentPayload(message.msgType, message.content);
     const requestBody = {
       receive_id: openId,
-      msg_type: 'text',
-      content: JSON.stringify({ text: content }),
+      msg_type: message.msgType,
+      content,
     };
 
     let lastError: Error | undefined;
@@ -194,4 +224,45 @@ export class FeishuApi {
 
 function isAbortError(error: Error): boolean {
   return error.name === 'AbortError';
+}
+
+function extractTextContent(content: FeishuOutgoingMessage['content']): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  const text = content.text;
+  return typeof text === 'string' ? text : '';
+}
+
+function resolveFeishuContentPayload(msgType: string, content: FeishuOutgoingMessage['content']): string {
+  if (typeof content === 'string') {
+    if (msgType === 'text') {
+      return JSON.stringify({ text: content });
+    }
+    const trimmed = content.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      return content;
+    }
+    return JSON.stringify(resolveSimpleContent(msgType, content));
+  }
+  return JSON.stringify(content);
+}
+
+function resolveSimpleContent(msgType: string, value: string): Record<string, string> {
+  if (msgType === 'image') {
+    return { image_key: value };
+  }
+  if (msgType === 'file' || msgType === 'audio' || msgType === 'sticker') {
+    return { file_key: value };
+  }
+  if (msgType === 'share_chat') {
+    return { chat_id: value };
+  }
+  if (msgType === 'share_user') {
+    return { user_id: value };
+  }
+  if (msgType === 'media') {
+    return { file_key: value };
+  }
+  return { text: value };
 }

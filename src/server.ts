@@ -135,6 +135,12 @@ if (wecomCrypto) {
 const userTaskQueue = new Map<string, Promise<void>>();
 const outboundSendQueue = new Map<string, Promise<void>>();
 
+interface GatewayStructuredMessage {
+  __gateway_message__: true;
+  msg_type: string;
+  content: Record<string, unknown> | string;
+}
+
 function resolveUserKey(userId: string): string {
   void userId;
   return 'local-owner';
@@ -238,7 +244,29 @@ async function sendText(channel: 'wecom' | 'feishu', userId: string, content: st
 }
 
 async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
+  const structured = parseStructuredMessage(content);
   await enqueueOutboundSend(channel, userId, async () => {
+    if (structured) {
+      if (channel === 'wecom') {
+        if (!weComApi) {
+          throw new Error('wecom api not configured');
+        }
+        await weComApi.sendMessage(userId, {
+          msgType: structured.msg_type,
+          content: structured.content,
+        });
+        return;
+      }
+      if (!feishuApi) {
+        throw new Error('feishu api not configured');
+      }
+      await feishuApi.sendMessage(userId, {
+        msgType: structured.msg_type,
+        content: structured.content,
+      });
+      return;
+    }
+
     if (channel === 'wecom') {
       if (!weComApi) {
         throw new Error('wecom api not configured');
@@ -251,6 +279,33 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
     }
     await feishuApi.sendText(userId, content);
   });
+}
+
+function parseStructuredMessage(content: string): GatewayStructuredMessage | undefined {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{')) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (parsed.__gateway_message__ !== true) {
+      return undefined;
+    }
+    if (typeof parsed.msg_type !== 'string') {
+      return undefined;
+    }
+    const payload = parsed.content;
+    if (!(typeof payload === 'string' || (payload && typeof payload === 'object' && !Array.isArray(payload)))) {
+      return undefined;
+    }
+    return {
+      __gateway_message__: true,
+      msg_type: parsed.msg_type,
+      content: payload as Record<string, unknown> | string,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 app.listen(config.port, () => {

@@ -24,7 +24,7 @@ describe('FeishuApi token cache', () => {
     let tokenCalls = 0;
     let messageCalls = 0;
 
-    global.fetch = vi.fn(async (input: string | URL | Request) => {
+    global.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/auth/v3/tenant_access_token/internal')) {
         tokenCalls += 1;
@@ -144,5 +144,53 @@ describe('FeishuApi token cache', () => {
 
     await expect(api.sendText('ou_a', 'hello')).rejects.toBeInstanceOf(Error);
     expect(messageCalls).toBe(3);
+  });
+
+  it('sends interactive message using structured payload', async () => {
+    let capturedBody = '';
+
+    global.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+            tenant_access_token: 'tenant-token',
+            expire: 7200,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/im/v1/messages')) {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+    });
+
+    await api.sendMessage('ou_a', {
+      msgType: 'interactive',
+      content: {
+        type: 'template',
+        data: { template_id: 'AAqC5c9997YMX' },
+      },
+    });
+
+    const payload = JSON.parse(capturedBody) as { msg_type?: string; content?: string };
+    expect(payload.msg_type).toBe('interactive');
+    expect(payload.content).toContain('template_id');
   });
 });

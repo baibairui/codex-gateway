@@ -10,6 +10,15 @@ interface RawWeComMessage {
   Content?: string;
   MsgId?: string;
   Encrypt?: string;
+  PicUrl?: string;
+  MediaId?: string;
+  ThumbMediaId?: string;
+  Location_X?: string;
+  Location_Y?: string;
+  Label?: string;
+  Title?: string;
+  Description?: string;
+  Url?: string;
 }
 
 export interface WeComIncomingMessage {
@@ -18,6 +27,15 @@ export interface WeComIncomingMessage {
   msgType: string;
   content: string;
   msgId?: string;
+  picUrl?: string;
+  mediaId?: string;
+  thumbMediaId?: string;
+  locationX?: string;
+  locationY?: string;
+  label?: string;
+  title?: string;
+  description?: string;
+  url?: string;
   /** 安全模式外层 XML 的 <Encrypt> 字段 */
   encrypt?: string;
 }
@@ -41,6 +59,15 @@ export async function parseWeComXml(xml: string): Promise<WeComIncomingMessage> 
     msgType: body.MsgType ?? '',
     content: body.Content ?? '',
     msgId: body.MsgId,
+    picUrl: body.PicUrl,
+    mediaId: body.MediaId,
+    thumbMediaId: body.ThumbMediaId,
+    locationX: body.Location_X,
+    locationY: body.Location_Y,
+    label: body.Label,
+    title: body.Title,
+    description: body.Description,
+    url: body.Url,
     encrypt: body.Encrypt,
   };
 
@@ -50,6 +77,9 @@ export async function parseWeComXml(xml: string): Promise<WeComIncomingMessage> 
     msgType: result.msgType,
     hasContent: !!result.content,
     hasMsgId: !!result.msgId,
+    hasMediaId: !!result.mediaId,
+    hasPicUrl: !!result.picUrl,
+    hasUrl: !!result.url,
     hasEncrypt: !!result.encrypt,
   });
 

@@ -239,6 +239,20 @@ function buildIdentityPatchPrompt(identityContent: string): string {
   ].join('\n');
 }
 
+function buildOutboundMessageProtocolPrompt(userPrompt: string): string {
+  return [
+    '你必须遵循以下回发协议：',
+    '1. 默认输出普通文本，不要输出 JSON。',
+    '2. 只有当用户明确要求发送非文本消息（如图片/文件/卡片/分享名片等）时，才输出单个 JSON 对象。',
+    '3. 输出 JSON 时禁止使用 markdown 代码块，禁止附加解释文字，只输出 JSON 本体。',
+    '4. JSON 格式必须为：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
+    '5. 飞书常用 msg_type：text、post、image、file、audio、media、sticker、interactive、share_chat、share_user。',
+    '',
+    '用户输入如下：',
+    userPrompt,
+  ].join('\n');
+}
+
 function buildMemoryOnboardingKickoffPrompt(input: {
   reason: 'shared' | 'agent' | 'both' | 'manual';
   targetAgent?: { agentId: string; name: string; workspaceDir: string };
@@ -1034,8 +1048,9 @@ ${clipMessage(text, 500)}
       });
 
       const startTime = Date.now();
+      const runtimePrompt = buildOutboundMessageProtocolPrompt(prompt);
       const result = await deps.codexRunner.run({
-        prompt,
+        prompt: runtimePrompt,
         threadId: runtimeThreadId,
         model: currentModel,
         search: runtimeSearch,
