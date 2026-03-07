@@ -86,6 +86,7 @@ cp .env.example .env
 ```env
 PORT=3000
 
+WECOM_ENABLED=true
 WEWORK_CORP_ID=你的企业ID
 WEWORK_SECRET=你的应用Secret
 WEWORK_AGENT_ID=你的应用AgentId
@@ -101,6 +102,7 @@ CODEX_SEARCH=false
 
 这些配置的含义：
 
+- `WECOM_ENABLED`：是否启用企业微信接入。默认 `true`，如果你不接企业微信，显式设成 `false`
 - `WEWORK_CORP_ID`：企业微信企业 ID
 - `WEWORK_SECRET`：企业微信应用 Secret
 - `WEWORK_AGENT_ID`：企业微信应用 AgentId
@@ -111,6 +113,12 @@ CODEX_SEARCH=false
 - `CODEX_SANDBOX`：Codex 执行沙箱模式，通常用 `full-auto`
 - `RUNNER_ENABLED`：是否允许网关实际调用 Codex
 - `CODEX_SEARCH`：默认是否开启联网搜索
+
+如果你不接企业微信，可以这样关掉：
+
+```env
+WECOM_ENABLED=false
+```
 
 如果你要启用飞书，再补充：
 

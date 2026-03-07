@@ -42,6 +42,7 @@ log.info('服务启动初始化...', {
   rateLimitWindowSeconds: config.rateLimitWindowSeconds,
   apiTimeoutMs: config.apiTimeoutMs,
   apiRetryOnTimeout: config.apiRetryOnTimeout,
+  wecomEnabled: config.wecomEnabled,
   feishuEnabled: config.feishuEnabled,
   feishuApiTimeoutMs: config.feishuApiTimeoutMs,
 });
@@ -95,14 +96,18 @@ const workspacePublisher = new WorkspacePublisher({
 });
 log.debug('WorkspacePublisher 已初始化', { cwd: '/opt/gateway' });
 
-const weComApi = new WeComApi({
-  corpId: config.corpId,
-  secret: config.corpSecret,
-  agentId: config.agentId,
-  timeoutMs: config.apiTimeoutMs,
-  retryOnTimeout: config.apiRetryOnTimeout,
-});
-log.debug('WeComApi 已初始化');
+const weComApi = config.wecomEnabled && config.corpId && config.corpSecret && config.agentId !== undefined
+  ? new WeComApi({
+      corpId: config.corpId,
+      secret: config.corpSecret,
+      agentId: config.agentId,
+      timeoutMs: config.apiTimeoutMs,
+      retryOnTimeout: config.apiRetryOnTimeout,
+    })
+  : undefined;
+if (weComApi) {
+  log.debug('WeComApi 已初始化');
+}
 
 const feishuApi = config.feishuEnabled && config.feishuAppId && config.feishuAppSecret
   ? new FeishuApi({
@@ -116,12 +121,16 @@ if (feishuApi) {
   log.debug('FeishuApi 已初始化');
 }
 
-const wecomCrypto = new WeComCrypto({
-  token: config.token,
-  encodingAesKey: config.encodingAesKey,
-  corpId: config.corpId,
-});
-log.debug('WeComCrypto 已初始化');
+const wecomCrypto = config.wecomEnabled && config.token && config.encodingAesKey && config.corpId
+  ? new WeComCrypto({
+      token: config.token,
+      encodingAesKey: config.encodingAesKey,
+      corpId: config.corpId,
+    })
+  : undefined;
+if (wecomCrypto) {
+  log.debug('WeComCrypto 已初始化');
+}
 
 const userTaskQueue = new Map<string, Promise<void>>();
 const outboundSendQueue = new Map<string, Promise<void>>();
@@ -211,6 +220,7 @@ const memorySteward = new MemorySteward({
 });
 
 const app = createApp({
+  wecomEnabled: config.wecomEnabled,
   wecomCrypto,
   allowFrom: config.allowFrom,
   feishuVerificationToken: config.feishuVerificationToken,
@@ -230,6 +240,9 @@ async function sendText(channel: 'wecom' | 'feishu', userId: string, content: st
 async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
   await enqueueOutboundSend(channel, userId, async () => {
     if (channel === 'wecom') {
+      if (!weComApi) {
+        throw new Error('wecom api not configured');
+      }
       await weComApi.sendText(userId, content);
       return;
     }
@@ -241,7 +254,7 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
 }
 
 app.listen(config.port, () => {
-  log.info(`✅ wecom-codex gateway 已启动，监听 http://127.0.0.1:${config.port}`);
+  log.info(`✅ codex gateway 已启动，监听 http://127.0.0.1:${config.port}`);
   memorySteward.start();
   reminderDispatcher.start();
 });
