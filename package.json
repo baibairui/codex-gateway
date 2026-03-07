@@ -1,6 +1,7 @@
 {
   "name": "wecom-codex-gateway",
   "version": "0.1.0",
+  "description": "A lightweight WeCom/Feishu gateway for Codex CLI with multi-agent memory workspaces.",
   "main": "dist/server.js",
   "scripts": {
     "test": "LOG_LEVEL=error vitest run",
@@ -10,11 +11,25 @@
     "publish:workspace": "bash ./bin/publish-workspace.sh",
     "tmp:deploy": "cd /opt/gateway && npm run publish:workspace"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "wecom",
+    "feishu",
+    "codex",
+    "gateway",
+    "agent",
+    "memory"
+  ],
+  "author": "bairui",
   "license": "ISC",
-  "description": "",
-  "private": true,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baibairui/codex-gateway.git"
+  },
+  "bugs": {
+    "url": "https://github.com/baibairui/codex-gateway/issues"
+  },
+  "homepage": "https://github.com/baibairui/codex-gateway#readme",
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
