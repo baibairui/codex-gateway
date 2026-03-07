@@ -47,7 +47,7 @@ describe('handleUserCommand', () => {
     const result = handleUserCommand('/help', context);
     expect(result.handled).toBe(true);
     expect(result.message).toContain('可用命令');
-    expect(result.message).toContain('/agent create <名称>');
+    expect(result.message).toContain('/agent create [名称]');
     expect(result.message).toContain('/skill-agent');
     expect(result.message).toContain('/skills');
     expect(result.message).not.toContain('/agent init-memory');

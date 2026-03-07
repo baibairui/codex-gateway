@@ -308,7 +308,7 @@ describe('createChatHandler', () => {
       elements?: Array<{ content?: string }>;
     };
     expect(card.header?.title?.content).toContain('/help');
-    expect(card.elements?.[0]?.content).toContain('可用命令：');
+    expect(card.elements?.[0]?.content).toContain('可用命令（按功能分组）：');
     expect(card.elements?.[0]?.content).toContain('/help - 查看帮助');
   });
 

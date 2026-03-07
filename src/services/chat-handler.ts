@@ -433,9 +433,13 @@ function resolveCommandQuickActions(commandName: string, text: string): CommandQ
 }
 
 function buildFeishuTextBlock(content: string): Record<string, unknown> {
+  const escaped = content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
   return {
     tag: 'markdown',
-    content,
+    content: escaped,
   };
 }
 
