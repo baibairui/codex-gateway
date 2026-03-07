@@ -55,8 +55,10 @@ log.debug('数据目录已就绪', { dataDir });
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
 fs.mkdirSync(feishuImageCacheDir, { recursive: true });
 
-const agentsDir = path.resolve(config.codexAgentsDir);
-fs.mkdirSync(agentsDir, { recursive: true });
+const agentsDir = resolveAgentsDir({
+  configuredDir: config.codexAgentsDir,
+  dataDir,
+});
 log.debug('Agent 工作区目录已就绪', { agentsDir });
 const reminderDbPath = path.join(dataDir, 'reminders.db');
 
@@ -158,6 +160,30 @@ interface InboundEnrichResult {
 function resolveUserKey(userId: string): string {
   void userId;
   return 'local-owner';
+}
+
+function canUseDir(targetDir: string): boolean {
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveAgentsDir(input: { configuredDir?: string; dataDir: string }): string {
+  const fallbackDir = path.resolve(input.dataDir, 'agents');
+  if (input.configuredDir) {
+    const configured = path.resolve(input.configuredDir);
+    if (canUseDir(configured)) {
+      return configured;
+    }
+    log.warn('配置的 CODEX_AGENTS_DIR 不可用，回退到默认目录', { configured, fallbackDir });
+    fs.mkdirSync(fallbackDir, { recursive: true });
+    return fallbackDir;
+  }
+  fs.mkdirSync(fallbackDir, { recursive: true });
+  return fallbackDir;
 }
 
 function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void> {

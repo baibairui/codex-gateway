@@ -116,6 +116,7 @@ CODEX_SEARCH=false
 - `WEWORK_ENCODING_AES_KEY`：企业微信回调解密密钥
 - `CODEX_BIN`：Codex CLI 可执行文件，默认是 `codex`
 - `CODEX_WORKDIR`：默认工作目录，建议填写你的主项目绝对路径
+- `CODEX_AGENTS_DIR`：可选。默认使用当前项目 `.data/agents`
 - `CODEX_SANDBOX`：Codex 执行沙箱模式，通常用 `full-auto`
 - `RUNNER_ENABLED`：是否允许网关实际调用 Codex
 - `CODEX_SEARCH`：默认是否开启联网搜索

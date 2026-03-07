@@ -80,7 +80,7 @@ export const config = {
   codexModel: optionalStringUndefined('CODEX_MODEL'),
   codexSearch: process.env.CODEX_SEARCH === 'true',
   codexWorkdir: process.env.CODEX_WORKDIR ?? process.cwd(),
-  codexAgentsDir: '/opt/gateway/.data/agents',
+  codexAgentsDir: optionalStringUndefined('CODEX_AGENTS_DIR'),
   /** 'full-auto' (默认，有沙箱) 或 'none' (跳过沙箱，适合服务器) */
   codexSandbox: codexSandboxMode(),
   browserOpenEnabled: process.env.BROWSER_OPEN_ENABLED === 'true',
