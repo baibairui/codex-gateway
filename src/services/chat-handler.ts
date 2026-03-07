@@ -1,7 +1,8 @@
 import { commandNeedsAgentList, commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from '../features/user-command.js';
 import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/session-store.js';
 import { formatCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
-import { listSkillsForAgentWorkspace, type SkillCatalogEntry } from './skill-registry.js';
+import { AgentSkillManager } from './agent-skill-manager.js';
+import type { SkillCatalogEntry } from './skill-registry.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('ChatHandler');
@@ -86,7 +87,14 @@ interface ChatHandlerDeps {
   defaultSearch: boolean;
   reminderDbPath: string;
   sendText: (channel: Channel, userId: string, content: string) => Promise<void>;
-  listSkills?: (workspaceDir: string) => SkillCatalogEntry[];
+  skillManager?: {
+    listEffectiveSkills(workspaceDir: string): SkillCatalogEntry[];
+    listGlobalSkills(workspaceDir: string): SkillCatalogEntry[];
+    listAgentLocalSkills(workspaceDir: string): SkillCatalogEntry[];
+    disableGlobalSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
+    enableGlobalSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
+    disableAgentSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
+  };
 }
 
 interface ReminderTriggerInput {
@@ -180,7 +188,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
   const userModelOverrides = new Map<string, string>();
   const userSearchOverrides = new Map<string, boolean>();
   const onboardingKickoffInFlight = new Set<string>();
-  const listSkills = deps.listSkills ?? listSkillsForAgentWorkspace;
+  const skillManager = deps.skillManager ?? new AgentSkillManager();
 
   async function runReminderTrigger(input: {
     channel: Channel;
@@ -592,7 +600,12 @@ ${clipMessage(text, 500)}
         return;
       }
       if (commandResult.querySkills) {
-        const skillList = listSkills(currentAgent.workspaceDir);
+        const scope = commandResult.querySkillsScope ?? 'effective';
+        const skillList = scope === 'global'
+          ? skillManager.listGlobalSkills(currentAgent.workspaceDir)
+          : scope === 'agent'
+          ? skillManager.listAgentLocalSkills(currentAgent.workspaceDir)
+          : skillManager.listEffectiveSkills(currentAgent.workspaceDir);
         if (skillList.length === 0) {
           await deps.sendText(channel, userId, '当前未发现可用 skill。');
           return;
@@ -605,10 +618,37 @@ ${clipMessage(text, 500)}
           channel,
           userId,
           [
-            `当前会话可用 skill（agent：${currentAgent.name} / ${currentAgent.agentId}）`,
+            `当前会话可用 skill（范围：${scope}，agent：${currentAgent.name} / ${currentAgent.agentId}）`,
             ...lines,
           ].join('\n'),
         );
+        return;
+      }
+      if (commandResult.disableGlobalSkillName) {
+        const result = skillManager.disableGlobalSkill(currentAgent.workspaceDir, commandResult.disableGlobalSkillName);
+        if (!result.ok) {
+          await deps.sendText(channel, userId, `❌ ${result.reason ?? '禁用全局 skill 失败'}`);
+          return;
+        }
+        await deps.sendText(channel, userId, `✅ 已禁用全局 skill（仅当前 agent）：${commandResult.disableGlobalSkillName}`);
+        return;
+      }
+      if (commandResult.enableGlobalSkillName) {
+        const result = skillManager.enableGlobalSkill(currentAgent.workspaceDir, commandResult.enableGlobalSkillName);
+        if (!result.ok) {
+          await deps.sendText(channel, userId, `❌ ${result.reason ?? '添加全局 skill 失败'}`);
+          return;
+        }
+        await deps.sendText(channel, userId, `✅ 已添加全局 skill（仅当前 agent）：${commandResult.enableGlobalSkillName}`);
+        return;
+      }
+      if (commandResult.disableAgentSkillName) {
+        const result = skillManager.disableAgentSkill(currentAgent.workspaceDir, commandResult.disableAgentSkillName);
+        if (!result.ok) {
+          await deps.sendText(channel, userId, `❌ ${result.reason ?? '禁用当前 agent skill 失败'}`);
+          return;
+        }
+        await deps.sendText(channel, userId, `✅ 已禁用当前 agent skill：${commandResult.disableAgentSkillName}`);
         return;
       }
       if (commandResult.clearModel) {

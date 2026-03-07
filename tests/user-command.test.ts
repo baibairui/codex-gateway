@@ -137,6 +137,11 @@ describe('handleUserCommand', () => {
   it('supports /models and /search', () => {
     expect(handleUserCommand('/models', context).queryModels).toBe(true);
     expect(handleUserCommand('/skills', context).querySkills).toBe(true);
+    expect(handleUserCommand('/skills global', context).querySkillsScope).toBe('global');
+    expect(handleUserCommand('/skills agent', context).querySkillsScope).toBe('agent');
+    expect(handleUserCommand('/skills disable global using-superpowers', context).disableGlobalSkillName).toBe('using-superpowers');
+    expect(handleUserCommand('/skills add global using-superpowers', context).enableGlobalSkillName).toBe('using-superpowers');
+    expect(handleUserCommand('/skills disable agent reminder-tool', context).disableAgentSkillName).toBe('reminder-tool');
     expect(handleUserCommand('/search', context).querySearch).toBe(true);
     expect(handleUserCommand('/search on', context).setSearchEnabled).toBe(true);
     expect(handleUserCommand('/search off', context).setSearchEnabled).toBe(false);

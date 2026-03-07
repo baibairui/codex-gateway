@@ -213,6 +213,17 @@ describe('createChatHandler', () => {
   it('lists merged skills for current agent by /skills command', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
+    const skillManager = {
+      listEffectiveSkills: vi.fn(() => ([
+        { name: 'using-superpowers', source: 'global' as const, skillDir: '/root/.agents/skills/using-superpowers' },
+        { name: 'reminder-tool', source: 'agent-local' as const, skillDir: '/tmp/agent/.codex/skills/reminder-tool' },
+      ])),
+      listGlobalSkills: vi.fn(() => []),
+      listAgentLocalSkills: vi.fn(() => []),
+      disableGlobalSkill: vi.fn(() => ({ ok: true })),
+      enableGlobalSkill: vi.fn(() => ({ ok: true })),
+      disableAgentSkill: vi.fn(() => ({ ok: true })),
+    };
     const handler = createChatHandler({
       sessionStore,
       rateLimitStore: { allow: () => true },
@@ -229,10 +240,7 @@ describe('createChatHandler', () => {
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
-      listSkills: () => ([
-        { name: 'using-superpowers', source: 'global', skillDir: '/root/.agents/skills/using-superpowers' },
-        { name: 'reminder-tool', source: 'agent-local', skillDir: '/tmp/agent/.codex/skills/reminder-tool' },
-      ]),
+      skillManager,
     });
 
     await handler({ channel: 'wecom', userId: 'u1', content: '/skills' });
@@ -240,6 +248,42 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('当前会话可用 skill'));
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('using-superpowers [global]'));
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('reminder-tool [agent-local]'));
+  });
+
+  it('disables global skill for current agent by /skills command', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const skillManager = {
+      listEffectiveSkills: vi.fn(() => []),
+      listGlobalSkills: vi.fn(() => []),
+      listAgentLocalSkills: vi.fn(() => []),
+      disableGlobalSkill: vi.fn(() => ({ ok: true })),
+      enableGlobalSkill: vi.fn(() => ({ ok: true })),
+      disableAgentSkill: vi.fn(() => ({ ok: true })),
+    };
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      skillManager,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/skills disable global using-superpowers' });
+
+    expect(skillManager.disableGlobalSkill).toHaveBeenCalledWith('/repo/default', 'using-superpowers');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('已禁用全局 skill'));
   });
 
   it('creates memory onboarding agent by command', async () => {

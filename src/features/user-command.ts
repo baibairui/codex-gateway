@@ -17,6 +17,10 @@ export interface UserCommandResult {
   queryModel?: boolean;
   queryModels?: boolean;
   querySkills?: boolean;
+  querySkillsScope?: 'effective' | 'global' | 'agent';
+  disableGlobalSkillName?: string;
+  enableGlobalSkillName?: string;
+  disableAgentSkillName?: string;
   setModel?: string;
   clearModel?: boolean;
   querySearch?: boolean;
@@ -113,7 +117,12 @@ export function handleUserCommand(content: string, context: UserCommandContext =
           '/model <模型名> - 切换模型',
           '/model reset - 重置为默认模型',
           '/models - 查看当前 Codex 支持的模型',
-          '/skills - 查看当前会话可用 skill 列表（全局 + 当前 agent）',
+          '/skills - 查看当前会话生效 skill 列表（全局 + 当前 agent）',
+          '/skills global - 查看全局 skill',
+          '/skills agent - 查看当前 agent skill',
+          '/skills disable global <skillName> - 禁用某个全局 skill（仅当前 agent）',
+          '/skills add global <skillName> - 重新启用某个全局 skill（仅当前 agent）',
+          '/skills disable agent <skillName> - 禁用某个当前 agent skill',
           '/search - 查看联网搜索状态',
           '/search on|off - 开启/关闭联网搜索',
           '/remind - 已废弃，请直接描述提醒需求，交由 agent 调用提醒工具处理',
@@ -271,11 +280,54 @@ export function handleUserCommand(content: string, context: UserCommandContext =
         handled: true,
         queryModels: true,
       };
-    case '/skills':
+    case '/skills': {
+      const action = (parts[1] ?? '').toLowerCase();
+      const scope = (parts[2] ?? '').toLowerCase();
+      const skillName = parts.slice(3).join(' ').trim();
+      if (!action || action === 'list') {
+        return {
+          handled: true,
+          querySkills: true,
+          querySkillsScope: 'effective',
+        };
+      }
+      if (action === 'global') {
+        return {
+          handled: true,
+          querySkills: true,
+          querySkillsScope: 'global',
+        };
+      }
+      if (action === 'agent' || action === 'local') {
+        return {
+          handled: true,
+          querySkills: true,
+          querySkillsScope: 'agent',
+        };
+      }
+      if (action === 'disable' && scope === 'global' && skillName) {
+        return {
+          handled: true,
+          disableGlobalSkillName: skillName,
+        };
+      }
+      if ((action === 'add' || action === 'enable') && scope === 'global' && skillName) {
+        return {
+          handled: true,
+          enableGlobalSkillName: skillName,
+        };
+      }
+      if (action === 'disable' && (scope === 'agent' || scope === 'local') && skillName) {
+        return {
+          handled: true,
+          disableAgentSkillName: skillName,
+        };
+      }
       return {
         handled: true,
-        querySkills: true,
+        message: '用法：/skills | /skills global | /skills agent | /skills disable global <skillName> | /skills add global <skillName> | /skills disable agent <skillName>',
       };
+    }
     case '/search': {
       const action = (parts[1] ?? '').toLowerCase();
       if (!action) {
