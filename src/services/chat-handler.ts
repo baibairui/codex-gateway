@@ -1013,12 +1013,8 @@ ${clipMessage(text, 500)}
     const isSharedMemoryEmpty = deps.agentWorkspaceManager.isSharedMemoryEmpty(sessionUserKey);
     const isCurrentAgentIdentityEmpty = !isSystemAgentRecord(currentAgent)
       && !!deps.agentWorkspaceManager.isWorkspaceIdentityEmpty?.(currentAgent.workspaceDir);
-    const shouldStartMemoryOnboarding = isSharedMemoryEmpty || isCurrentAgentIdentityEmpty;
-    const onboardingReason = isSharedMemoryEmpty && isCurrentAgentIdentityEmpty
-      ? 'both'
-      : isSharedMemoryEmpty
-      ? 'shared'
-      : 'agent';
+    const shouldStartMemoryOnboarding = isSharedMemoryEmpty;
+    const onboardingReason = isCurrentAgentIdentityEmpty ? 'both' : 'shared';
     const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, MEMORY_ONBOARDING_AGENT_ID);
 
     if (shouldStartMemoryOnboarding) {
@@ -1035,8 +1031,6 @@ ${clipMessage(text, 500)}
           [
             onboardingReason === 'shared'
               ? '🧭 检测到 shared-memory 为空，先进行记忆初始化。'
-              : onboardingReason === 'agent'
-              ? '🧭 检测到当前 agent 自身份未初始化，先进行记忆初始化。'
               : '🧭 检测到 shared-memory 与当前 agent 自身份都未初始化，先进行记忆初始化。',
             renderMemoryOnboardingStartMessage(onboardingReason),
           ].join('\n'),
