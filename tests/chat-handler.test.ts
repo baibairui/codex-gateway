@@ -382,7 +382,7 @@ describe('createChatHandler', () => {
       template: 'memory-onboarding',
     }));
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      workdir: '/tmp/memory-onboarding',
+      workdir: '/tmp',
       search: false,
       prompt: expect.stringContaining('language style'),
     }));
@@ -626,7 +626,7 @@ describe('createChatHandler', () => {
       template: 'memory-onboarding',
     }));
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      workdir: '/tmp/memory-onboarding',
+      workdir: '/tmp',
       search: false,
     }));
     expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
@@ -708,7 +708,7 @@ describe('createChatHandler', () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining('用户输入如下：\n我叫 Alice'),
       threadId: 'thread_onboarding',
-      workdir: '/tmp/memory-onboarding',
+      workdir: '/tmp',
     }));
     expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
   });

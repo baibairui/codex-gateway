@@ -1,4 +1,5 @@
 import { commandNeedsAgentList, commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from '../features/user-command.js';
+import path from 'node:path';
 import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/session-store.js';
 import { formatCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
@@ -207,6 +208,13 @@ function isSystemAgentRecord(agent: { agentId: string; name?: string }): boolean
   return byId || byName;
 }
 
+function resolveAgentWorkdir(agent: { agentId: string; workspaceDir: string }): string {
+  if (agent.agentId === MEMORY_ONBOARDING_AGENT_ID) {
+    return path.dirname(agent.workspaceDir);
+  }
+  return agent.workspaceDir;
+}
+
 function sanitizeOnboardingText(text: string): string {
   const pathLike = /`[^`\n]*\/[^`\n]*`/g;
   const mdFileLike = /`[^`\n]+\.md`/g;
@@ -360,7 +368,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
         prompt: buildIdentityBootstrapPrompt(snapshot.identityContent),
         model,
         search: false,
-        workdir: agent.workspaceDir,
+        workdir: resolveAgentWorkdir(agent),
         reminderToolContext: {
           channel,
           userId,
@@ -379,7 +387,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
         threadId,
         model,
         search: false,
-        workdir: agent.workspaceDir,
+        workdir: resolveAgentWorkdir(agent),
         reminderToolContext: {
           channel,
           userId,
@@ -437,7 +445,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
         threadId: runtimeThreadId,
         model: currentModel,
         search: false,
-        workdir: runtimeAgent.workspaceDir,
+        workdir: resolveAgentWorkdir(runtimeAgent),
         reminderToolContext: {
           channel,
           userId,
@@ -552,7 +560,7 @@ ${clipMessage(prompt, 500)}
           threadId: onboardingThreadId,
           model,
           search: false,
-          workdir: onboardingAgent.workspaceDir,
+          workdir: resolveAgentWorkdir(onboardingAgent),
           reminderToolContext: {
             channel,
             userId,
@@ -729,7 +737,7 @@ ${clipMessage(prompt, 500)}
             prompt: SKILL_ONBOARDING_KICKOFF_PROMPT,
             model: currentModel,
             search: false,
-            workdir: agent.workspaceDir,
+            workdir: resolveAgentWorkdir(agent),
             reminderToolContext: {
               channel,
               userId,
@@ -970,7 +978,7 @@ ${clipMessage(text, 500)}
             prompt: commandResult.reviewPrompt,
             model: currentModel,
             search: currentSearch,
-            workdir: currentAgent.workspaceDir,
+            workdir: resolveAgentWorkdir(currentAgent),
             onMessage: (text) => {
               log.info(`
 ════════════════════════════════════════════════════════════
@@ -990,7 +998,7 @@ ${clipMessage(text, 500)}
             mode: commandResult.reviewMode,
             target: commandResult.reviewTarget ?? '(none)',
             agentId: currentAgent.agentId,
-            workdir: currentAgent.workspaceDir,
+            workdir: resolveAgentWorkdir(currentAgent),
             elapsedMs: elapsed,
             rawOutputLength: reviewResult.rawOutput.length,
           });
@@ -1079,7 +1087,7 @@ ${clipMessage(text, 500)}
       log.debug('handleText 查询 session', {
         userId,
         agentId: runtimeAgent.agentId,
-        workdir: runtimeAgent.workspaceDir,
+        workdir: resolveAgentWorkdir(runtimeAgent),
         existingThreadId: runtimeThreadId ?? '(无，新会话)',
       });
 
@@ -1090,7 +1098,7 @@ ${clipMessage(text, 500)}
         threadId: runtimeThreadId,
         model: currentModel,
         search: runtimeSearch,
-        workdir: runtimeAgent.workspaceDir,
+          workdir: resolveAgentWorkdir(runtimeAgent),
         reminderToolContext: {
           channel,
           userId,
@@ -1146,7 +1154,7 @@ ${clipMessage(userVisibleOutput, 500)}
         userId,
         agentId: runtimeAgent.agentId,
         threadId: result.threadId,
-        workdir: runtimeAgent.workspaceDir,
+        workdir: resolveAgentWorkdir(runtimeAgent),
         elapsedMs: elapsed,
         rawOutputLength: result.rawOutput.length,
       });
