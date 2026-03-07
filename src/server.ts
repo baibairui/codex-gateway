@@ -344,9 +344,19 @@ async function enrichInboundContent(channel: 'wecom' | 'feishu', content: string
     };
   }
   try {
-    const localPath = inboundRef.kind === 'image'
-      ? await feishuApi.downloadImage(inboundRef.key)
-      : await feishuApi.downloadFile(inboundRef.key);
+    if (!inboundRef.messageId) {
+      return {
+        content,
+        attachmentRequired: true,
+        attachmentDownloaded: false,
+        errorMessage: 'missing message_id for feishu message.resource.get',
+      };
+    }
+    const localPath = await feishuApi.downloadMessageResource({
+      messageId: inboundRef.messageId,
+      fileKey: inboundRef.key,
+      type: inboundRef.kind,
+    });
     return {
       content: `${content}\nlocal_${inboundRef.kind}_path=${localPath}`,
       attachmentRequired: true,
@@ -368,26 +378,31 @@ async function enrichInboundContent(channel: 'wecom' | 'feishu', content: string
   }
 }
 
-function extractFeishuBinaryRef(content: string): { kind: 'image' | 'file' | 'audio' | 'media' | 'sticker'; key: string } | undefined {
+function extractFeishuBinaryRef(content: string): {
+  kind: 'image' | 'file' | 'audio' | 'media' | 'sticker';
+  key: string;
+  messageId?: string;
+} | undefined {
+  const messageId = content.match(/\bmessage_id=([^\s]+)/)?.[1];
   const image = content.match(/^\[飞书图片]\s+image_key=([^\s]+)/);
   if (image?.[1]) {
-    return { kind: 'image', key: image[1] };
+    return { kind: 'image', key: image[1], messageId };
   }
   const file = content.match(/^\[飞书文件]\s+file_key=([^\s]+)/);
   if (file?.[1]) {
-    return { kind: 'file', key: file[1] };
+    return { kind: 'file', key: file[1], messageId };
   }
   const audio = content.match(/^\[飞书语音]\s+file_key=([^\s]+)/);
   if (audio?.[1]) {
-    return { kind: 'audio', key: audio[1] };
+    return { kind: 'audio', key: audio[1], messageId };
   }
   const media = content.match(/^\[飞书媒体]\s+file_key=([^\s]+)/);
   if (media?.[1]) {
-    return { kind: 'media', key: media[1] };
+    return { kind: 'media', key: media[1], messageId };
   }
   const sticker = content.match(/^\[飞书表情]\s+file_key=([^\s]+)/);
   if (sticker?.[1]) {
-    return { kind: 'sticker', key: sticker[1] };
+    return { kind: 'sticker', key: sticker[1], messageId };
   }
   return undefined;
 }

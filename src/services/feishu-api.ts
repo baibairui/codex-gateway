@@ -182,6 +182,45 @@ export class FeishuApi {
     throw lastError ?? new Error('feishu file download failed: unknown');
   }
 
+  async downloadMessageResource(input: {
+    messageId: string;
+    fileKey: string;
+    type: 'image' | 'file' | 'audio' | 'media' | 'sticker';
+  }): Promise<string> {
+    const messageId = input.messageId.trim();
+    const fileKey = input.fileKey.trim();
+    if (!messageId || !fileKey) {
+      throw new Error('feishu message resource download failed: messageId and fileKey are required');
+    }
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const token = await this.getTenantAccessToken();
+        const url = new URL(
+          `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(fileKey)}`,
+        );
+        url.searchParams.set('type', input.type);
+        const response = await this.fetchWithTimeout(url.toString(), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          if (response.status === 401 || response.status === 403) {
+            this.tokenCache = undefined;
+          }
+          throw new Error(`feishu message resource download failed: ${response.status} ${clipText(text, 200)}`);
+        }
+        return await writeFeishuBinaryToFile(this.imageCacheDir, fileKey, response, input.type);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    throw lastError ?? new Error('feishu message resource download failed: unknown');
+  }
+
   private async sendSingleMessage(openId: string, message: FeishuOutgoingMessage): Promise<void> {
     const content = resolveFeishuContentPayload(message.msgType, message.content);
     const requestBody = {

@@ -140,7 +140,7 @@ describe('createApp feishu callback', () => {
     expect(handleText).toHaveBeenCalledWith({
       channel: 'feishu',
       userId: 'ou_1',
-      content: '[飞书图片] image_key=img_1',
+      content: '[飞书图片] image_key=img_1\nmessage_id=om_1',
     });
   });
 });

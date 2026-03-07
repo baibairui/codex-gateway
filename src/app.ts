@@ -277,6 +277,12 @@ export function createApp(deps: AppDeps) {
         res.json({ code: 0, msg: 'ignored' });
         return;
       }
+      const binaryType = messageType === 'image'
+        || messageType === 'file'
+        || messageType === 'audio'
+        || messageType === 'media'
+        || messageType === 'sticker';
+      const contentWithMeta = binaryType ? `${content}\nmessage_id=${messageId}` : content;
 
       if (deps.isDuplicateMessage(`feishu:${messageId}`)) {
         res.json({ code: 0, msg: 'success' });
@@ -289,7 +295,7 @@ export function createApp(deps: AppDeps) {
         return;
       }
 
-      deps.handleText({ channel: 'feishu', userId: openId, content }).catch((err) => {
+      deps.handleText({ channel: 'feishu', userId: openId, content: contentWithMeta }).catch((err) => {
         log.error('POST /feishu/callback handleText 异步处理失败', err);
       });
     } catch (error) {

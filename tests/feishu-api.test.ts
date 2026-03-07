@@ -272,4 +272,48 @@ describe('FeishuApi token cache', () => {
     expect(fs.existsSync(filePath)).toBe(true);
     expect(fs.readFileSync(filePath).toString('utf8')).toBe('fake-file-bytes');
   });
+
+  it('downloads user message resource with message_id + file_key + type', async () => {
+    const imageCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-resource-'));
+    let seenUrl = '';
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+            tenant_access_token: 'tenant-token',
+            expire: 7200,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/open-apis/im/v1/messages/')) {
+        seenUrl = url;
+        return new Response(Buffer.from('fake-resource-bytes'), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      imageCacheDir,
+    });
+
+    const filePath = await api.downloadMessageResource({
+      messageId: 'om_123',
+      fileKey: 'img_123',
+      type: 'image',
+    });
+    expect(seenUrl).toContain('/open-apis/im/v1/messages/om_123/resources/img_123');
+    expect(seenUrl).toContain('type=image');
+    expect(fs.existsSync(filePath)).toBe(true);
+    expect(fs.readFileSync(filePath).toString('utf8')).toBe('fake-resource-bytes');
+  });
 });
