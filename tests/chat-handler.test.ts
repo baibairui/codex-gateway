@@ -556,6 +556,35 @@ describe('createChatHandler', () => {
     expect(prompt).not.toContain('飞书常用 msg_type');
   });
 
+  it('includes message type selection rules in feishu prompt', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'frontend', workspaceDir: '/tmp/frontend' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      browserOpenEnabled: false,
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: 'hello' });
+
+    const prompt = run.mock.calls[0]?.[0]?.prompt as string;
+    expect(prompt).toContain('简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。');
+    expect(prompt).toContain('如果不确定该用哪种类型，优先退回 text');
+  });
+
   it('publishes workspace for /deploy-workspace command', async () => {
     const sendText = vi.fn(async () => undefined);
     const publish = vi.fn(async () => ({ output: 'publish ok' }));
