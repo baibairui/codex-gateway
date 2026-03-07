@@ -2,23 +2,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`missing required env: ${name}`);
-  }
-
-  return value;
-}
-
-function requiredNumber(name: string): number {
-  const value = Number(required(name));
-  if (!Number.isFinite(value)) {
-    throw new Error(`invalid number env: ${name}`);
-  }
-  return value;
-}
-
 function optionalNumber(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) {
@@ -70,11 +53,12 @@ function codexSandboxMode(): 'full-auto' | 'none' {
 
 export const config = {
   port: optionalNumber('PORT', 3000),
-  corpId: required('WEWORK_CORP_ID'),
-  corpSecret: required('WEWORK_SECRET'),
-  agentId: requiredNumber('WEWORK_AGENT_ID'),
-  token: required('WEWORK_TOKEN'),
-  encodingAesKey: required('WEWORK_ENCODING_AES_KEY'),
+  wecomEnabled: process.env.WECOM_ENABLED !== 'false',
+  corpId: optionalStringUndefined('WEWORK_CORP_ID'),
+  corpSecret: optionalStringUndefined('WEWORK_SECRET'),
+  agentId: optionalNumberUndefined('WEWORK_AGENT_ID'),
+  token: optionalStringUndefined('WEWORK_TOKEN'),
+  encodingAesKey: optionalStringUndefined('WEWORK_ENCODING_AES_KEY'),
   confirmTtlSeconds: optionalNumber('CONFIRM_TTL_SECONDS', 120),
   commandTimeoutMs: optionalNumberUndefined('COMMAND_TIMEOUT_MS'),
   commandTimeoutMinMs: optionalNumber('COMMAND_TIMEOUT_MIN_MS', 180_000),
@@ -108,5 +92,13 @@ export const config = {
 if (config.feishuEnabled) {
   if (!config.feishuAppId || !config.feishuAppSecret) {
     throw new Error('missing required env for Feishu: FEISHU_APP_ID / FEISHU_APP_SECRET');
+  }
+}
+
+if (config.wecomEnabled) {
+  if (!config.corpId || !config.corpSecret || config.agentId === undefined || !config.token || !config.encodingAesKey) {
+    throw new Error(
+      'missing required env for WeCom: WEWORK_CORP_ID / WEWORK_SECRET / WEWORK_AGENT_ID / WEWORK_TOKEN / WEWORK_ENCODING_AES_KEY',
+    );
   }
 }

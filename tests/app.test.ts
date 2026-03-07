@@ -12,6 +12,7 @@ afterAll(() => {
 
 async function startTestServer(feishuVerificationToken?: string) {
   const app = createApp({
+    wecomEnabled: true,
     wecomCrypto: {
       verifySignature: () => true,
       decrypt: (input: string) => input,
@@ -33,6 +34,36 @@ async function startTestServer(feishuVerificationToken?: string) {
   }
   return `http://127.0.0.1:${address.port}`;
 }
+
+async function startWecomDisabledServer() {
+  const app = createApp({
+    wecomEnabled: false,
+    allowFrom: '*',
+    isDuplicateMessage: () => false,
+    handleText: async () => undefined,
+  });
+
+  const server = app.listen(0);
+  serverRefs.push(server);
+  await new Promise<void>((resolve) => {
+    server.once('listening', () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('failed to acquire test server address');
+  }
+  return `http://127.0.0.1:${address.port}`;
+}
+
+describe('createApp wecom toggle', () => {
+  it('does not expose wecom callback when disabled', async () => {
+    const baseUrl = await startWecomDisabledServer();
+
+    const response = await fetch(`${baseUrl}/wecom/callback`);
+
+    expect(response.status).toBe(404);
+  });
+});
 
 describe('createApp feishu callback', () => {
   it('rejects url_verification when token mismatch', async () => {
