@@ -22,13 +22,14 @@ import { RateLimitStore } from './stores/rate-limit-store.js';
 import { createLogger } from './utils/logger.js';
 
 const log = createLogger('Server');
+const codexWorkdir = resolveCodexWorkdir(config.codexWorkdir);
 
 log.info('服务启动初始化...', {
   port: config.port,
   codexBin: config.codexBin,
   codexModel: config.codexModel ?? '(codex cli default)',
   codexSearch: config.codexSearch,
-  codexWorkdir: config.codexWorkdir,
+  codexWorkdir,
   codexAgentsDir: config.codexAgentsDir,
   commandTimeoutMs: config.commandTimeoutMs ?? '(adaptive)',
   commandTimeoutMinMs: config.commandTimeoutMinMs,
@@ -63,12 +64,12 @@ log.debug('Agent 工作区目录已就绪', { agentsDir });
 const reminderDbPath = path.join(dataDir, 'reminders.db');
 
 const sessionStore = new SessionStore(path.join(dataDir, 'sessions.db'), {
-  defaultWorkspaceDir: config.codexWorkdir,
+  defaultWorkspaceDir: agentsDir,
 });
 log.debug('SessionStore 已初始化');
 const agentWorkspaceManager = new AgentWorkspaceManager(agentsDir);
 log.debug('AgentWorkspaceManager 已初始化', { agentsDir });
-syncReminderToolSkills(config.codexWorkdir, agentsDir);
+syncReminderToolSkills(codexWorkdir, agentsDir);
 const dedupStore = new MessageDedupStore(config.dedupWindowSeconds);
 log.debug('MessageDedupStore 已初始化', { dedupWindowSeconds: config.dedupWindowSeconds });
 const rateLimitStore = new RateLimitStore(config.rateLimitMaxMessages, config.rateLimitWindowSeconds);
@@ -79,7 +80,7 @@ log.debug('RateLimitStore 已初始化', {
 
 const codexRunner = new CodexRunner({
   codexBin: config.codexBin,
-  workdir: config.codexWorkdir,
+  workdir: codexWorkdir,
   timeoutMs: config.commandTimeoutMs,
   timeoutMinMs: config.commandTimeoutMinMs,
   timeoutMaxMs: config.commandTimeoutMaxMs,
@@ -184,6 +185,23 @@ function resolveAgentsDir(input: { configuredDir?: string; dataDir: string }): s
   }
   fs.mkdirSync(fallbackDir, { recursive: true });
   return fallbackDir;
+}
+
+function resolveCodexWorkdir(configuredDir: string): string {
+  const resolved = path.resolve(configuredDir);
+  try {
+    if (fs.statSync(resolved).isDirectory()) {
+      return resolved;
+    }
+  } catch {
+    // noop
+  }
+  const fallback = path.resolve(process.cwd());
+  log.warn('配置的 CODEX_WORKDIR 不可用，回退到当前目录', {
+    configured: resolved,
+    fallback,
+  });
+  return fallback;
 }
 
 function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void> {
