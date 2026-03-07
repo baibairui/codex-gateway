@@ -26,11 +26,62 @@ interface AppDeps {
   }) => Promise<void>;
 }
 
+interface FeishuEventDeps {
+  allowFrom: string;
+  isDuplicateMessage: (msgId?: string) => boolean;
+  handleText: AppDeps['handleText'];
+}
+
 /**
  * 从 query 中安全提取 string 类型参数
  */
 function qs(val: unknown): string {
   return typeof val === 'string' ? val : '';
+}
+
+export function dispatchFeishuMessageReceiveEvent(
+  deps: FeishuEventDeps,
+  event: Record<string, unknown>,
+): 'success' | 'ignored' {
+  const message = (event.message ?? {}) as Record<string, unknown>;
+  const sender = (event.sender ?? {}) as Record<string, unknown>;
+  const senderId = (sender.sender_id ?? {}) as Record<string, unknown>;
+  const openId = typeof senderId.open_id === 'string' ? senderId.open_id : '';
+  const messageId = typeof message.message_id === 'string' ? message.message_id : '';
+  const messageType = typeof message.message_type === 'string' ? message.message_type : '';
+  const rawContent = typeof message.content === 'string' ? message.content : '';
+
+  if (!openId || !messageId || !messageType || !rawContent) {
+    return 'ignored';
+  }
+
+  const content = normalizeFeishuIncomingMessage(messageType, rawContent);
+  if (!content) {
+    return 'ignored';
+  }
+  const binaryType = messageType === 'image'
+    || messageType === 'file'
+    || messageType === 'audio'
+    || messageType === 'media'
+    || messageType === 'sticker';
+  const contentWithMeta = binaryType ? `${content}\nmessage_id=${messageId}` : content;
+
+  if (deps.isDuplicateMessage(`feishu:${messageId}`)) {
+    return 'success';
+  }
+  if (!allowList(deps.allowFrom, openId)) {
+    return 'success';
+  }
+
+  deps.handleText({
+    channel: 'feishu',
+    userId: openId,
+    content: contentWithMeta,
+    sourceMessageId: messageId,
+  }).catch((err) => {
+    log.error('飞书事件异步处理失败', err);
+  });
+  return 'success';
 }
 
 export function createApp(deps: AppDeps) {
@@ -264,50 +315,12 @@ export function createApp(deps: AppDeps) {
       }
 
       const event = (body.event ?? {}) as Record<string, unknown>;
-      const message = (event.message ?? {}) as Record<string, unknown>;
-      const sender = (event.sender ?? {}) as Record<string, unknown>;
-      const senderId = (sender.sender_id ?? {}) as Record<string, unknown>;
-      const openId = typeof senderId.open_id === 'string' ? senderId.open_id : '';
-      const messageId = typeof message.message_id === 'string' ? message.message_id : '';
-      const messageType = typeof message.message_type === 'string' ? message.message_type : '';
-      const rawContent = typeof message.content === 'string' ? message.content : '';
-
-      if (!openId || !messageId || !messageType || !rawContent) {
-        res.json({ code: 0, msg: 'ignored' });
-        return;
-      }
-
-      const content = normalizeFeishuIncomingMessage(messageType, rawContent);
-      if (!content) {
-        res.json({ code: 0, msg: 'ignored' });
-        return;
-      }
-      const binaryType = messageType === 'image'
-        || messageType === 'file'
-        || messageType === 'audio'
-        || messageType === 'media'
-        || messageType === 'sticker';
-      const contentWithMeta = binaryType ? `${content}\nmessage_id=${messageId}` : content;
-
-      if (deps.isDuplicateMessage(`feishu:${messageId}`)) {
-        res.json({ code: 0, msg: 'success' });
-        return;
-      }
-
-      res.json({ code: 0, msg: 'success' });
-
-      if (!allowList(deps.allowFrom, openId)) {
-        return;
-      }
-
-      deps.handleText({
-        channel: 'feishu',
-        userId: openId,
-        content: contentWithMeta,
-        sourceMessageId: messageId,
-      }).catch((err) => {
-        log.error('POST /feishu/callback handleText 异步处理失败', err);
-      });
+      const result = dispatchFeishuMessageReceiveEvent({
+        allowFrom: deps.allowFrom,
+        isDuplicateMessage: deps.isDuplicateMessage,
+        handleText: deps.handleText,
+      }, event);
+      res.json({ code: 0, msg: result });
     } catch (error) {
       log.error('POST /feishu/callback 回调处理异常', error);
       res.json({ code: 0, msg: 'success' });
