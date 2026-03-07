@@ -58,6 +58,7 @@
 - Node.js 20+
 - npm 10+
 - 已安装并可执行的 `codex` CLI
+- 如果要做真实浏览器自动化，还需要本地可用的 Playwright 浏览器运行环境
 - 企业微信自建应用
 
 可选项：
@@ -71,6 +72,12 @@
 
 ```bash
 npm install
+```
+
+如果你要让 agent 稳定执行网页点击、输入、截图，建议再执行一次：
+
+```bash
+npx playwright install chromium
 ```
 
 可选：安装本地 CLI 命令（安装后可直接用 `codexclaw`）：
@@ -120,6 +127,18 @@ CODEX_SEARCH=false
 - `CODEX_SANDBOX`：Codex 执行沙箱模式，通常用 `full-auto`
 - `RUNNER_ENABLED`：是否允许网关实际调用 Codex
 - `CODEX_SEARCH`：默认是否开启联网搜索
+- `PLAYWRIGHT_MCP_ENABLED`：默认开启；只有你明确不需要浏览器自动化时，才设为 `false`
+- `PLAYWRIGHT_MCP_URL`：可选。如果你已有外部常驻 Playwright MCP，可直接填它的 URL
+- `PLAYWRIGHT_MCP_PORT`：可选。gateway 本地自启动 Playwright MCP 时使用的端口，默认 `8931`
+- `PLAYWRIGHT_MCP_PROFILE_DIR`：可选，共享浏览器登录态目录；默认是 `.data/playwright/profile`
+- `PLAYWRIGHT_MCP_OUTPUT_DIR`：可选，浏览器截图和运行产物目录；默认是 `.data/playwright/artifacts`
+
+浏览器能力说明：
+
+- 默认情况下，gateway 启动时会先拉起本地常驻 `@playwright/mcp`，`CodexRunner` 只连接它的本地 URL
+- 所有 agent 默认共用同一套浏览器 profile，所以登录态可以复用
+- 首次浏览器冷启动成本被前移到 gateway 启动阶段，而不是落到用户的第一个浏览器任务上
+- `/open <URL>` 仍然保留，作为宿主机直接打开浏览器的兜底能力
 
 如果你不接企业微信，可以这样关掉：
 

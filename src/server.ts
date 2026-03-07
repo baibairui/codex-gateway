@@ -9,6 +9,7 @@ import { WorkspacePublisher } from './services/workspace-publisher.js';
 import { AgentWorkspaceManager } from './services/agent-workspace-manager.js';
 import { CodexRunner } from './services/codex-runner.js';
 import { createChatHandler } from './services/chat-handler.js';
+import { resolvePlaywrightMcpRuntime, startPlaywrightMcpServer } from './services/playwright-mcp-server.js';
 import { MemorySteward } from './services/memory-steward.js';
 import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
@@ -35,6 +36,11 @@ log.info('服务启动初始化...', {
   commandTimeoutMinMs: config.commandTimeoutMinMs,
   commandTimeoutMaxMs: config.commandTimeoutMaxMs,
   commandTimeoutPerCharMs: config.commandTimeoutPerCharMs,
+  playwrightMcpEnabled: config.playwrightMcpEnabled,
+  playwrightMcpUrl: config.playwrightMcpUrl ?? '(local auto)',
+  playwrightMcpPort: config.playwrightMcpPort,
+  playwrightMcpProfileDir: config.playwrightMcpProfileDir ?? '(default)',
+  playwrightMcpOutputDir: config.playwrightMcpOutputDir ?? '(default)',
   runnerEnabled: config.runnerEnabled,
   memoryStewardEnabled: config.memoryStewardEnabled,
   memoryStewardIntervalHours: config.memoryStewardIntervalHours,
@@ -53,6 +59,15 @@ log.info('服务启动初始化...', {
 const dataDir = path.resolve(process.cwd(), '.data');
 fs.mkdirSync(dataDir, { recursive: true });
 log.debug('数据目录已就绪', { dataDir });
+const playwrightDataDir = path.join(dataDir, 'playwright');
+const playwrightMcpRuntime = resolvePlaywrightMcpRuntime({
+  enabled: config.playwrightMcpEnabled,
+  url: config.playwrightMcpUrl,
+  port: config.playwrightMcpPort,
+  profileDir: resolveRuntimeDir(config.playwrightMcpProfileDir, path.join(playwrightDataDir, 'profile')),
+  outputDir: resolveRuntimeDir(config.playwrightMcpOutputDir, path.join(playwrightDataDir, 'artifacts')),
+});
+const activePlaywrightMcpUrl = await ensurePlaywrightMcpUrl(playwrightMcpRuntime);
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
 fs.mkdirSync(feishuImageCacheDir, { recursive: true });
 
@@ -85,6 +100,7 @@ const codexRunner = new CodexRunner({
   timeoutMinMs: config.commandTimeoutMinMs,
   timeoutMaxMs: config.commandTimeoutMaxMs,
   timeoutPerCharMs: config.commandTimeoutPerCharMs,
+  playwrightMcpUrl: activePlaywrightMcpUrl,
   sandbox: config.codexSandbox,
 });
 log.debug('CodexRunner 已初始化');
@@ -143,7 +159,6 @@ if (wecomCrypto) {
 const userTaskQueue = new Map<string, Promise<void>>();
 const outboundSendQueue = new Map<string, Promise<void>>();
 const inboundReplyContext = new Map<string, { messageId?: string }>();
-const feishuStreamingState = new Map<string, { messageId?: string }>();
 
 interface GatewayStructuredMessage {
   __gateway_message__: true;
@@ -202,6 +217,38 @@ function resolveCodexWorkdir(configuredDir: string): string {
     fallback,
   });
   return fallback;
+}
+
+function resolveRuntimeDir(configuredDir: string | undefined, fallbackDir: string): string {
+  if (!configuredDir?.trim()) {
+    return path.resolve(fallbackDir);
+  }
+  return path.resolve(configuredDir);
+}
+
+async function ensurePlaywrightMcpUrl(
+  runtime: ReturnType<typeof resolvePlaywrightMcpRuntime>,
+): Promise<string | undefined> {
+  if (!runtime) {
+    return undefined;
+  }
+
+  try {
+    await startPlaywrightMcpServer(runtime);
+    log.debug('Playwright MCP 运行时已启用', {
+      url: runtime.url,
+      shouldAutoStart: runtime.shouldAutoStart,
+      profileDir: runtime.profileDir,
+      outputDir: runtime.outputDir,
+    });
+    return runtime.url;
+  } catch (error) {
+    log.warn('Playwright MCP 启动失败，当前将以无浏览器工具模式运行', {
+      url: runtime.url,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
 }
 
 function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void> {
@@ -295,35 +342,6 @@ const app = createApp({
 
 async function sendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
   await enqueueSendText(channel, userId, content);
-}
-
-async function sendStreamingText(
-  channel: 'wecom' | 'feishu',
-  userId: string,
-  streamId: string,
-  content: string,
-  done: boolean,
-): Promise<void> {
-  if (channel !== 'feishu' || !feishuApi) {
-    await sendText(channel, userId, content);
-    return;
-  }
-  const key = `${channel}:${userId}:${streamId}`;
-  await enqueueOutboundSend(channel, userId, async () => {
-    const state = feishuStreamingState.get(key);
-    if (!state?.messageId) {
-      const replyContext = inboundReplyContext.get(`${channel}:${userId}`);
-      const createdMessageId = await feishuApi.sendText(userId, content, {
-        replyToMessageId: replyContext?.messageId,
-      });
-      feishuStreamingState.set(key, { messageId: createdMessageId });
-      return;
-    }
-    await feishuApi.updateMessage(state.messageId, 'text', { text: content });
-  });
-  if (done) {
-    feishuStreamingState.delete(key);
-  }
 }
 
 async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {

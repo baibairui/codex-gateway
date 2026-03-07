@@ -83,6 +83,11 @@ export const config = {
   codexAgentsDir: optionalStringUndefined('CODEX_AGENTS_DIR'),
   /** 'full-auto' (默认，有沙箱) 或 'none' (跳过沙箱，适合服务器) */
   codexSandbox: codexSandboxMode(),
+  playwrightMcpEnabled: process.env.PLAYWRIGHT_MCP_ENABLED !== 'false',
+  playwrightMcpProfileDir: optionalStringUndefined('PLAYWRIGHT_MCP_PROFILE_DIR'),
+  playwrightMcpOutputDir: optionalStringUndefined('PLAYWRIGHT_MCP_OUTPUT_DIR'),
+  playwrightMcpUrl: optionalStringUndefined('PLAYWRIGHT_MCP_URL'),
+  playwrightMcpPort: optionalNumber('PLAYWRIGHT_MCP_PORT', 8931),
   browserOpenEnabled: process.env.BROWSER_OPEN_ENABLED === 'true',
   browserOpenCommand: optionalStringUndefined('BROWSER_OPEN_COMMAND'),
   runnerEnabled: process.env.RUNNER_ENABLED !== 'false',

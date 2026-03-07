@@ -102,6 +102,20 @@ describe('buildCodexArgs', () => {
     expect(args).toContain('mcp_servers.gateway_reminder.env.REMINDER_USER_ID="u1"');
     expect(args).toContain('mcp_servers.gateway_reminder.env.REMINDER_AGENT_ID="assistant"');
   });
+
+  it('injects persistent playwright MCP url config', () => {
+    const args = buildCodexArgs(
+      {
+        prompt: 'open browser',
+        workdir: '/tmp/agent-e',
+      },
+      'full-auto',
+      'http://127.0.0.1:8931/mcp',
+    );
+
+    expect(args).toContain('-c');
+    expect(args).toContain('mcp_servers.playwright.url="http://127.0.0.1:8931/mcp"');
+  });
 });
 
 describe('buildCodexReviewArgs', () => {
@@ -142,5 +156,16 @@ describe('buildCodexReviewArgs', () => {
       'main',
       'focus on regressions',
     ]);
+  });
+
+  it('injects persistent playwright MCP url config for review runs', () => {
+    const args = buildCodexReviewArgs(
+      { mode: 'uncommitted', workdir: '/tmp/agent-f' },
+      'full-auto',
+      'http://127.0.0.1:8931/mcp',
+    );
+
+    expect(args).toContain('-c');
+    expect(args).toContain('mcp_servers.playwright.url="http://127.0.0.1:8931/mcp"');
   });
 });

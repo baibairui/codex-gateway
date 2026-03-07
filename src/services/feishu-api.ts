@@ -675,13 +675,6 @@ function normalizeResourceTypes(type: 'image' | 'file' | ReadonlyArray<'image' |
   return [...seen];
 }
 
-function shouldTryNextResourceType(status: number, bodyText: string): boolean {
-  if (status !== 400) {
-    return false;
-  }
-  return extractOpenApiCode(bodyText) === 234001;
-}
-
 function extractOpenApiCode(bodyText: string): number | undefined {
   try {
     const parsed = JSON.parse(bodyText) as { code?: unknown };

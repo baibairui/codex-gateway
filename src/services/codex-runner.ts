@@ -51,6 +51,7 @@ interface CodexRunnerOptions {
   timeoutMinMs?: number;
   timeoutMaxMs?: number;
   timeoutPerCharMs?: number;
+  playwrightMcpUrl?: string;
   /** 'full-auto' (沙箱) 或 'none' (无沙箱) */
   sandbox?: 'full-auto' | 'none';
 }
@@ -103,6 +104,7 @@ export class CodexRunner {
   private readonly timeoutMinMs: number;
   private readonly timeoutMaxMs: number;
   private readonly timeoutPerCharMs: number;
+  private readonly playwrightMcpUrl?: string;
   private readonly sandbox: 'full-auto' | 'none';
 
   constructor(options: CodexRunnerOptions = {}) {
@@ -112,6 +114,7 @@ export class CodexRunner {
     this.timeoutMinMs = options.timeoutMinMs ?? DEFAULT_TIMEOUT_MIN_MS;
     this.timeoutMaxMs = options.timeoutMaxMs ?? DEFAULT_TIMEOUT_MAX_MS;
     this.timeoutPerCharMs = options.timeoutPerCharMs ?? DEFAULT_TIMEOUT_PER_CHAR_MS;
+    this.playwrightMcpUrl = options.playwrightMcpUrl?.trim() || undefined;
     this.sandbox = options.sandbox ?? 'full-auto';
     log.debug('CodexRunner 构造完成', {
       codexBin: this.codexBin,
@@ -120,12 +123,13 @@ export class CodexRunner {
       timeoutMinMs: this.timeoutMinMs,
       timeoutMaxMs: this.timeoutMaxMs,
       timeoutPerCharMs: this.timeoutPerCharMs,
+      playwrightMcpUrl: this.playwrightMcpUrl ?? '(disabled)',
       sandbox: this.sandbox,
     });
   }
 
   run(input: CodexRunInput): Promise<CodexRunResult> {
-    const args = buildCodexArgs(input, this.sandbox);
+    const args = buildCodexArgs(input, this.sandbox, this.playwrightMcpUrl);
     return this.runJsonl({
       args,
       prompt: input.prompt,
@@ -150,7 +154,7 @@ export class CodexRunner {
   }
 
   review(input: CodexReviewInput): Promise<{ rawOutput: string }> {
-    const args = buildCodexReviewArgs(input, this.sandbox);
+    const args = buildCodexReviewArgs(input, this.sandbox, this.playwrightMcpUrl);
     const timeoutHint = input.prompt ?? input.target ?? input.mode;
     return this.runJsonl({
       args,
@@ -385,6 +389,7 @@ export class CodexRunner {
 export function buildCodexArgs(
   input: Pick<CodexRunInput, 'prompt' | 'threadId' | 'model' | 'search' | 'workdir' | 'reminderToolContext'>,
   sandbox: 'full-auto' | 'none',
+  playwrightMcpUrl?: string,
 ): string[] {
   const sandboxFlag = sandbox === 'none'
     ? '--dangerously-bypass-approvals-and-sandbox'
@@ -407,6 +412,9 @@ export function buildCodexArgs(
   if (input.reminderToolContext) {
     args.unshift(...buildReminderMcpConfigArgs(input.reminderToolContext));
   }
+  if (playwrightMcpUrl?.trim()) {
+    args.unshift('-c', `mcp_servers.playwright.url=${tomlString(playwrightMcpUrl.trim())}`);
+  }
   args.push(input.prompt);
   return args;
 }
@@ -414,6 +422,7 @@ export function buildCodexArgs(
 export function buildCodexReviewArgs(
   input: Pick<CodexReviewInput, 'mode' | 'target' | 'prompt' | 'model' | 'search' | 'workdir'>,
   sandbox: 'full-auto' | 'none',
+  playwrightMcpUrl?: string,
 ): string[] {
   const sandboxFlag = sandbox === 'none'
     ? '--dangerously-bypass-approvals-and-sandbox'
@@ -436,6 +445,9 @@ export function buildCodexReviewArgs(
   }
   if (input.search) {
     args.unshift('--search');
+  }
+  if (playwrightMcpUrl?.trim()) {
+    args.unshift('-c', `mcp_servers.playwright.url=${tomlString(playwrightMcpUrl.trim())}`);
   }
   if (input.prompt) {
     args.push(input.prompt);
