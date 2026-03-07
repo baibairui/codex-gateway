@@ -126,8 +126,14 @@ WECOM_ENABLED=false
 FEISHU_ENABLED=true
 FEISHU_APP_ID=你的飞书AppID
 FEISHU_APP_SECRET=你的飞书AppSecret
+FEISHU_LONG_CONNECTION=true
 FEISHU_VERIFICATION_TOKEN=你的校验Token
 ```
+
+说明：
+
+- `FEISHU_LONG_CONNECTION=true`：启用官方 SDK 长连接收事件，不需要公网回调地址
+- `FEISHU_VERIFICATION_TOKEN`：Webhook 模式需要；长连接模式可留空，但如果你要保留 `/feishu/callback` 回调能力，建议仍然配置
 
 完整配置模板见 [.env.example](./.env.example)。
 

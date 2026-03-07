@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { EventDispatcher as LarkEventDispatcher, LoggerLevel as LarkSdkLoggerLevel, WSClient as LarkWSClient } from '@larksuiteoapi/node-sdk';
 
-import { createApp } from './app.js';
+import { createApp, dispatchFeishuMessageReceiveEvent } from './app.js';
 import { config } from './config.js';
 import { BrowserOpener } from './services/browser-opener.js';
 import { WorkspacePublisher } from './services/workspace-publisher.js';
@@ -44,6 +45,7 @@ log.info('服务启动初始化...', {
   apiRetryOnTimeout: config.apiRetryOnTimeout,
   wecomEnabled: config.wecomEnabled,
   feishuEnabled: config.feishuEnabled,
+  feishuLongConnection: config.feishuLongConnection,
   feishuApiTimeoutMs: config.feishuApiTimeoutMs,
 });
 
@@ -244,29 +246,7 @@ const app = createApp({
   allowFrom: config.allowFrom,
   feishuVerificationToken: config.feishuVerificationToken,
   isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
-  handleText: async ({ channel, userId, content, sourceMessageId }) => {
-    const enrichResult = await enrichInboundContent(channel, content);
-    if (enrichResult.attachmentRequired && !enrichResult.attachmentDownloaded) {
-      await sendText(
-        channel,
-        userId,
-        `❌ 附件下载失败，未调用 Codex。${enrichResult.errorMessage ? `原因：${enrichResult.errorMessage}` : ''}`,
-      );
-      return;
-    }
-    const sessionUserKey = resolveUserKey(userId);
-    await runInUserQueue(sessionUserKey, async () => {
-      const contextKey = `${channel}:${userId}`;
-      inboundReplyContext.set(contextKey, {
-        messageId: channel === 'feishu' ? sourceMessageId : undefined,
-      });
-      try {
-        await handleChatText({ channel, userId, content: enrichResult.content });
-      } finally {
-        inboundReplyContext.delete(contextKey);
-      }
-    });
-  },
+  handleText: appDepsHandleText,
 });
 
 async function sendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
@@ -466,9 +446,61 @@ function extractFeishuBinaryRef(content: string): {
 
 app.listen(config.port, () => {
   log.info(`✅ codex gateway 已启动，监听 http://127.0.0.1:${config.port}`);
+  if (config.feishuEnabled && config.feishuLongConnection && config.feishuAppId && config.feishuAppSecret) {
+    const wsClient = new LarkWSClient({
+      appId: config.feishuAppId,
+      appSecret: config.feishuAppSecret,
+      loggerLevel: LarkSdkLoggerLevel.error,
+    });
+    const eventDispatcher = new LarkEventDispatcher({
+      loggerLevel: LarkSdkLoggerLevel.error,
+    }).register({
+      'im.message.receive_v1': async (data: Record<string, unknown>) => {
+        dispatchFeishuMessageReceiveEvent({
+          allowFrom: config.allowFrom,
+          isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
+          handleText: async (input) => appDepsHandleText(input),
+        }, data);
+      },
+    });
+    wsClient.start({ eventDispatcher }).then(() => {
+      log.info('✅ 飞书长连接已启动');
+    }).catch((error) => {
+      log.error('❌ 飞书长连接启动失败', error);
+    });
+  }
   memorySteward.start();
   reminderDispatcher.start();
 });
+
+async function appDepsHandleText(input: {
+  channel: 'wecom' | 'feishu';
+  userId: string;
+  content: string;
+  sourceMessageId?: string;
+}): Promise<void> {
+  const enrichResult = await enrichInboundContent(input.channel, input.content);
+  if (enrichResult.attachmentRequired && !enrichResult.attachmentDownloaded) {
+    await sendText(
+      input.channel,
+      input.userId,
+      `❌ 附件下载失败，未调用 Codex。${enrichResult.errorMessage ? `原因：${enrichResult.errorMessage}` : ''}`,
+    );
+    return;
+  }
+  const sessionUserKey = resolveUserKey(input.userId);
+  await runInUserQueue(sessionUserKey, async () => {
+    const contextKey = `${input.channel}:${input.userId}`;
+    inboundReplyContext.set(contextKey, {
+      messageId: input.channel === 'feishu' ? input.sourceMessageId : undefined,
+    });
+    try {
+      await handleChatText({ channel: input.channel, userId: input.userId, content: enrichResult.content });
+    } finally {
+      inboundReplyContext.delete(contextKey);
+    }
+  });
+}
 
 function syncReminderToolSkills(defaultWorkspaceDir: string, customAgentsRootDir: string): void {
   installReminderToolSkill(path.resolve(defaultWorkspaceDir));

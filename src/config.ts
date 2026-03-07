@@ -70,6 +70,7 @@ export const config = {
   feishuAppId: optionalStringUndefined('FEISHU_APP_ID'),
   feishuAppSecret: optionalStringUndefined('FEISHU_APP_SECRET'),
   feishuVerificationToken: optionalStringUndefined('FEISHU_VERIFICATION_TOKEN'),
+  feishuLongConnection: process.env.FEISHU_LONG_CONNECTION === 'true',
   feishuApiTimeoutMs: optionalNumber('FEISHU_API_TIMEOUT_MS', 15_000),
   dedupWindowSeconds: optionalNumber('DEDUP_WINDOW_SECONDS', 60),
   rateLimitMaxMessages: optionalNumber('RATE_LIMIT_MAX_MESSAGES', 20),

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { createApp } from '../src/app.js';
+import { createApp, dispatchFeishuMessageReceiveEvent } from '../src/app.js';
 
 const serverRefs: Array<{ close: () => void }> = [];
 
@@ -147,6 +147,33 @@ describe('createApp feishu callback', () => {
       userId: 'ou_1',
       content: '[飞书图片] image_key=img_1\nmessage_id=om_1',
       sourceMessageId: 'om_1',
+    });
+  });
+});
+
+describe('dispatchFeishuMessageReceiveEvent', () => {
+  it('accepts long connection event payload and forwards normalized content', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_ws_1' } },
+      message: {
+        message_id: 'om_ws_1',
+        message_type: 'text',
+        content: JSON.stringify({ text: 'hello from ws' }),
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).toHaveBeenCalledWith({
+      channel: 'feishu',
+      userId: 'ou_ws_1',
+      content: 'hello from ws',
+      sourceMessageId: 'om_ws_1',
     });
   });
 });
