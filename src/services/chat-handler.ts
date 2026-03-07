@@ -249,6 +249,7 @@ function buildOutboundMessageProtocolPrompt(userPrompt: string): string {
     '5. 飞书常用 msg_type：text、post、image、file、audio、media、sticker、interactive、share_chat、share_user。',
     '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
     '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path/local_sticker_path，必须先读取对应本地文件并给出分析结果，不要先追问目标。',
+    '8. 若明确需要回发飞书非文本消息，且你已经拿到本地文件路径，可在 JSON content 中直接提供 local_image_path/local_file_path/local_audio_path/local_media_path，网关会自动上传后发送。',
     '',
     '用户输入如下：',
     userPrompt,

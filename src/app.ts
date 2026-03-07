@@ -18,7 +18,12 @@ interface AppDeps {
    * 处理文本消息，业务回复统一走主动发消息 API，无需返回值。
    * 该函数被 fire-and-forget 调用，不阻塞回调响应。
    */
-  handleText: (input: { channel: 'wecom' | 'feishu'; userId: string; content: string }) => Promise<void>;
+  handleText: (input: {
+    channel: 'wecom' | 'feishu';
+    userId: string;
+    content: string;
+    sourceMessageId?: string;
+  }) => Promise<void>;
 }
 
 /**
@@ -295,7 +300,12 @@ export function createApp(deps: AppDeps) {
         return;
       }
 
-      deps.handleText({ channel: 'feishu', userId: openId, content: contentWithMeta }).catch((err) => {
+      deps.handleText({
+        channel: 'feishu',
+        userId: openId,
+        content: contentWithMeta,
+        sourceMessageId: messageId,
+      }).catch((err) => {
         log.error('POST /feishu/callback handleText 异步处理失败', err);
       });
     } catch (error) {

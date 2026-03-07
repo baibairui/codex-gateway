@@ -137,6 +137,7 @@ if (wecomCrypto) {
 
 const userTaskQueue = new Map<string, Promise<void>>();
 const outboundSendQueue = new Map<string, Promise<void>>();
+const inboundReplyContext = new Map<string, { messageId?: string }>();
 
 interface GatewayStructuredMessage {
   __gateway_message__: true;
@@ -241,7 +242,7 @@ const app = createApp({
   allowFrom: config.allowFrom,
   feishuVerificationToken: config.feishuVerificationToken,
   isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
-  handleText: async ({ channel, userId, content }) => {
+  handleText: async ({ channel, userId, content, sourceMessageId }) => {
     const enrichResult = await enrichInboundContent(channel, content);
     if (enrichResult.attachmentRequired && !enrichResult.attachmentDownloaded) {
       await sendText(
@@ -253,7 +254,15 @@ const app = createApp({
     }
     const sessionUserKey = resolveUserKey(userId);
     await runInUserQueue(sessionUserKey, async () => {
-      await handleChatText({ channel, userId, content: enrichResult.content });
+      const contextKey = `${channel}:${userId}`;
+      inboundReplyContext.set(contextKey, {
+        messageId: channel === 'feishu' ? sourceMessageId : undefined,
+      });
+      try {
+        await handleChatText({ channel, userId, content: enrichResult.content });
+      } finally {
+        inboundReplyContext.delete(contextKey);
+      }
     });
   },
 });
@@ -265,6 +274,7 @@ async function sendText(channel: 'wecom' | 'feishu', userId: string, content: st
 async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
   const structured = parseStructuredMessage(content);
   await enqueueOutboundSend(channel, userId, async () => {
+    const replyContext = inboundReplyContext.get(`${channel}:${userId}`);
     if (structured) {
       if (channel === 'wecom') {
         if (!weComApi) {
@@ -282,6 +292,7 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       await feishuApi.sendMessage(userId, {
         msgType: structured.msg_type,
         content: structured.content,
+        replyToMessageId: replyContext?.messageId,
       });
       return;
     }
@@ -296,7 +307,9 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
     if (!feishuApi) {
       throw new Error('feishu api not configured');
     }
-    await feishuApi.sendText(userId, content);
+    await feishuApi.sendText(userId, content, {
+      replyToMessageId: replyContext?.messageId,
+    });
   });
 }
 
