@@ -103,19 +103,21 @@ describe('buildCodexArgs', () => {
     expect(args).toContain('mcp_servers.gateway_reminder.env.REMINDER_AGENT_ID="assistant"');
   });
 
-  it('replaces the playwright MCP table with a URL config when provided', () => {
+  it('injects playwright MCP stdio config with persistent profile args', () => {
     const args = buildCodexArgs(
       {
         prompt: 'open browser',
         workdir: '/tmp/agent-e',
       },
       'full-auto',
-      'http://127.0.0.1:8931/mcp',
+      '/tmp/playwright-profile',
     );
 
     expect(args).toContain('-c');
-    expect(args).toContain('mcp_servers.playwright={ url = "http://127.0.0.1:8931/mcp" }');
-    expect(args).not.toContain('mcp_servers.playwright.url="http://127.0.0.1:8931/mcp"');
+    expect(args).toContain('mcp_servers.playwright.command="npx"');
+    expect(args).toContain(
+      'mcp_servers.playwright.args=["-y","@playwright/mcp@latest","--save-session","--user-data-dir","/tmp/playwright-profile","--output-dir","/tmp/playwright-profile"]',
+    );
   });
 });
 
@@ -159,15 +161,17 @@ describe('buildCodexReviewArgs', () => {
     ]);
   });
 
-  it('replaces the playwright MCP table with a URL config for review runs', () => {
+  it('injects playwright MCP stdio config for review runs', () => {
     const args = buildCodexReviewArgs(
       { mode: 'uncommitted', workdir: '/tmp/agent-f' },
       'full-auto',
-      'http://127.0.0.1:8931/mcp',
+      '/tmp/playwright-profile',
     );
 
     expect(args).toContain('-c');
-    expect(args).toContain('mcp_servers.playwright={ url = "http://127.0.0.1:8931/mcp" }');
-    expect(args).not.toContain('mcp_servers.playwright.url="http://127.0.0.1:8931/mcp"');
+    expect(args).toContain('mcp_servers.playwright.command="npx"');
+    expect(args).toContain(
+      'mcp_servers.playwright.args=["-y","@playwright/mcp@latest","--save-session","--user-data-dir","/tmp/playwright-profile","--output-dir","/tmp/playwright-profile"]',
+    );
   });
 });
