@@ -8,12 +8,6 @@ const DEFAULT_AGENT_ID = 'default';
 const HIDDEN_AGENT_ID_PREFIXES = ['memory-onboarding'];
 const HIDDEN_AGENT_NAMES = new Set(['记忆初始化引导']);
 
-export interface SessionMeta {
-  name?: string;
-  lastPrompt?: string;
-  updatedAt: number;
-}
-
 export interface SessionListItem {
   threadId: string;
   name?: string;

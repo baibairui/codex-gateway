@@ -92,7 +92,6 @@ npm start
 - `/model` `/models`
 - `/search on|off`
 - `/open <URL>`
-- `/deploy-workspace`
 - `/review` `/review base <分支>` `/review commit <SHA>`
 
 ## 工作区与记忆设计

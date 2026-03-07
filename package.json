@@ -8,8 +8,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc -p tsconfig.json",
-    "publish:workspace": "bash ./bin/publish-workspace.sh",
-    "tmp:deploy": "cd /opt/gateway && npm run publish:workspace"
+    "publish:workspace": "bash ./bin/publish-workspace.sh"
   },
   "keywords": [
     "wecom",

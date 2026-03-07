@@ -154,11 +154,12 @@ describe('handleUserCommand', () => {
     expect(handleUserCommand('/review base main', context).reviewTarget).toBe('main');
   });
 
-  it('marks /remind as deprecated', () => {
+  it('treats /remind as unknown command', () => {
     const result = handleUserCommand('/remind 5min 喝水', context);
     expect(result.handled).toBe(true);
-    expect(result.message).toContain('已废弃');
+    expect(result.message).toContain('未识别命令');
   });
+
 });
 
 describe('commandNeedsDetailedSessions', () => {

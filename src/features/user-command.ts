@@ -94,7 +94,6 @@ export function handleUserCommand(content: string, context: UserCommandContext =
 
   const parts = raw.split(/\s+/).filter(Boolean);
   const cmd = (parts[0] ?? '').toLowerCase();
-
   switch (cmd) {
     case '/help':
       return {
@@ -125,9 +124,7 @@ export function handleUserCommand(content: string, context: UserCommandContext =
           '/skills disable agent <skillName> - 禁用某个当前 agent skill',
           '/search - 查看联网搜索状态',
           '/search on|off - 开启/关闭联网搜索',
-          '/remind - 已废弃，请直接描述提醒需求，交由 agent 调用提醒工具处理',
           '/open <URL> - 在宿主机打开浏览器',
-          '/deploy-workspace - 发布当前 workspace 到网关运行目录',
           '/review - 审查当前 agent 工作区变更',
           '/review base <分支> - 审查相对分支的变更',
           '/review commit <SHA> - 审查指定提交',
@@ -353,12 +350,6 @@ export function handleUserCommand(content: string, context: UserCommandContext =
         message: '用法：/search on|off',
       };
     }
-    case '/remind':
-    case '/reminder':
-      return {
-        handled: true,
-        message: '该命令已废弃。请直接描述提醒需求（例如“1小时后提醒我开会”），由 agent 调用提醒工具自动执行。',
-      };
     case '/open': {
       const url = parts[1] ?? '';
       if (!url) {
