@@ -28,6 +28,8 @@ describe('AgentWorkspaceManager', () => {
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'decisions.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'open-loops.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'daily', 'README.md'))).toBe(true);
+    const identity = fs.readFileSync(path.join(result.workspaceDir, 'memory', 'identity.md'), 'utf8');
+    expect(identity).toContain('- Language style:');
     expect(fs.existsSync(path.join(result.workspaceDir, 'browser-playbook.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'agents', 'openai.yaml'))).toBe(true);
@@ -65,7 +67,9 @@ describe('AgentWorkspaceManager', () => {
 
     expect(result.agentId).toBe('memory-onboarding');
     expect(agentsMd).toContain('初始化职责');
+    expect(agentsMd).toContain('语言风格');
     expect(checklist).toContain('Round 1: Identity');
+    expect(checklist).toContain('language style');
   });
 
   it('creates scaffold for skill onboarding template', () => {
@@ -126,4 +130,5 @@ describe('AgentWorkspaceManager', () => {
 
     expect(manager.isSharedMemoryEmpty(userId)).toBe(false);
   });
+
 });

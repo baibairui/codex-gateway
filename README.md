@@ -147,9 +147,9 @@ npm start
 - `AGENTS.md` 是 Codex 自动读取的工作区规则入口。
 - `agent.md` 是该 agent 的主记忆索引。
 - `shared-memory/` 是同一用户下所有 agent 共用的记忆层。
-- `shared-memory/identity.md` 是用户跨 agent 的统一身份内核（角色、语气、原则），会在新线程或身份版本变化时自动注入一次。
+- `shared-memory/identity.md` 是用户跨 agent 的统一身份内核（身份名字、角色、语言风格、语气、原则），会在新线程或身份版本变化时自动注入一次。
 - `_memory-steward/` 是系统后台工作区，定时运行，用于整理 shared-memory；不面向最终用户。
-- `memory/identity.md` 是当前 agent 的身份内核副本，冲突按最新用户输入覆盖。
+- `memory/identity.md` 是当前 agent 的身份内核副本（含身份名字与语言风格），冲突按最新用户输入覆盖。
 - `memory/profile.md` / `preferences.md` / `projects.md` / `relationships.md` 用于保存 personal agent 的长期稳定信息。
 - `memory/decisions.md` 用于记录已确认的重要决定，`memory/open-loops.md` 用于记录未来还要继续跟进的事项。
 - `memory/daily/YYYY-MM-DD.md` 用于保存当天短期上下文和临时笔记。

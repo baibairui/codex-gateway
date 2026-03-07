@@ -317,6 +317,7 @@ describe('createChatHandler', () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
       workdir: '/tmp/memory-onboarding',
       search: false,
+      prompt: expect.stringContaining('language style'),
     }));
     expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
     expect(sessionStore.getSession('local-owner', 'memory-onboarding')).toBe('thread_onboarding');
