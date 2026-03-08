@@ -15,9 +15,17 @@ export class WorkspacePublisher {
   }
 
   publish(): Promise<{ output: string }> {
+    return this.runScript('publish:workspace');
+  }
+
+  repairUsers(): Promise<{ output: string }> {
+    return this.runScript('repair:users');
+  }
+
+  private runScript(scriptName: string): Promise<{ output: string }> {
     return new Promise((resolve, reject) => {
       const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-      const child = spawn(npmCommand, ['run', 'publish:workspace'], {
+      const child = spawn(npmCommand, ['run', scriptName], {
         cwd: this.cwd,
         env: process.env,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -49,7 +57,7 @@ export class WorkspacePublisher {
           resolve({ output: output.trim() });
           return;
         }
-        reject(new Error(`publish exited with code ${code}\n${output.trim()}`));
+        reject(new Error(`${scriptName} exited with code ${code}\n${output.trim()}`));
       });
     });
   }

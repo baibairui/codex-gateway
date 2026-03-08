@@ -30,6 +30,7 @@ export interface UserCommandResult {
   reviewTarget?: string;
   reviewPrompt?: string;
   publishWorkspace?: boolean;
+  repairUsers?: boolean;
   queryAgent?: boolean;
   queryAgents?: boolean;
   createAgentName?: string;
@@ -122,6 +123,7 @@ const HELP_PAGES: Array<{ title: string; lines: string[] }> = [
       '/review - 审查当前 agent 工作区变更',
       '/review base [分支] - 审查相对分支的变更',
       '/review commit [SHA] - 审查指定提交',
+      '/repair-users - 清理并修复已部署用户工作区（技能注入与规则升级）',
       '/login - 使用设备码登录 Codex',
       '提醒任务请直接用自然语言描述，由已安装的 reminder-tool skill 调用提醒工具执行。',
     ],
@@ -398,6 +400,12 @@ export function handleUserCommand(content: string, context: UserCommandContext =
       return {
         handled: true,
         publishWorkspace: true,
+      };
+    case '/repair-users':
+    case '/repairusers':
+      return {
+        handled: true,
+        repairUsers: true,
       };
     case '/review': {
       const args = parts.slice(1);

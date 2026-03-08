@@ -67,6 +67,7 @@ interface CodexRunnerLike {
 
 interface WorkspacePublisherLike {
   publish(): Promise<{ output: string }>;
+  repairUsers(): Promise<{ output: string }>;
 }
 
 interface AgentWorkspaceManagerLike {
@@ -79,6 +80,12 @@ interface AgentWorkspaceManagerLike {
   isSharedMemoryEmpty(userId: string): boolean;
   isWorkspaceIdentityEmpty?(workspaceDir: string): boolean;
   getSharedMemorySnapshot?: (userId: string) => {
+    sharedMemoryDir: string;
+    identityContent: string;
+    identityVersion: string;
+    hasIdentity: boolean;
+  };
+  getIdentitySnapshot?: (userId: string, workspaceDir: string) => {
     sharedMemoryDir: string;
     identityContent: string;
     identityVersion: string;
@@ -253,19 +260,9 @@ function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
   return [
     '你必须遵循以下飞书回发协议：',
     '1. 默认输出普通文本，不要输出 JSON。',
-    '2. 只有当用户明确要求“请发送/回发某种非文本消息”时，才输出单个 JSON 对象。',
-    '3. 输出 JSON 时禁止使用 markdown 代码块，禁止附加解释文字，只输出 JSON 本体。',
-    '4. JSON 格式必须为：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
-    '5. 飞书常用 msg_type：text、markdown、post、image、file、audio、media、sticker、interactive、share_chat、share_user。',
-    '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
-    '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path/local_sticker_path，必须先读取对应本地文件并给出分析结果，不要先追问目标。',
-    '8. 若明确需要回发飞书非文本消息，且你已经拿到本地文件路径，可在 JSON content 中直接提供 local_image_path/local_file_path/local_audio_path/local_media_path，网关会自动上传后发送。',
-    '9. 回发飞书 interactive 时，可优先使用简写 content：{"template_id":"...","template_variable":{...}}，网关会自动转换为模板卡片格式。',
-    '10. 回发飞书 post 时，若只是普通富文本段落，可直接把 content 写成字符串，网关会自动转换为基础 post 格式。',
-    '11. 回发飞书 sticker 时，若已有本地贴纸文件，可直接提供 local_sticker_path，网关会自动上传后发送。',
-    '12. 选择消息类型时遵循：简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。',
-    '13. image/file/audio/media/sticker/share_chat/share_user 只在用户明确要求发送对应类型，或你已经拿到可发送资源（如 key、本地路径、分享对象ID）时使用。',
-    '14. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 post 或 interactive。',
+    '2. 仅当用户明确要求回发非文本消息时，输出单个 JSON 对象：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
+    '3. 用户消息包含 local_*_path 时，先读取并分析本地文件，再回复结果。',
+    '4. 输出 JSON 时禁止 markdown 代码块和解释文字。',
     '',
     '用户输入如下：',
     userPrompt,
@@ -276,12 +273,9 @@ function buildWeComOutboundMessageProtocolPrompt(userPrompt: string): string {
   return [
     '你必须遵循以下企微回发协议：',
     '1. 默认输出普通文本，不要输出 JSON。',
-    '2. 只有当用户明确要求“请发送/回发某种非文本消息”时，才输出单个 JSON 对象。',
-    '3. 输出 JSON 时禁止使用 markdown 代码块，禁止附加解释文字，只输出 JSON 本体。',
-    '4. JSON 格式必须为：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
-    '5. 企微常用 msg_type：text、markdown、image、voice、video、file。',
-    '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
-    '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path，可先读取对应本地文件并给出分析结果；若明确需要回发企微非文本消息，且你已经拿到本地路径，可在 JSON content 中直接提供这些路径，网关会先上传再发送。',
+    '2. 仅当用户明确要求回发非文本消息时，输出单个 JSON 对象：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
+    '3. 用户消息包含 local_*_path 时，先读取并分析本地文件，再回复结果。',
+    '4. 输出 JSON 时禁止 markdown 代码块和解释文字。',
     '',
     '用户输入如下：',
     userPrompt,
@@ -374,7 +368,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     threadId?: string;
   }): Promise<{ threadId?: string; boundIdentityVersion?: string }> {
     const { channel, userId, sessionUserKey, agent, model } = input;
-    const snapshot = deps.agentWorkspaceManager.getSharedMemorySnapshot?.(sessionUserKey);
+    const snapshot = deps.agentWorkspaceManager.getIdentitySnapshot
+      ? deps.agentWorkspaceManager.getIdentitySnapshot(sessionUserKey, agent.workspaceDir)
+      : deps.agentWorkspaceManager.getSharedMemorySnapshot?.(sessionUserKey);
     if (!snapshot || isSystemAgentId(agent.agentId)) {
       return {
         threadId: input.threadId,
@@ -669,17 +665,32 @@ ${clipMessage(prompt, 500)}
     function normalizeVisibleCurrentAgent(userKey: string): AgentRecord {
       const selected = deps.sessionStore.getCurrentAgent(userKey);
       if (!isSystemAgentRecord(selected)) {
-        return selected;
+        if (selected.agentId !== 'default') {
+          return selected;
+        }
       }
 
       const listedAgents = deps.sessionStore.listAgents(userKey, { includeHidden: true });
       const customFallback = listedAgents.find((item) => !item.isDefault && !isSystemAgentRecord(item));
-      const fallback = customFallback ?? listedAgents.find((item) => !isSystemAgentRecord(item));
+      const fallback = customFallback
+        ?? listedAgents.find((item) => !item.isDefault);
       if (fallback) {
         deps.sessionStore.setCurrentAgent(userKey, fallback.agentId);
         return deps.sessionStore.getCurrentAgent(userKey);
       }
-      return selected;
+
+      const workspace = deps.agentWorkspaceManager.createWorkspace({
+        userId: userKey,
+        agentName: '助理',
+        existingAgentIds: listedAgents.map((item) => item.agentId),
+      });
+      const agent = deps.sessionStore.createAgent(userKey, {
+        agentId: workspace.agentId,
+        name: '助理',
+        workspaceDir: workspace.workspaceDir,
+      });
+      deps.sessionStore.setCurrentAgent(userKey, agent.agentId);
+      return deps.sessionStore.getCurrentAgent(userKey);
     }
 
     if (commandResult.handled) {
@@ -973,6 +984,28 @@ ${clipMessage(text, 500)}
         }
         return;
       }
+      if (commandResult.repairUsers) {
+        if (!deps.workspacePublisher) {
+          await sendCommandText('⚠️ 当前服务未开启用户修复命令，请联系管理员。');
+          return;
+        }
+        await sendCommandText('⏳ 正在执行用户工作区修复，请稍候...');
+        try {
+          const result = await deps.workspacePublisher.repairUsers();
+          const preview = result.output
+            ? `\n\n修复输出（末尾）：\n${clipMessage(result.output, 600)}`
+            : '';
+          await sendCommandText(`✅ 用户工作区修复完成。${preview}`);
+        } catch (error) {
+          log.error('handleText /repair-users 执行失败', {
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+          });
+          await sendCommandText('❌ 用户工作区修复失败，请检查日志后重试。');
+        }
+        return;
+      }
       if (commandResult.reviewMode) {
         if (!deps.rateLimitStore.allow(sessionUserKey)) {
           log.warn('handleText /review 命中限流，拒绝执行', { userId });
@@ -1036,8 +1069,12 @@ ${clipMessage(text, 500)}
     const isSharedMemoryEmpty = deps.agentWorkspaceManager.isSharedMemoryEmpty(sessionUserKey);
     const isCurrentAgentIdentityEmpty = !isSystemAgentRecord(currentAgent)
       && !!deps.agentWorkspaceManager.isWorkspaceIdentityEmpty?.(currentAgent.workspaceDir);
-    const shouldStartMemoryOnboarding = isSharedMemoryEmpty;
-    const onboardingReason = isCurrentAgentIdentityEmpty ? 'both' : 'shared';
+    const shouldStartMemoryOnboarding = isSharedMemoryEmpty || isCurrentAgentIdentityEmpty;
+    const onboardingReason: 'shared' | 'agent' | 'both' = isSharedMemoryEmpty && isCurrentAgentIdentityEmpty
+      ? 'both'
+      : isSharedMemoryEmpty
+      ? 'shared'
+      : 'agent';
     const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, MEMORY_ONBOARDING_AGENT_ID);
 
     if (shouldStartMemoryOnboarding) {
@@ -1054,6 +1091,8 @@ ${clipMessage(text, 500)}
           [
             onboardingReason === 'shared'
               ? '🧭 检测到 shared-memory 为空，先进行记忆初始化。'
+              : onboardingReason === 'agent'
+              ? '🧭 检测到当前 agent 自身份未初始化，先进行记忆初始化。'
               : '🧭 检测到 shared-memory 与当前 agent 自身份都未初始化，先进行记忆初始化。',
             renderMemoryOnboardingStartMessage(onboardingReason),
           ].join('\n'),

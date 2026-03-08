@@ -87,7 +87,7 @@ const sessionStore = new SessionStore(path.join(dataDir, 'sessions.db'), {
 log.debug('SessionStore 已初始化');
 const agentWorkspaceManager = new AgentWorkspaceManager(agentsDir);
 log.debug('AgentWorkspaceManager 已初始化', { agentsDir });
-syncBuiltInSkills(codexWorkdir, agentsDir);
+syncBuiltInSkills(agentsDir);
 const dedupStore = new MessageDedupStore(config.dedupWindowSeconds);
 log.debug('MessageDedupStore 已初始化', { dedupWindowSeconds: config.dedupWindowSeconds });
 const rateLimitStore = new RateLimitStore(config.rateLimitMaxMessages, config.rateLimitWindowSeconds);
@@ -626,10 +626,10 @@ async function appDepsHandleText(input: {
   });
 }
 
-function syncBuiltInSkills(defaultWorkspaceDir: string, customAgentsRootDir: string): void {
-  installReminderToolSkill(path.resolve(defaultWorkspaceDir));
-  installFeishuOfficialOpsSkill(path.resolve(defaultWorkspaceDir));
-  const usersDir = path.join(customAgentsRootDir, 'users');
+function syncBuiltInSkills(agentsRootDir: string): void {
+  installReminderToolSkill(path.resolve(agentsRootDir));
+  installFeishuOfficialOpsSkill(path.resolve(agentsRootDir));
+  const usersDir = path.join(agentsRootDir, 'users');
   if (!fs.existsSync(usersDir)) {
     return;
   }

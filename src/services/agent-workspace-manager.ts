@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { installReminderToolSkill } from './reminder-tool-skill.js';
+import { installFeishuOfficialOpsSkill } from './feishu-official-ops-skill.js';
 
 export interface AgentWorkspaceRecord {
   agentId: string;
@@ -124,7 +125,12 @@ export class AgentWorkspaceManager {
       path.join(workspaceDir, 'browser-playbook.md'),
       renderBrowserPlaybook(),
     );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'feishu-ops-playbook.md'),
+      renderFeishuOpsPlaybook(),
+    );
     installReminderToolSkill(workspaceDir);
+    installFeishuOfficialOpsSkill(workspaceDir);
 
     return {
       agentId,
@@ -163,7 +169,7 @@ export class AgentWorkspaceManager {
       return true;
     }
     const content = fs.readFileSync(identityPath, 'utf8');
-    return !hasMeaningfulMemoryContent(content);
+    return !hasInitializedCurrentAgentIdentity(content);
   }
 
   getSharedMemorySnapshot(userId: string): SharedMemorySnapshot {
@@ -181,6 +187,39 @@ export class AgentWorkspaceManager {
         ? createHash('sha1').update(normalized).digest('hex').slice(0, 16)
         : 'empty',
       hasIdentity: !!normalized,
+    };
+  }
+
+  getIdentitySnapshot(userId: string, workspaceDir: string): SharedMemorySnapshot {
+    const shared = this.getSharedMemorySnapshot(userId);
+    const identityPath = path.join(workspaceDir, 'memory', 'identity.md');
+    if (!fs.existsSync(identityPath)) {
+      return shared;
+    }
+    const content = fs.readFileSync(identityPath, 'utf8');
+    const normalized = normalizeIdentityText(content);
+    if (!normalized) {
+      return shared;
+    }
+    const combinedContent = [
+      '# Identity',
+      '',
+      '## Global User Identity (Shared Memory)',
+      shared.identityContent.trim(),
+      '',
+      '## Current Agent Identity (Agent Memory)',
+      content.trim(),
+      '',
+      '## Injection Rules',
+      '- 上述两部分都必须遵守，不可互相替代。',
+      '- 用户全局身份用于长期风格与原则；当前 agent 身份用于当前角色、职责和边界。',
+    ].join('\n');
+    const versionSeed = `${normalizeIdentityText(shared.identityContent)}\n---\n${normalized}`;
+    return {
+      sharedMemoryDir: shared.sharedMemoryDir,
+      identityContent: combinedContent,
+      identityVersion: createHash('sha1').update(versionSeed).digest('hex').slice(0, 16),
+      hasIdentity: true,
     };
   }
 
@@ -406,6 +445,7 @@ function renderWorkspaceAgentsMd(
     '- `./memory/decisions.md`',
     '- `./memory/open-loops.md`',
     '- `./browser-playbook.md`',
+    '- `./feishu-ops-playbook.md`',
     `- \`${sharedDir}/identity.md\``,
     `- \`${sharedDir}/profile.md\``,
     `- \`${sharedDir}/preferences.md\``,
@@ -590,6 +630,32 @@ function renderBrowserPlaybook(): string {
     '',
     '## Output Style',
     '- 更新要短、具体、可核对：动作、证据、下一步都要明确。',
+    '',
+  ].join('\n');
+}
+
+function renderFeishuOpsPlaybook(): string {
+  return [
+    '# Feishu Ops Playbook',
+    '',
+    '## Scope',
+    '- 目标是执行真实飞书 OpenAPI 操作（DocX / Wiki），不是口头承诺。',
+    '- 优先使用 `./.codex/skills/feishu-official-ops/SKILL.md` 及其 CLI。',
+    '',
+    '## Standard Workflow',
+    '1. 明确目标：创建文档、创建 wiki 节点、查询节点、列出空间。',
+    '2. 先做只读探测（优先 `wiki list-spaces`），确认鉴权和权限状态。',
+    '3. 再执行写操作（如 `docx create` / `wiki create-node`)。',
+    '4. 输出真实返回（document_id/node token/错误码），不要编造成果。',
+    '',
+    '## Error Classification',
+    '- 缺少凭据：`FEISHU_APP_ID` / `FEISHU_APP_SECRET` 未配置。',
+    '- 权限不足：应用缺少对应 OpenAPI scope。',
+    '- 接口可用：只读探测成功，可继续写操作。',
+    '',
+    '## Guardrails',
+    '- 未实际调用 API 前，不得说“已创建”。',
+    '- 遇到错误必须带上真实错误信息和下一步建议。',
     '',
   ].join('\n');
 }
@@ -903,4 +969,35 @@ function stripIdentityTitle(content: string): string[] {
     start += 1;
   }
   return lines.slice(start);
+}
+
+function hasInitializedCurrentAgentIdentity(content: string): boolean {
+  const requiredFieldLabels = [
+    'Primary responsibility',
+    'Mission',
+    'Success criteria',
+  ];
+  for (const label of requiredFieldLabels) {
+    const pattern = new RegExp(`^-\\s+${label}:\\s*(.*)$`, 'im');
+    const match = content.match(pattern);
+    const value = match?.[1]?.trim() ?? '';
+    if (!value || value === '-') {
+      return false;
+    }
+  }
+  return hasInitializedListField(content, 'Decision principles')
+    && hasInitializedListField(content, 'Boundaries');
+}
+
+function hasInitializedListField(content: string, label: string): boolean {
+  const blockPattern = new RegExp(`^-\\s+${label}:\\s*\\n((?:\\s{2,}-.*\\n?)*)`, 'im');
+  const blockMatch = content.match(blockPattern);
+  if (!blockMatch) {
+    return false;
+  }
+  const lines = blockMatch[1]
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('-'));
+  return lines.some((line) => line !== '-');
 }

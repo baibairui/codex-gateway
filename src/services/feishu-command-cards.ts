@@ -40,6 +40,7 @@ const COMMAND_LABELS: Record<string, string> = {
   '/search': '联网搜索',
   '/deploy-workspace': 'Workspace 发布',
   '/publish-workspace': 'Workspace 发布',
+  '/repair-users': '用户工作区修复',
   '/review': '代码审查',
 };
 
@@ -54,6 +55,7 @@ const COMMAND_SUMMARIES: Record<string, string> = {
   '/search': '控制本会话的联网搜索开关，按需临时开启。',
   '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
   '/login': '重新触发登录授权流程，恢复 Codex 执行能力。',
+  '/repair-users': '批量清理并升级已部署用户工作区，修复内置 skill 与规则注入。',
 };
 
 const COMMAND_TEMPLATES: Record<string, FeishuCardTemplate> = {
@@ -70,6 +72,7 @@ const COMMAND_TEMPLATES: Record<string, FeishuCardTemplate> = {
   '/search': 'wathet',
   '/review': 'orange',
   '/login': 'blue',
+  '/repair-users': 'orange',
 };
 
 const CARD_COPY = {
@@ -133,6 +136,10 @@ const STATIC_QUICK_ACTIONS: Record<string, CommandQuickAction[]> = {
   ],
   '/login': [
     { label: '重新登录', cmd: '/login', type: 'primary' },
+    { label: '查看帮助', cmd: '/help' },
+  ],
+  '/repair-users': [
+    { label: '执行修复', cmd: '/repair-users', type: 'primary' },
     { label: '查看帮助', cmd: '/help' },
   ],
 };

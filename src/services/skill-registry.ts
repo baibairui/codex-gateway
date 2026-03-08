@@ -78,7 +78,8 @@ function dedupeSkillEntries(entries: SkillCatalogEntry[]): SkillCatalogEntry[] {
     return a.name.localeCompare(b.name);
   });
   for (const entry of sorted) {
-    const key = `${entry.source}:${entry.name.toLowerCase()}`;
+    // 同名 skill 只保留一个：按排序优先级，agent-local 覆盖 global。
+    const key = entry.name.toLowerCase();
     if (seen.has(key)) {
       continue;
     }

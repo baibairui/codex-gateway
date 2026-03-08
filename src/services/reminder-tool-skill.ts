@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const REMINDER_TOOL_SKILL_NAME = 'reminder-tool';
+const REMINDER_RULE_START = '<!-- gateway:reminder-rule:start -->';
+const REMINDER_RULE_END = '<!-- gateway:reminder-rule:end -->';
 
 export function installReminderToolSkill(workspaceDir: string): void {
   installToSkillRoot(path.join(workspaceDir, '.codex', 'skills'));
@@ -68,20 +70,19 @@ function ensureAgentsReminderRule(workspaceDir: string): void {
     return;
   }
   const content = fs.readFileSync(agentsPath, 'utf8');
-  if (
-    content.includes('./.codex/skills/reminder-tool/SKILL.md')
-    || content.includes('$reminder-tool')
-  ) {
-    return;
-  }
   const reminderSection = [
-    '',
+    REMINDER_RULE_START,
     '提醒规则：',
     '- 用户提出“稍后提醒我”或定时任务需求时，优先使用 `./.codex/skills/reminder-tool/SKILL.md`。',
     '- 必须调用 `create_reminder` 工具创建提醒，不要要求用户输入 `/remind`。',
-    '',
+    REMINDER_RULE_END,
   ].join('\n');
-  fs.writeFileSync(agentsPath, `${content.trimEnd()}\n${reminderSection}`, 'utf8');
+  const next = upsertManagedSection(content, REMINDER_RULE_START, REMINDER_RULE_END, reminderSection, [
+    /(?:\n|^)提醒规则：[\s\S]*?(?=\n[A-Z\u4e00-\u9fff#].*：|\n执行权限规则：|\n飞书官方操作规则：|\n$)/m,
+  ]);
+  if (next !== content) {
+    fs.writeFileSync(agentsPath, `${next.trimEnd()}\n`, 'utf8');
+  }
 }
 
 function installToSkillRoot(skillRootDir: string): void {
@@ -94,4 +95,25 @@ function installToSkillRoot(skillRootDir: string): void {
 function removeLegacySkillDirs(workspaceDir: string): void {
   fs.rmSync(path.join(workspaceDir, 'skills', REMINDER_TOOL_SKILL_NAME), { recursive: true, force: true });
   fs.rmSync(path.join(workspaceDir, '.agent', 'skills', REMINDER_TOOL_SKILL_NAME), { recursive: true, force: true });
+}
+
+function upsertManagedSection(
+  content: string,
+  startMarker: string,
+  endMarker: string,
+  section: string,
+  legacyPatterns: RegExp[],
+): string {
+  let next = content;
+  for (const pattern of legacyPatterns) {
+    next = next.replace(pattern, '\n');
+  }
+  const start = next.indexOf(startMarker);
+  const end = next.indexOf(endMarker);
+  if (start >= 0 && end > start) {
+    const before = next.slice(0, start).trimEnd();
+    const after = next.slice(end + endMarker.length).trimStart();
+    return [before, section, after].filter(Boolean).join('\n\n');
+  }
+  return `${next.trimEnd()}\n\n${section}\n`;
 }
