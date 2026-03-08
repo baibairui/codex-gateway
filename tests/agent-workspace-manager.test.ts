@@ -119,6 +119,10 @@ describe('AgentWorkspaceManager', () => {
 
     expect(agentsMd).toContain('浏览器操作职责');
     expect(playbook).toContain('Browser Playbook');
+    expect(playbook).toContain('回报格式固定：已执行动作 -> 页面证据 -> 当前结论 -> 下一步。');
+    expect(playbook).toContain('## Stop Conditions');
+    expect(playbook).toContain('多个相似目标并存');
+    expect(playbook).toContain('需要用户做出的精确决策');
   });
 
   it('detects shared memory emptiness by meaningful content', () => {
