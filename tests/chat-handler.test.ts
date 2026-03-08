@@ -1272,6 +1272,8 @@ describe('createChatHandler', () => {
     expect(prompt).toContain('简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。');
     expect(prompt).toContain('若是在汇报浏览器执行中的阶段性进度');
     expect(prompt).toContain('Action/Evidence/Result/Next step');
+    expect(prompt).toContain('若是在请求用户接管浏览器步骤');
+    expect(prompt).toContain('阻塞原因、风险点、待确认项');
     expect(prompt).toContain('如果不确定该用哪种类型，优先退回 text');
   });
 
