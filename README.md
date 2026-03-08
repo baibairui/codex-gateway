@@ -89,6 +89,22 @@ npm install
 npx playwright install chromium
 ```
 
+如果你部署在没有图形界面的 Linux 服务器上，再安装一次：
+
+```bash
+sudo apt-get install -y xvfb
+```
+
+启动脚本会自动判断：
+- 有可用 `DISPLAY` 时，沿用原来的有头浏览器启动方式
+- 没有 `DISPLAY` 时，自动改用 `xvfb-run` 提供虚拟显示
+
+如需强制走虚拟显示，可额外设置：
+
+```bash
+GATEWAY_FORCE_XVFB=true
+```
+
 可选：安装本地 CLI 命令（安装后可直接用 `codexclaw`）：
 
 ```bash
@@ -155,6 +171,25 @@ CODEX_SEARCH=false
 - 所有 agent 默认共用同一套浏览器 profile，所以登录态可以复用
 - 浏览器窗口只有在手动关闭它或 gateway 退出时才会结束
 - 录屏工具已支持：`browser_start_recording` 开始录制、`browser_stop_recording` 停止并产出本地 mp4；宿主机需安装 `ffmpeg`
+
+Agent 浏览器操作指南（推荐）：
+
+1. 先定义任务成功标准，再执行页面动作。
+2. 默认复用当前标签页，先 `browser_snapshot` 再决定是否 `browser_navigate`。
+3. 每次只做一个小动作（点/输/选/等），动作后立刻做一次 `snapshot` 或截图确认。
+4. 回报必须包含：执行动作、页面证据、当前结论、下一步。
+
+登录与扫码：
+
+- 遇到登录、OTP、验证码、支付确认时，必须切人工接管，不得伪造完成。
+- 扫码流程先输出二维码截图，再等待用户回复“继续”。
+- 用户回复“继续”后先校验登录态，再恢复自动化步骤。
+
+失败处理与边界：
+
+- 同一动作最多重试 2 次；仍失败就回报阻塞点并请求用户决策。
+- 禁止在页面状态未知时连续点击或连续输入。
+- 只允许走 gateway 的 `browser_*` MCP 工具，不允许改走 playwright-cli、`npx @playwright/mcp` 或其他脚本入口。
 
 如果你不接企业微信，可以这样关掉：
 
