@@ -83,4 +83,17 @@ describe('config feishu mention trigger', () => {
 
     expect(config.feishuGroupRequireMention).toBe(false);
   });
+
+  it('reads feishu startup help config', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'false',
+      CODEX_SANDBOX: 'full-auto',
+      FEISHU_STARTUP_HELP_ENABLED: 'true',
+      FEISHU_STARTUP_HELP_ADMIN_OPEN_ID: 'ou_admin',
+    });
+
+    expect(config.feishuStartupHelpEnabled).toBe(true);
+    expect(config.feishuStartupHelpAdminOpenId).toBe('ou_admin');
+  });
 });
