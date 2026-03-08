@@ -11,6 +11,7 @@ export interface BrowserLocatorLike {
   selectOption?(value: string | string[]): Promise<void>;
   setInputFiles?(files: string | string[]): Promise<void>;
   setChecked?(checked: boolean): Promise<void>;
+  screenshot?(options: Record<string, unknown>): Promise<Buffer>;
 }
 
 export interface BrowserKeyboardLike {
@@ -54,6 +55,20 @@ export interface BrowserTabSummary {
 export interface BrowserSnapshotResult {
   page: string;
   snapshot: string;
+}
+
+interface BrowserSnapshotEntry {
+  ref: string;
+  tag: string;
+  role?: string;
+  ariaLabel?: string;
+  placeholder?: string;
+  text?: string;
+  value?: string;
+  checked?: boolean;
+  disabled?: boolean;
+  selectedText?: string;
+  label?: string;
 }
 
 interface BrowserManagerOptions {
@@ -172,7 +187,7 @@ export class BrowserManager {
         'a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"]',
       ));
       let index = 0;
-      const lines: string[] = [];
+      const entries: Array<Record<string, unknown>> = [];
       for (const element of elements) {
         const visible = element.getClientRects().length > 0;
         if (!visible) {
@@ -181,25 +196,53 @@ export class BrowserManager {
         index += 1;
         const ref = `e${index}`;
         element.setAttribute(attr, ref);
-        const label = (
-          element.getAttribute('aria-label')
-          || element.getAttribute('placeholder')
-          || element.textContent
-          || element.getAttribute('value')
-          || element.tagName.toLowerCase()
-        ).trim();
-        lines.push(`- ${element.tagName.toLowerCase()} "${label}" [ref=${ref}]`);
+        const base = {
+          ref,
+          tag: element.tagName.toLowerCase(),
+          role: element.getAttribute('role') || undefined,
+          ariaLabel: element.getAttribute('aria-label') || undefined,
+          placeholder: element.getAttribute('placeholder') || undefined,
+          text: element.textContent || undefined,
+          disabled: element.hasAttribute('disabled'),
+        } as Record<string, unknown>;
+        if (element instanceof HTMLInputElement) {
+          entries.push({
+            ...base,
+            value: element.value || undefined,
+            checked: ['checkbox', 'radio'].includes(element.type) ? element.checked : undefined,
+            label: element.labels?.[0]?.textContent || undefined,
+          });
+          continue;
+        }
+        if (element instanceof HTMLTextAreaElement) {
+          entries.push({
+            ...base,
+            value: element.value || undefined,
+            label: element.labels?.[0]?.textContent || undefined,
+          });
+          continue;
+        }
+        if (element instanceof HTMLSelectElement) {
+          entries.push({
+            ...base,
+            value: element.value || undefined,
+            selectedText: element.selectedOptions?.[0]?.textContent || undefined,
+            label: element.labels?.[0]?.textContent || undefined,
+          });
+          continue;
+        }
+        entries.push(base);
       }
       return {
         url: window.location.href,
         title: document.title,
-        snapshot: lines.join('\n'),
+        entries,
       };
     }, DEFAULT_REF_ATTR);
 
     return {
       page: `- Page URL: ${state.url}\n- Page Title: ${state.title}`,
-      snapshot: state.snapshot,
+      snapshot: renderSnapshotEntries((state.entries as BrowserSnapshotEntry[] | undefined) ?? []),
     };
   }
 
@@ -320,19 +363,29 @@ export class BrowserManager {
     filename?: string;
     fullPage?: boolean;
     type?: 'png' | 'jpeg';
+    ref?: string;
   }): Promise<string> {
     const page = await this.ensureCurrentTab();
-    if (!page.screenshot) {
-      throw new Error('screenshot is not supported for this page');
-    }
     fs.mkdirSync(this.screenshotDir, { recursive: true });
     const ext = input.type === 'jpeg' ? 'jpeg' : 'png';
     const filename = input.filename?.trim() || `page-${Date.now()}.${ext}`;
     const filePath = path.isAbsolute(filename) ? filename : path.join(this.screenshotDir, filename);
-    const buffer = await page.screenshot({
-      type: ext,
-      fullPage: input.fullPage === true,
-    });
+    let buffer: Buffer;
+    if (input.ref) {
+      const locator = page.locator(selectorForRef(input.ref));
+      if (!locator.screenshot) {
+        throw new Error('element screenshot is not supported for this locator');
+      }
+      buffer = await locator.screenshot({ type: ext });
+    } else {
+      if (!page.screenshot) {
+        throw new Error('screenshot is not supported for this page');
+      }
+      buffer = await page.screenshot({
+        type: ext,
+        fullPage: input.fullPage === true,
+      });
+    }
     fs.writeFileSync(filePath, buffer);
     return filePath;
   }
@@ -391,6 +444,67 @@ export class BrowserManager {
 
 function selectorForRef(ref: string): string {
   return `[${DEFAULT_REF_ATTR}="${ref}"]`;
+}
+
+function renderSnapshotEntries(entries: BrowserSnapshotEntry[]): string {
+  return entries
+    .map((entry) => {
+      const kind = resolveSnapshotKind(entry);
+      const label = resolveSnapshotLabel(entry) || kind;
+      const suffix: string[] = [];
+      const value = normalizeSnapshotText(entry.selectedText || entry.value);
+      if (value && value !== label) {
+        suffix.push(`value="${truncateSnapshotText(value, 40)}"`);
+      }
+      if (entry.checked === true) {
+        suffix.push('checked');
+      }
+      if (entry.disabled) {
+        suffix.push('disabled');
+      }
+      const details = suffix.length > 0 ? ` ${suffix.join(' ')}` : '';
+      return `- ${kind} "${truncateSnapshotText(label, 60)}"${details} [ref=${entry.ref}]`;
+    })
+    .join('\n');
+}
+
+function resolveSnapshotKind(entry: BrowserSnapshotEntry): string {
+  if (entry.role === 'button' || entry.tag === 'button') {
+    return 'button';
+  }
+  if (entry.role === 'link' || entry.tag === 'a') {
+    return 'link';
+  }
+  if (entry.tag === 'textarea') {
+    return 'textarea';
+  }
+  if (entry.tag === 'select') {
+    return 'select';
+  }
+  return 'input';
+}
+
+function resolveSnapshotLabel(entry: BrowserSnapshotEntry): string {
+  return normalizeSnapshotText(
+    entry.ariaLabel
+      || entry.label
+      || entry.placeholder
+      || entry.text
+      || entry.selectedText
+      || entry.value
+      || entry.tag,
+  );
+}
+
+function normalizeSnapshotText(value: string | undefined): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function truncateSnapshotText(value: string, max: number): string {
+  if (value.length <= max) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
 }
 
 function createDefaultLauncher(profileDir = '.data/browser/profile'): BrowserLauncher {

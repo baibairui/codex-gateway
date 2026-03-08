@@ -7,6 +7,7 @@ class FakeLocator {
   async fill(): Promise<void> {}
   async pressSequentially(): Promise<void> {}
   async selectOption(): Promise<void> {}
+  async screenshot(): Promise<Buffer> { return Buffer.from('locator'); }
 }
 
 class FakeKeyboard {
@@ -18,6 +19,7 @@ class FakePage implements BrowserPageLike {
   public currentUrl = 'about:blank';
   public readonly keyboard = new FakeKeyboard();
   public waitedMs?: number;
+  public snapshotEntries: Array<Record<string, unknown>> = [];
 
   constructor(url = 'about:blank') {
     this.currentUrl = url;
@@ -56,7 +58,7 @@ class FakePage implements BrowserPageLike {
     return {
       url: this.currentUrl,
       title: this.currentUrl,
-      snapshot: '',
+      entries: this.snapshotEntries,
     } as T;
   }
 }
@@ -129,5 +131,40 @@ describe('BrowserManager', () => {
     await manager.waitFor({ time: 1500 });
 
     expect(page.waitedMs).toBe(1500);
+  });
+
+  it('renders snapshot entries with readable labels and states', async () => {
+    const page = new FakePage('https://example.com/form');
+    page.snapshotEntries = [
+      { ref: 'e1', tag: 'input', placeholder: 'Search docs', value: 'billing status' },
+      { ref: 'e2', tag: 'button', text: 'Save changes' },
+      { ref: 'e3', tag: 'input', label: 'Remember me', checked: true },
+      { ref: 'e4', tag: 'select', label: 'Region', selectedText: 'Hangzhou' },
+    ];
+    const manager = new BrowserManager({
+      launcher: async () => new FakeContext([page]),
+    });
+
+    const snapshot = await manager.snapshot();
+
+    expect(snapshot.snapshot).toContain('- input "Search docs" value="billing status" [ref=e1]');
+    expect(snapshot.snapshot).toContain('- button "Save changes" [ref=e2]');
+    expect(snapshot.snapshot).toContain('- input "Remember me" checked [ref=e3]');
+    expect(snapshot.snapshot).toContain('- select "Region" value="Hangzhou" [ref=e4]');
+  });
+
+  it('supports element screenshots by ref', async () => {
+    const page = new FakePage('https://example.com/form');
+    const manager = new BrowserManager({
+      launcher: async () => new FakeContext([page]),
+      screenshotDir: '/tmp/browser-manager-tests',
+    });
+
+    const filePath = await manager.takeScreenshot({
+      filename: 'field.png',
+      ref: 'e2',
+    });
+
+    expect(filePath).toBe('/tmp/browser-manager-tests/field.png');
   });
 });

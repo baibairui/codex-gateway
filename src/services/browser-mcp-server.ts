@@ -66,6 +66,10 @@ export function createBrowserMcpBackend(manager: Pick<
   listTools(): Promise<Array<Record<string, unknown>>>;
   callTool(name: string, args: Record<string, unknown>): Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 } {
+  const snapshotResult = async (): Promise<{ content: Array<{ type: 'text'; text: string }> }> => (
+    textResult(renderSnapshot(await manager.snapshot()))
+  );
+
   return {
     async listTools() {
       const tools = [
@@ -138,6 +142,8 @@ export function createBrowserMcpBackend(manager: Pick<
             filename: { type: 'string' },
             fullPage: { type: 'boolean' },
             type: { type: 'string', enum: ['png', 'jpeg'] },
+            ref: { type: 'string' },
+            element: { type: 'string' },
           },
         }),
         tool('browser_navigate_back', 'Navigate back in history', {}),
@@ -170,32 +176,32 @@ export function createBrowserMcpBackend(manager: Pick<
           return textResult(renderSnapshot(await manager.snapshot()));
         case 'browser_click':
           await manager.click(String(args.ref ?? ''));
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_hover':
           await manager.hover(String(args.ref ?? ''));
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_drag':
           await manager.drag(String(args.startRef ?? ''), String(args.endRef ?? ''));
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_type':
           await manager.type(String(args.ref ?? ''), String(args.text ?? ''), {
             slowly: args.slowly === true,
             submit: args.submit === true,
           });
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_select_option':
           await manager.selectOption(String(args.ref ?? ''), ((args.values as string[] | undefined) ?? []).map(String));
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_press_key':
           await manager.pressKey(String(args.key ?? ''));
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_wait_for':
           await manager.waitFor({
             time: typeof args.time === 'number' ? args.time : undefined,
             text: typeof args.text === 'string' ? args.text : undefined,
             textGone: typeof args.textGone === 'string' ? args.textGone : undefined,
           });
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_evaluate': {
           const output = await manager.evaluate(String(args.function ?? ''), typeof args.ref === 'string' ? args.ref : undefined);
           return textResult(typeof output === 'string' ? output : JSON.stringify(output));
@@ -205,7 +211,7 @@ export function createBrowserMcpBackend(manager: Pick<
             String(args.ref ?? ''),
             Array.isArray(args.paths) ? args.paths.map(String) : [],
           );
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_fill_form':
           await manager.fillForm(
             Array.isArray(args.fields)
@@ -216,30 +222,31 @@ export function createBrowserMcpBackend(manager: Pick<
                 }))
               : [],
           );
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_handle_dialog':
           await manager.handleDialog({
             accept: args.accept === true,
             promptText: typeof args.promptText === 'string' ? args.promptText : undefined,
           });
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_resize':
           await manager.resize({
             width: Number(args.width ?? 0),
             height: Number(args.height ?? 0),
           });
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_take_screenshot': {
           const filePath = await manager.takeScreenshot({
             filename: typeof args.filename === 'string' ? args.filename : undefined,
             fullPage: args.fullPage === true,
             type: args.type === 'jpeg' ? 'jpeg' : 'png',
+            ref: typeof args.ref === 'string' ? args.ref : undefined,
           });
           return textResult(filePath);
         }
         case 'browser_navigate_back':
           await manager.navigateBack();
-          return textResult('OK');
+          return snapshotResult();
         case 'browser_close':
           await manager.closeCurrentTab();
           return textResult('OK');
@@ -714,13 +721,21 @@ function createSdkBrowserServer(
   }, async ({ width, height }) => backend.callTool('browser_resize', { width, height }));
 
   server.registerTool('browser_take_screenshot', {
-    description: 'Take screenshot of current page',
+    description: 'Take screenshot of current page or a specific element ref',
     inputSchema: {
       filename: z.string().optional(),
       fullPage: z.boolean().optional(),
       type: z.enum(['png', 'jpeg']).optional(),
+      ref: z.string().optional(),
+      element: z.string().optional(),
     },
-  }, async ({ filename, fullPage, type }) => backend.callTool('browser_take_screenshot', { filename, fullPage, type }));
+  }, async ({ filename, fullPage, type, ref, element }) => backend.callTool('browser_take_screenshot', {
+    filename,
+    fullPage,
+    type,
+    ref,
+    element,
+  }));
 
   server.registerTool('browser_navigate_back', {
     description: 'Navigate back in history',
