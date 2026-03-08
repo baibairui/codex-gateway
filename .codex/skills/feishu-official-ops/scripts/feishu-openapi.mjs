@@ -42,6 +42,7 @@ function printHelp() {
     'Environment:',
     '  FEISHU_APP_ID',
     '  FEISHU_APP_SECRET',
+    '  FEISHU_DOC_BASE_URL (optional, e.g. https://your-domain.feishu.cn/docx)',
     '',
     'Commands:',
     '  docx create --title <title> [--folder-token <token>] [--markdown <text>] [--markdown-file <path>]',
@@ -98,6 +99,7 @@ async function getTenantAccessToken(input) {
 async function createDocx(token, args) {
   const title = args.title?.trim() || '未命名文档';
   const markdownContent = resolveMarkdownInput(args);
+  const docBaseUrl = firstNonEmptyString(args['doc-base-url'], process.env.FEISHU_DOC_BASE_URL);
   const body = {
     title,
     ...(args['folder-token'] ? { folder_token: args['folder-token'] } : {}),
@@ -121,6 +123,7 @@ async function createDocx(token, args) {
     operation: 'docx.create',
     title: document.title ?? title,
     document_id: documentId,
+    document_url: resolveDocxUrl(documentId, docBaseUrl),
     revision_id: document.revision_id ?? null,
     content_write: writeResult ?? null,
     raw: payload.data ?? null,
@@ -251,6 +254,17 @@ async function appendMarkdownToDocx(token, documentId, markdown) {
 
   let appended = 0;
   for (const chunk of chunkArray(children, 20)) {
+    await appendDocxChildrenWithRetry(token, documentId, chunk);
+    appended += chunk.length;
+  }
+  return {
+    ok: true,
+    blocks_appended: appended,
+  };
+}
+
+async function appendDocxChildrenWithRetry(token, documentId, chunk, attempt = 1) {
+  try {
     await apiRequest(
       token,
       'POST',
@@ -260,12 +274,36 @@ async function appendMarkdownToDocx(token, documentId, markdown) {
         children: chunk,
       },
     );
-    appended += chunk.length;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('feishu api failed: 429') || attempt >= 6) {
+      throw error;
+    }
+    await sleep(attempt * 1500);
+    await appendDocxChildrenWithRetry(token, documentId, chunk, attempt + 1);
   }
-  return {
-    ok: true,
-    blocks_appended: appended,
-  };
+}
+
+function resolveDocxUrl(documentId, docBaseUrl) {
+  const id = typeof documentId === 'string' ? documentId.trim() : '';
+  const base = typeof docBaseUrl === 'string' ? docBaseUrl.trim().replace(/\/+$/, '') : '';
+  if (!id || !base) {
+    return null;
+  }
+  return `${base}/${encodeURIComponent(id)}`;
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeMarkdownLine(line) {

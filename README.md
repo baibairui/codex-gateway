@@ -203,6 +203,7 @@ WECOM_ENABLED=false
 FEISHU_ENABLED=true
 FEISHU_APP_ID=你的飞书AppID
 FEISHU_APP_SECRET=你的飞书AppSecret
+FEISHU_DOC_BASE_URL=https://你的飞书域名/docx
 FEISHU_LONG_CONNECTION=true
 FEISHU_VERIFICATION_TOKEN=你的校验Token
 FEISHU_GROUP_REQUIRE_MENTION=true
@@ -214,6 +215,7 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 - 开启 `FEISHU_LONG_CONNECTION=true` 后，会关闭 `/feishu/callback` webhook 接口（不再做兜底双通道）
 - `FEISHU_VERIFICATION_TOKEN`：仅 webhook 模式需要；长连接模式可留空
 - `FEISHU_GROUP_REQUIRE_MENTION=true`：群聊默认要求 `@机器人` 才触发；私聊不受影响。显式设为 `false` 可恢复“群里任何消息都触发”
+- `FEISHU_DOC_BASE_URL`：可选。用于飞书官方操作 CLI 在创建 DocX 后直接返回可访问文档链接，例如 `https://你的飞书域名/docx`
 
 ### 飞书能力说明（当前实现）
 
