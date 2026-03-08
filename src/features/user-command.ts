@@ -105,23 +105,18 @@ const HELP_PAGES: Array<{ title: string; lines: string[] }> = [
     ],
   },
   {
-    title: '模型与技能',
+    title: '模型、技能与执行',
     lines: [
-      '/model - 查看当前模型',
+      '/model - 查看当前模型与可选模型',
+      '/model page [页码] - 查看更多模型',
       '/model [模型名] - 切换模型',
       '/model reset - 重置为默认模型',
-      '/models [页码] - 查看当前 Codex 支持的模型',
       '/skills - 查看当前会话生效 skill 列表（全局 + 当前 agent）',
       '/skills global - 查看全局 skill',
       '/skills agent - 查看当前 agent skill',
       '/skills disable global [skillName] - 禁用某个全局 skill（仅当前 agent）',
       '/skills add global [skillName] - 重新启用某个全局 skill（仅当前 agent）',
       '/skills disable agent [skillName] - 禁用某个当前 agent skill',
-    ],
-  },
-  {
-    title: '执行控制',
-    lines: [
       '/search - 查看联网搜索状态',
       '/search on|off - 开启/关闭联网搜索',
       '/review - 审查当前 agent 工作区变更',
@@ -285,6 +280,7 @@ export function handleUserCommand(content: string, context: UserCommandContext =
         return {
           handled: true,
           queryModel: true,
+          queryModelsPage: 1,
         };
       }
       const action = model.toLowerCase();
@@ -295,9 +291,17 @@ export function handleUserCommand(content: string, context: UserCommandContext =
         };
       }
       if (/\s/.test(model)) {
+        const pageMatch = model.match(/^page\s+(\d+)$/i);
+        if (pageMatch) {
+          return {
+            handled: true,
+            queryModel: true,
+            queryModelsPage: Math.max(1, Math.trunc(Number(pageMatch[1]))),
+          };
+        }
         return {
           handled: true,
-          message: '用法：/model <模型名>；模型名不能包含空格',
+          message: '用法：/model | /model page <页码> | /model <模型名>',
         };
       }
       return {
@@ -311,6 +315,7 @@ export function handleUserCommand(content: string, context: UserCommandContext =
         const page = Number.isFinite(rawPage) ? Math.max(1, Math.trunc(rawPage)) : 1;
         return {
           handled: true,
+          queryModel: true,
           queryModels: true,
           queryModelsPage: page,
         };

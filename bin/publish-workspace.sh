@@ -70,7 +70,12 @@ log "Installing dependencies"
 npm ci
 
 log "Running tests"
-npm test
+mapfile -t test_files < <(find "$TARGET_DIR/tests" -type f -name '*.test.ts' | sort)
+if [ "${#test_files[@]}" -eq 0 ]; then
+  printf 'no test files found under %s/tests\n' "$TARGET_DIR" >&2
+  exit 1
+fi
+npx vitest run --exclude 'workspace/**' "${test_files[@]}"
 
 log "Building project"
 npm run build

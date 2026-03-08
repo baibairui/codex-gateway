@@ -76,8 +76,6 @@ const CARD_COPY = {
   genericTitle: '命令结果',
   actionTitle: '快捷操作',
   actionHint: '点击按钮可继续执行相关命令',
-  actionFallback: '若平台未启用卡片回调，也可手动发送对应命令文本。',
-  usagePrefix: '提示：',
   sessionsTitle: '会话总览',
   agentsTitle: 'Agent 列表',
   helpTitle: '帮助目录',
@@ -363,34 +361,12 @@ function resolveModelPageInfo(text: string): { page: number; total: number } | u
   };
 }
 
-function formatModelDisplayName(slug: string): string {
-  return slug
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((part) => {
-      if (/^gpt$/i.test(part)) {
-        return 'GPT';
-      }
-      if (/^o\d+$/i.test(part)) {
-        return part.toUpperCase();
-      }
-      if (/^\d+$/.test(part)) {
-        return part;
-      }
-      if (/^codex$/i.test(part)) {
-        return 'Codex';
-      }
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join(' ');
-}
-
 function buildSessionsCardElements(text: string): Array<Record<string, unknown>> {
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
   const indexed = extractIndexedLines(text);
   const currentSession = indexed.find((line) => line.startsWith('👉'));
-  const usage = lines.find((line) => line.startsWith('使用 /switch '));
   const summary = lines[0] ?? text;
+  const sessionButtons = buildSessionButtons(indexed);
   const elements: Array<Record<string, unknown>> = [
     buildFeishuTitleBlock(CARD_COPY.sessionsTitle, summary),
   ];
@@ -401,13 +377,41 @@ function buildSessionsCardElements(text: string): Array<Record<string, unknown>>
       { label: '可执行操作', value: '切换 / 重命名' },
     ]));
   }
-  if (indexed.length > 0) {
-    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('会话项', indexed));
-  }
-  if (usage) {
-    elements.push(buildFeishuTipsNote(`${CARD_COPY.usagePrefix}${usage}`));
+  if (sessionButtons.length > 0) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('会话切换', '点击按钮切换会话'));
+    elements.push(...buildCommandButtonRows(sessionButtons, 1));
   }
   return elements;
+}
+
+function buildSessionButtons(lines: string[]): FeishuCardButton[] {
+  const buttons: FeishuCardButton[] = [];
+  for (const line of lines) {
+      const normalized = line.replace(/^👉\s+/, '');
+      const match = normalized.match(/^(\d+)\.\s+(.+)$/);
+      if (!match) {
+        continue;
+      }
+      const index = match[1];
+      const body = match[2] ?? '';
+      const title = body.split(' (')[0]?.trim() ?? body.trim();
+      const preview = body.match(/\)\s*-\s*(.+)$/)?.[1]?.trim() ?? '';
+      const labelText = preview ? `${title} · ${preview}` : title;
+      const label = truncateCardButtonLabel(labelText || `会话 ${index}`, 26);
+      buttons.push({
+        label,
+        cmd: `/switch ${index}`,
+        type: line.startsWith('👉') ? 'primary' : 'default',
+      });
+  }
+  return buttons;
+}
+
+function truncateCardButtonLabel(input: string, max = 22): string {
+  if (input.length <= max) {
+    return input;
+  }
+  return `${input.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
 }
 
 function buildAgentsCardElements(text: string): Array<Record<string, unknown>> {
@@ -511,8 +515,9 @@ function buildModelCardElements(text: string): Array<Record<string, unknown>> {
   const currentModel = extractCurrentModelName(currentLine);
   const prioritizedVisibleModels = prioritizeCurrentModel(visibleModels, currentModel);
   const visibleModelButtons = prioritizedVisibleModels.slice(0, maxVisibleModelButtons);
-  const remainingVisibleCount = Math.max(0, prioritizedVisibleModels.length - visibleModelButtons.length);
   const pageInfo = resolveModelPageInfo(text);
+  const hasMoreVisibleModels = (pageInfo?.page ?? 1) < (pageInfo?.total ?? 1)
+    || prioritizedVisibleModels.length > visibleModelButtons.length;
   if (currentLine) {
     elements.push(buildFeishuTitleBlock('当前模型', currentLine));
     elements.push(buildFeishuFieldGrid([
@@ -533,24 +538,24 @@ function buildModelCardElements(text: string): Array<Record<string, unknown>> {
     elements.push(buildFeishuDivider(), buildFeishuSectionBlock('可选模型', `点击即可切换，共显示 ${visibleModelButtons.length} 个`));
     elements.push(...buildCommandButtonRows(
       visibleModelButtons.map((model) => ({
-        label: model === currentModel ? `当前 · ${formatModelDisplayName(model)}` : formatModelDisplayName(model),
-        cmd: `/model ${model}`,
+        label: model === currentModel ? `当前 · ${model}` : model,
+        cmd: model === currentModel ? '/model' : `/model ${model}`,
         type: model === currentModel ? 'primary' : 'default',
       })),
       3,
     ));
-    if (remainingVisibleCount > 0) {
-      elements.push(buildFeishuTipsNote(`还有 ${remainingVisibleCount} 个可见模型未展开，点击下方按钮查看完整列表。`));
+    if (hasMoreVisibleModels) {
+      elements.push(buildFeishuTipsNote('还有更多可见模型，点击下方按钮继续查看。'));
       elements.push(...buildCommandButtonRows([
-        { label: '查看全部模型', cmd: '/models', type: 'primary' },
+        { label: '更多模型', cmd: `/model page ${Math.min(pageInfo?.total ?? 2, (pageInfo?.page ?? 1) + 1)}`, type: 'primary' },
       ]));
     }
   }
   if (pageInfo && pageInfo.total > 1) {
     elements.push(buildFeishuDivider(), buildFeishuSectionBlock('模型翻页', `当前第 ${pageInfo.page} / ${pageInfo.total} 页`));
     elements.push(...buildCommandButtonRows([
-      { label: '上一页', cmd: `/models ${Math.max(1, pageInfo.page - 1)}`, type: pageInfo.page > 1 ? 'primary' : 'default' },
-      { label: '下一页', cmd: `/models ${Math.min(pageInfo.total, pageInfo.page + 1)}`, type: pageInfo.page < pageInfo.total ? 'primary' : 'default' },
+      { label: '上一页', cmd: `/model page ${Math.max(1, pageInfo.page - 1)}`, type: pageInfo.page > 1 ? 'primary' : 'default' },
+      { label: '下一页', cmd: `/model page ${Math.min(pageInfo.total, pageInfo.page + 1)}`, type: pageInfo.page < pageInfo.total ? 'primary' : 'default' },
     ]));
   }
   if (hiddenModels.length > 0) {
@@ -592,12 +597,9 @@ function buildSearchCardElements(text: string): Array<Record<string, unknown>> {
 
 function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const pager = lines.find((line) => line.startsWith('翻页：'));
   const groupLine = lines.find((line) => line.startsWith('【') && line.endsWith('】'));
-  const commandLines = lines.filter((line) => line.startsWith('/'));
   const pageInfo = resolveHelpPageInfo(text);
   const groupName = groupLine?.replace(/^【/, '').replace(/】$/, '') ?? '';
-  const compactCommands = compactHelpCommands(commandLines);
   const summary = groupName && pageInfo
     ? `${groupName} · ${pageInfo.page}/${pageInfo.total}`
     : pageInfo
@@ -609,67 +611,14 @@ function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
   elements.push(buildFeishuFieldGrid([
     { label: CARD_COPY.helpGroupLabel, value: groupName },
     { label: '页码', value: pageInfo ? `${pageInfo.page}/${pageInfo.total}` : '' },
-    { label: '命令数', value: compactCommands ? String(compactCommands.split('  |  ').length) : '' },
+    { label: '命令数', value: '' },
   ]));
-  if (compactCommands) {
-    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('命令', compactCommands));
-  } else {
-    elements.push(buildFeishuDivider());
-  }
+  elements.push(buildFeishuDivider());
   const shortcutButtons = resolveHelpShortcutButtons(groupName);
   if (shortcutButtons.length > 0) {
     elements.push(...buildCommandButtonRows(shortcutButtons, 3));
   }
-  if (pager) {
-    elements.push(buildFeishuTipsNote(pager));
-  }
   return elements;
-}
-
-function compactHelpCommands(lines: string[]): string {
-  const groups = new Map<string, Set<string>>();
-  for (const line of lines) {
-    const signature = line.split(' - ')[0]?.trim() ?? '';
-    if (!signature.startsWith('/')) {
-      continue;
-    }
-    const parts = signature.split(/\s+/).filter(Boolean);
-    const base = normalizeHelpBaseCommand(parts[0] ?? '');
-    if (!base) {
-      continue;
-    }
-    const suffix = parts.length > 1 ? parts.slice(1).join(' ') : '';
-    const set = groups.get(base) ?? new Set<string>();
-    if (suffix) {
-      set.add(suffix);
-    }
-    groups.set(base, set);
-  }
-  return Array.from(groups.entries())
-    .map(([base, suffixes]) => {
-      const normalizedSuffixes = Array.from(suffixes)
-        .map((item) => item.replace(/\[[^\]]+\]/g, '').trim())
-        .filter(Boolean);
-      const uniqueSuffixes = Array.from(new Set(normalizedSuffixes));
-      if (uniqueSuffixes.length === 0) {
-        return base;
-      }
-      if (uniqueSuffixes.length === 1) {
-        return `${base} ${uniqueSuffixes[0]}`;
-      }
-      return `${base} (${uniqueSuffixes.join(' / ')})`;
-    })
-    .join('  |  ');
-}
-
-function normalizeHelpBaseCommand(command: string): string {
-  if (command === '/clear') {
-    return '/new';
-  }
-  if (command === '/skillagent') {
-    return '/skill-agent';
-  }
-  return command;
 }
 
 function resolveHelpShortcutButtons(groupName: string): FeishuCardButton[] {
@@ -680,18 +629,11 @@ function resolveHelpShortcutButtons(groupName: string): FeishuCardButton[] {
       { label: 'Agent 列表', cmd: '/agents' },
     ];
   }
-  if (groupName === '模型与技能') {
+  if (groupName === '模型、技能与执行') {
     return [
-      { label: '当前模型', cmd: '/model', type: 'primary' },
-      { label: '模型列表', cmd: '/models' },
+      { label: '模型管理', cmd: '/model', type: 'primary' },
       { label: '生效 Skills', cmd: '/skills' },
-    ];
-  }
-  if (groupName === '执行控制') {
-    return [
-      { label: '搜索状态', cmd: '/search', type: 'primary' },
-      { label: '代码审查', cmd: '/review' },
-      { label: '登录授权', cmd: '/login' },
+      { label: '搜索状态', cmd: '/search' },
     ];
   }
   return [
@@ -764,7 +706,6 @@ function buildFeishuActionSection(actions: CommandQuickAction[]): Array<Record<s
       cmd: item.cmd,
       type: item.type,
     })), 3),
-    buildFeishuTipsNote(CARD_COPY.actionFallback),
   ];
 }
 
@@ -836,7 +777,7 @@ function buildFeishuInteractiveCommandCard(commandName: string, text: string): R
       template: resolveCardTemplate(commandName, text),
       title: {
         tag: 'plain_text',
-        content: `${title} · ${commandName}`,
+        content: title,
       },
     },
     elements: [

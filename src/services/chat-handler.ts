@@ -1,7 +1,7 @@
 import { commandNeedsAgentList, commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from '../features/user-command.js';
 import path from 'node:path';
 import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/session-store.js';
-import { formatCodexModelsText, formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
+import { formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
 import { formatCommandOutboundMessage } from './feishu-command-cards.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
@@ -859,7 +859,7 @@ ${clipMessage(text, 500)}
         const snapshot = loadCodexModels();
         const lines = [`当前模型：${currentModel ?? '(codex cli 默认模型)'}`];
         if (snapshot.models.length > 0) {
-          lines.push(formatCodexModelsText(snapshot));
+          lines.push(formatPaginatedCodexModelsText(snapshot, commandResult.queryModelsPage ?? 1));
         }
         await sendCommandText(lines.join('\n'));
         return;
@@ -923,7 +923,7 @@ ${clipMessage(text, 500)}
         const snapshot = loadCodexModels();
         await sendCommandText([
           `✅ 已重置模型：${deps.defaultModel ?? '(codex cli 默认模型)'}`,
-          ...(snapshot.models.length > 0 ? [formatCodexModelsText(snapshot)] : []),
+          ...(snapshot.models.length > 0 ? [formatPaginatedCodexModelsText(snapshot, 1)] : []),
         ].join('\n'));
         return;
       }
@@ -938,7 +938,7 @@ ${clipMessage(text, 500)}
         const note = resolved.reason ? `\n⚠️ ${resolved.reason}` : '';
         await sendCommandText([
           `✅ 已切换模型为：${resolved.model}${note}`,
-          ...(snapshot.models.length > 0 ? [formatCodexModelsText(snapshot)] : []),
+          ...(snapshot.models.length > 0 ? [formatPaginatedCodexModelsText(snapshot, 1)] : []),
         ].join('\n'));
         return;
       }

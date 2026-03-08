@@ -92,6 +92,27 @@ function createSessionStore() {
   };
 }
 
+async function withMockModelsCache(
+  payload: { fetched_at: string; models: Array<{ slug: string; visibility: string; supported_in_api: boolean }> },
+  run: () => Promise<void>,
+) {
+  const cacheDir = path.join(os.homedir(), '.codex');
+  const cachePath = path.join(cacheDir, 'models_cache.json');
+  const hadOriginal = fs.existsSync(cachePath);
+  const original = hadOriginal ? fs.readFileSync(cachePath, 'utf8') : '';
+  fs.mkdirSync(cacheDir, { recursive: true });
+  fs.writeFileSync(cachePath, JSON.stringify(payload));
+  try {
+    await run();
+  } finally {
+    if (hadOriginal) {
+      fs.writeFileSync(cachePath, original);
+    } else {
+      fs.rmSync(cachePath, { force: true });
+    }
+  }
+}
+
 describe('createChatHandler', () => {
   it('runs agent again when reminder trigger arrives', async () => {
     const sendText = vi.fn(async () => undefined);
@@ -315,19 +336,15 @@ describe('createChatHandler', () => {
       header?: { title?: { content?: string } };
       elements?: Array<{ content?: string }>;
     };
-    expect(card.header?.title?.content).toContain('/help');
+    expect(card.header?.title?.content).toBe('命令帮助');
     const merged = (card.elements ?? []).map((item) => String(item.content ?? '')).join('\n');
     expect(merged).toContain('帮助目录');
-    expect(merged).toContain('会话与 Agent · 1/3');
-    expect(merged).toContain('**命令**');
-    expect(merged).toContain('/new');
-    expect(merged).toContain('/agent (create / use)');
+    expect(merged).toContain('会话与 Agent · 1/2');
     expect(merged).toContain('快捷操作');
     const noteContents = (card.elements ?? [])
       .filter((item) => (item as { tag?: string }).tag === 'note')
       .flatMap((item) => ((item as { elements?: Array<{ content?: string }> }).elements ?? []).map((element) => String(element.content ?? '')));
     expect(noteContents).not.toContain('按功能分组浏览可用命令，并直接点击执行常用操作。');
-    expect(noteContents).toContain('翻页：/help 1 | /help 2');
     const fieldGrid = (card.elements ?? []).find((item) => (item as { tag?: string }).tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
@@ -378,7 +395,7 @@ describe('createChatHandler', () => {
       header?: { title?: { content?: string } };
       elements?: Array<{ content?: string; tag?: string; actions?: Array<{ value?: { gateway_cmd?: string } }> }>;
     };
-    expect(card.header?.title?.content).toContain('/search');
+    expect(card.header?.title?.content).toBe('联网搜索');
     const markdownContents = (card.elements ?? [])
       .filter((item) => item.tag === 'markdown')
       .map((item) => String(item.content ?? ''));
@@ -486,7 +503,7 @@ describe('createChatHandler', () => {
     expect(cmds).toContain('/skills agent');
   });
 
-  it('renders sessions command card with session item section', async () => {
+  it('renders sessions command card with switch buttons', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
     sessionStore.setSession('local-owner', 'default', 'thread_1');
@@ -518,12 +535,26 @@ describe('createChatHandler', () => {
     const markdownContents = (parsed.content?.elements ?? [])
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
-    expect(markdownContents.join('\n')).toContain('**会话项**');
+    expect(markdownContents.join('\n')).toContain('**会话切换**');
     const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**会话数量**'))).toBe(true);
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前会话**'))).toBe(true);
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
+    }>;
+    const switchCurrent = actionElements
+      .flatMap((item) => item.actions ?? [])
+      .find((action) => action.value?.gateway_cmd === '/switch 1');
+    const switchOther = actionElements
+      .flatMap((item) => item.actions ?? [])
+      .find((action) => action.value?.gateway_cmd === '/switch 2');
+    expect(switchCurrent?.type).toBe('primary');
+    expect(switchCurrent?.text?.content).toContain('当前会话');
+    expect(switchCurrent?.text?.content).toContain('hello');
+    expect(switchOther?.text?.content).toContain('历史会话');
+    expect(switchOther?.text?.content).toContain('world');
   });
 
   it('renders agents command card with current agent and workspace sections', async () => {
@@ -603,209 +634,198 @@ describe('createChatHandler', () => {
   });
 
   it('renders model command card with current model section', async () => {
-    const cacheDir = path.join(os.homedir(), '.codex');
-    const cachePath = path.join(cacheDir, 'models_cache.json');
-    fs.mkdirSync(cacheDir, { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({
+    await withMockModelsCache({
       fetched_at: '2026-03-08T11:00:00Z',
       models: [
         { slug: 'gpt-5-codex', visibility: 'list', supported_in_api: true },
         { slug: 'gpt-5', visibility: 'list', supported_in_api: true },
         { slug: 'legacy-hidden', visibility: 'hide', supported_in_api: true },
       ],
-    }));
-    const sendText = vi.fn(async () => undefined);
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultModel: 'gpt-5-codex',
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
+    }, async () => {
+      const sendText = vi.fn(async () => undefined);
+      const sessionStore = createSessionStore();
+      const handler = createChatHandler({
+        sessionStore,
+        rateLimitStore: { allow: () => true },
+        codexRunner: {
+          run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+          review: async () => ({ rawOutput: '' }),
+        },
+        agentWorkspaceManager: {
+          createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+          isSharedMemoryEmpty: () => false,
+        },
+        runnerEnabled: true,
+        defaultModel: 'gpt-5-codex',
+        defaultSearch: false,
+        reminderDbPath: '/tmp/reminders.db',
+        sendText,
+      });
+
+      await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
+
+      const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+      const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+      const markdownContents = (parsed.content?.elements ?? [])
+        .filter((item) => item.tag === 'markdown')
+        .map((item) => String((item as { content?: unknown }).content ?? ''));
+      expect(markdownContents.join('\n')).toContain('**当前模型**');
+      expect(markdownContents.join('\n')).toContain('**可选模型**');
+      const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+        actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
+      }>;
+      const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+      expect(cmds).toContain('/model');
+      expect(cmds).toContain('/model gpt-5');
+      const currentModelAction = actionElements
+        .flatMap((item) => item.actions ?? [])
+        .find((action) => action.value?.gateway_cmd === '/model');
+      expect(currentModelAction?.text?.content).toBe('当前 · gpt-5-codex');
+      expect(currentModelAction?.type).toBe('primary');
     });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
-
-    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-    const markdownContents = (parsed.content?.elements ?? [])
-      .filter((item) => item.tag === 'markdown')
-      .map((item) => String((item as { content?: unknown }).content ?? ''));
-    expect(markdownContents.join('\n')).toContain('**当前模型**');
-    expect(markdownContents.join('\n')).toContain('**可选模型**');
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
-    }>;
-    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
-    expect(cmds).toContain('/model gpt-5-codex');
-    expect(cmds).toContain('/model gpt-5');
-    const currentModelAction = actionElements
-      .flatMap((item) => item.actions ?? [])
-      .find((action) => action.value?.gateway_cmd === '/model gpt-5-codex');
-    expect(currentModelAction?.text?.content).toBe('当前 · GPT 5 Codex');
-    expect(currentModelAction?.type).toBe('primary');
   });
 
   it('keeps model switch card interactive after changing model', async () => {
-    const cacheDir = path.join(os.homedir(), '.codex');
-    const cachePath = path.join(cacheDir, 'models_cache.json');
-    fs.mkdirSync(cacheDir, { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({
+    await withMockModelsCache({
       fetched_at: '2026-03-08T11:00:00Z',
       models: [
         { slug: 'gpt-5-codex', visibility: 'list', supported_in_api: true },
         { slug: 'gpt-5', visibility: 'list', supported_in_api: true },
       ],
-    }));
-    const sendText = vi.fn(async () => undefined);
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultModel: 'gpt-5-codex',
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
+    }, async () => {
+      const sendText = vi.fn(async () => undefined);
+      const sessionStore = createSessionStore();
+      const handler = createChatHandler({
+        sessionStore,
+        rateLimitStore: { allow: () => true },
+        codexRunner: {
+          run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+          review: async () => ({ rawOutput: '' }),
+        },
+        agentWorkspaceManager: {
+          createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+          isSharedMemoryEmpty: () => false,
+        },
+        runnerEnabled: true,
+        defaultModel: 'gpt-5-codex',
+        defaultSearch: false,
+        reminderDbPath: '/tmp/reminders.db',
+        sendText,
+      });
+
+      await handler({ channel: 'feishu', userId: 'u1', content: '/model gpt-5' });
+
+      const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+      const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+      const markdownContents = (parsed.content?.elements ?? [])
+        .filter((item) => item.tag === 'markdown')
+        .map((item) => String((item as { content?: unknown }).content ?? ''));
+      expect(markdownContents.join('\n')).toContain('**当前模型**');
+      expect(markdownContents.join('\n')).toContain('**可选模型**');
+      const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+        actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }>;
+      }>;
+      const currentModelAction = actionElements
+        .flatMap((item) => item.actions ?? [])
+        .find((action) => action.value?.gateway_cmd === '/model');
+      expect(currentModelAction?.type).toBe('primary');
     });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '/model gpt-5' });
-
-    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-    const markdownContents = (parsed.content?.elements ?? [])
-      .filter((item) => item.tag === 'markdown')
-      .map((item) => String((item as { content?: unknown }).content ?? ''));
-    expect(markdownContents.join('\n')).toContain('**当前模型**');
-    expect(markdownContents.join('\n')).toContain('**可选模型**');
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }>;
-    }>;
-    const currentModelAction = actionElements
-      .flatMap((item) => item.actions ?? [])
-      .find((action) => action.value?.gateway_cmd === '/model gpt-5');
-    expect(currentModelAction?.type).toBe('primary');
   });
 
   it('truncates long model list and adds full-list entry', async () => {
-    const cacheDir = path.join(os.homedir(), '.codex');
-    const cachePath = path.join(cacheDir, 'models_cache.json');
-    fs.mkdirSync(cacheDir, { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({
+    await withMockModelsCache({
       fetched_at: '2026-03-08T11:00:00Z',
       models: Array.from({ length: 12 }, (_, index) => ({
         slug: `model-${index + 1}`,
         visibility: 'list',
         supported_in_api: true,
       })),
-    }));
-    const sendText = vi.fn(async () => undefined);
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultModel: 'model-1',
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
+    }, async () => {
+      const sendText = vi.fn(async () => undefined);
+      const sessionStore = createSessionStore();
+      const handler = createChatHandler({
+        sessionStore,
+        rateLimitStore: { allow: () => true },
+        codexRunner: {
+          run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+          review: async () => ({ rawOutput: '' }),
+        },
+        agentWorkspaceManager: {
+          createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+          isSharedMemoryEmpty: () => false,
+        },
+        runnerEnabled: true,
+        defaultModel: 'model-1',
+        defaultSearch: false,
+        reminderDbPath: '/tmp/reminders.db',
+        sendText,
+      });
+
+      await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
+
+      const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+      const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+      const noteContents = (parsed.content?.elements ?? [])
+        .filter((item) => item.tag === 'note')
+        .flatMap((item) => ((item as { elements?: Array<{ content?: string }> }).elements ?? []).map((element) => String(element.content ?? '')));
+      expect(noteContents).toContain('还有更多可见模型，点击下方按钮继续查看。');
+      const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+        actions?: Array<{ value?: { gateway_cmd?: string } }>;
+      }>;
+      const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+      expect(cmds).toContain('/model page 2');
     });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
-
-    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-    const markdownContents = (parsed.content?.elements ?? [])
-      .filter((item) => item.tag === 'markdown')
-      .map((item) => String((item as { content?: unknown }).content ?? ''));
-    const noteContents = (parsed.content?.elements ?? [])
-      .filter((item) => item.tag === 'note')
-      .flatMap((item) => ((item as { elements?: Array<{ content?: string }> }).elements ?? []).map((element) => String(element.content ?? '')));
-    expect(noteContents).toContain('还有 3 个可见模型未展开，点击下方按钮查看完整列表。');
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ value?: { gateway_cmd?: string } }>;
-    }>;
-    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
-    expect(cmds).toContain('/models');
   });
 
   it('renders paginated models card with page navigation buttons', async () => {
-    const cacheDir = path.join(os.homedir(), '.codex');
-    const cachePath = path.join(cacheDir, 'models_cache.json');
-    fs.mkdirSync(cacheDir, { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({
+    await withMockModelsCache({
       fetched_at: '2026-03-08T11:00:00Z',
       models: Array.from({ length: 12 }, (_, index) => ({
         slug: `page-model-${index + 1}`,
         visibility: 'list',
         supported_in_api: true,
       })),
-    }));
-    const sendText = vi.fn(async () => undefined);
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultModel: 'page-model-1',
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
+    }, async () => {
+      const sendText = vi.fn(async () => undefined);
+      const sessionStore = createSessionStore();
+      const handler = createChatHandler({
+        sessionStore,
+        rateLimitStore: { allow: () => true },
+        codexRunner: {
+          run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+          review: async () => ({ rawOutput: '' }),
+        },
+        agentWorkspaceManager: {
+          createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+          isSharedMemoryEmpty: () => false,
+        },
+        runnerEnabled: true,
+        defaultModel: 'page-model-1',
+        defaultSearch: false,
+        reminderDbPath: '/tmp/reminders.db',
+        sendText,
+      });
+
+      await handler({ channel: 'feishu', userId: 'u1', content: '/model page 2' });
+
+      const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+      const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+      const markdownContents = (parsed.content?.elements ?? [])
+        .filter((item) => item.tag === 'markdown')
+        .map((item) => String((item as { content?: unknown }).content ?? ''));
+      expect(markdownContents.join('\n')).toContain('模型翻页');
+      expect(markdownContents.join('\n')).toContain('模型翻页');
+      const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+        actions?: Array<{ text?: { content?: string }; value?: { gateway_cmd?: string } }>;
+      }>;
+      const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+      expect(cmds).toContain('/model page 1');
+      expect(cmds).toContain('/model page 2');
+      const pageModelAction = actionElements
+        .flatMap((item) => item.actions ?? [])
+        .find((action) => action.value?.gateway_cmd === '/model page-model-10');
+      expect(pageModelAction?.text?.content).toBe('page-model-10');
     });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '/models 2' });
-
-    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-    const markdownContents = (parsed.content?.elements ?? [])
-      .filter((item) => item.tag === 'markdown')
-      .map((item) => String((item as { content?: unknown }).content ?? ''));
-    expect(markdownContents.join('\n')).toContain('模型翻页');
-    expect(markdownContents.join('\n')).toContain('模型翻页');
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ text?: { content?: string }; value?: { gateway_cmd?: string } }>;
-    }>;
-    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
-    expect(cmds).toContain('/models 1');
-    expect(cmds).toContain('/models 2');
-    const pageModelAction = actionElements
-      .flatMap((item) => item.actions ?? [])
-      .find((action) => action.value?.gateway_cmd === '/model page-model-10');
-    expect(pageModelAction?.text?.content).toBe('Page Model 10');
   });
 
   it('renders status change response as structured feishu card', async () => {

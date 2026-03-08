@@ -47,7 +47,7 @@ describe('handleUserCommand', () => {
     const result = handleUserCommand('/help', context);
     expect(result.handled).toBe(true);
     expect(result.message).toContain('可用命令');
-    expect(result.message).toContain('帮助页 1/3');
+    expect(result.message).toContain('帮助页 1/2');
     expect(result.message).toContain('/agent create [名称]');
     expect(result.message).toContain('/skill-agent');
     expect(result.message).toContain('翻页：/help 1 | /help 2');
@@ -57,9 +57,11 @@ describe('handleUserCommand', () => {
   it('supports /help pagination', () => {
     const result = handleUserCommand('/help 2', context);
     expect(result.handled).toBe(true);
-    expect(result.message).toContain('帮助页 2/3');
+    expect(result.message).toContain('帮助页 2/2');
+    expect(result.message).toContain('模型、技能与执行');
     expect(result.message).toContain('/skills');
-    expect(result.message).toContain('翻页：/help 1 | /help 3');
+    expect(result.message).toContain('/model page [页码]');
+    expect(result.message).toContain('翻页：/help 1 | /help 2');
   });
 
   it('supports /clear', () => {
@@ -143,8 +145,11 @@ describe('handleUserCommand', () => {
     expect(handleUserCommand('/model gpt-5-codex', context).setModel).toBe('gpt-5-codex');
   });
 
-  it('supports /models and /search', () => {
-    expect(handleUserCommand('/models', context).queryModels).toBe(true);
+  it('supports model paging aliases and /search', () => {
+    expect(handleUserCommand('/model page 2', context).queryModel).toBe(true);
+    expect(handleUserCommand('/model page 2', context).queryModelsPage).toBe(2);
+    expect(handleUserCommand('/models 2', context).queryModel).toBe(true);
+    expect(handleUserCommand('/models 2', context).queryModelsPage).toBe(2);
     expect(handleUserCommand('/skills', context).querySkills).toBe(true);
     expect(handleUserCommand('/skills global', context).querySkillsScope).toBe('global');
     expect(handleUserCommand('/skills agent', context).querySkillsScope).toBe('agent');
