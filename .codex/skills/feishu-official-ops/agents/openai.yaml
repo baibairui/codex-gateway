@@ -1,0 +1,7 @@
+interface:
+  display_name: "Feishu Official Ops"
+  short_description: "Execute real Feishu OpenAPI operations such as creating DocX docs and Wiki nodes."
+  default_prompt: "Use $feishu-official-ops when the user wants real Feishu official operations."
+policy:
+  allow_implicit_invocation: true
+
