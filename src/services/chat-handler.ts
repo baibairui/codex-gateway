@@ -1077,6 +1077,9 @@ ${clipMessage(text, 500)}
       ? 'shared'
       : 'agent';
     const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, MEMORY_ONBOARDING_AGENT_ID);
+    const shouldPushStartupHelp = !existingThreadId
+      && !shouldStartMemoryOnboarding
+      && !isSystemAgentRecord(currentAgent);
 
     if (shouldStartMemoryOnboarding) {
       if (!onboardingThreadId) {
@@ -1103,6 +1106,13 @@ ${clipMessage(text, 500)}
           targetAgent: currentAgent,
         });
         return;
+      }
+    }
+
+    if (shouldPushStartupHelp) {
+      const helpText = handleUserCommand('/help').message;
+      if (helpText) {
+        await deps.sendText(channel, userId, formatCommandOutboundMessage(channel, '/help', helpText));
       }
     }
 

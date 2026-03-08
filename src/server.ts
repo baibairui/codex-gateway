@@ -15,6 +15,7 @@ import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
 import { installReminderToolSkill } from './services/reminder-tool-skill.js';
 import { installFeishuOfficialOpsSkill } from './services/feishu-official-ops-skill.js';
+import { pushFeishuStartupHelp } from './services/startup-help.js';
 import { WeComApi } from './services/wecom-api.js';
 import { FeishuApi } from './services/feishu-api.js';
 import { WeComCrypto } from './utils/wecom-crypto.js';
@@ -58,6 +59,8 @@ log.info('服务启动初始化...', {
   feishuEnabled: config.feishuEnabled,
   feishuLongConnection: config.feishuLongConnection,
   feishuApiTimeoutMs: config.feishuApiTimeoutMs,
+  feishuStartupHelpEnabled: config.feishuStartupHelpEnabled,
+  feishuStartupHelpAdminOpenId: config.feishuStartupHelpAdminOpenId ? '(configured)' : '(not configured)',
 });
 
 const dataDir = path.resolve(process.cwd(), '.data');
@@ -581,10 +584,31 @@ app.listen(config.port, () => {
         }, data);
       },
     });
-    wsClient.start({ eventDispatcher }).then(() => {
+    wsClient.start({ eventDispatcher }).then(async () => {
       log.info('✅ 飞书长连接已启动');
+      try {
+        await pushFeishuStartupHelp({
+          enabled: config.feishuStartupHelpEnabled,
+          adminOpenId: config.feishuStartupHelpAdminOpenId,
+          sendText,
+        });
+      } catch (error) {
+        log.warn('飞书启动帮助发送失败', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }).catch((error) => {
       log.error('❌ 飞书长连接启动失败', error);
+    });
+  } else if (config.feishuEnabled && feishuApi) {
+    void pushFeishuStartupHelp({
+      enabled: config.feishuStartupHelpEnabled,
+      adminOpenId: config.feishuStartupHelpAdminOpenId,
+      sendText,
+    }).catch((error) => {
+      log.warn('飞书启动帮助发送失败', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
   }
   memorySteward.start();

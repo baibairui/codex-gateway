@@ -221,6 +221,21 @@ describe('AgentWorkspaceManager', () => {
       agentName: 'first-agent',
       existingAgentIds: [],
     });
+    expect(manager.isWorkspaceIdentityEmpty(first.workspaceDir)).toBe(true);
+
+    fs.writeFileSync(path.join(first.workspaceDir, 'memory', 'identity.md'), [
+      '# Identity',
+      '',
+      '## Current Agent Identity',
+      '- Primary responsibility: 负责需求澄清与实现',
+      '- Mission: 确保需求高质量交付',
+      '- Success criteria: 可验证、可回归、可上线',
+      '- Decision principles:',
+      '  - 遵守事实',
+      '- Boundaries:',
+      '  - 不做半途兼容方案',
+      '',
+    ].join('\n'), 'utf8');
     expect(manager.isWorkspaceIdentityEmpty(first.workspaceDir)).toBe(false);
 
     const legacy = manager.createWorkspace({
