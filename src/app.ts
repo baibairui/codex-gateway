@@ -348,12 +348,14 @@ export function createApp(deps: AppDeps) {
         const eventType = typeof header.event_type === 'string' ? header.event_type : '';
         if (eventType === 'card.action.trigger') {
           const event = (body.event ?? {}) as Record<string, unknown>;
-          const result = dispatchFeishuCardActionEvent({
+          dispatchFeishuCardActionEvent({
             allowFrom: deps.allowFrom,
             isDuplicateMessage: deps.isDuplicateMessage,
             handleText: deps.handleText,
           }, event);
-          res.json({ code: 0, msg: result });
+          // 飞书卡片动作回调不能复用普通事件回执格式（code/msg）。
+          // 这里返回空对象，表示卡片点击已被服务端接收，由异步消息结果继续反馈给用户。
+          res.json({});
           return;
         }
         if (eventType !== 'im.message.receive_v1') {

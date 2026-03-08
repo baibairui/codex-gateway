@@ -200,11 +200,10 @@ describe('createApp feishu callback', () => {
         },
       }),
     });
-    const payload = await response.json() as { code?: number; msg?: string };
+    const payload = await response.json() as Record<string, unknown>;
 
     expect(response.status).toBe(200);
-    expect(payload.code).toBe(0);
-    expect(payload.msg).toBe('success');
+    expect(payload).toEqual({});
     expect(handleText).toHaveBeenCalledWith({
       channel: 'feishu',
       userId: 'ou_card_1',
