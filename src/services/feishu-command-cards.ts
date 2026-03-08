@@ -420,6 +420,7 @@ function buildAgentsCardElements(text: string): Array<Record<string, unknown>> {
   const currentAgent = indexed.find((line) => line.startsWith('👉'));
   const summary = lines[0] ?? text;
   const workspaceLines = lines.filter((line) => line.startsWith('/'));
+  const agentButtons = buildAgentButtons(lines);
   const elements: Array<Record<string, unknown>> = [
     buildFeishuTitleBlock(CARD_COPY.agentsTitle, summary),
   ];
@@ -429,7 +430,8 @@ function buildAgentsCardElements(text: string): Array<Record<string, unknown>> {
       { label: '当前 Agent', value: currentAgent ? stripListMarker(currentAgent) : '未标记' },
       { label: '切换', value: '/agent use' },
     ]));
-    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('Agent', indexed));
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('Agent 切换', '点击按钮切换 Agent'));
+    elements.push(...buildCommandButtonRows(agentButtons, 1));
   } else if (workspaceLines.length > 0) {
     elements.push(buildFeishuDivider(), buildFeishuSectionBlock('工作区', workspaceLines));
   }
@@ -476,7 +478,36 @@ function compactAgentEntries(lines: string[]): string[] {
 }
 
 function compactSkillEntries(lines: string[]): string[] {
-  return lines.map((line) => stripListMarker(line));
+  return lines.map((line) => {
+    const normalized = stripListMarker(line);
+    return normalized.split(' - ')[0]?.trim() ?? normalized;
+  });
+}
+
+function buildAgentButtons(lines: string[]): FeishuCardButton[] {
+  const buttons: FeishuCardButton[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (!/^\d+\.\s+|^👉\s+\d+\.\s+/.test(line)) {
+      continue;
+    }
+    const normalized = line.replace(/^👉\s+/, '');
+    const match = normalized.match(/^(\d+)\.\s+(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const index = match[1];
+    const body = match[2] ?? '';
+    const title = body.split(' (')[0]?.trim() ?? body.trim();
+    const workspace = lines[i + 1]?.startsWith('/') ? lines[i + 1].split('/').filter(Boolean).pop() ?? '' : '';
+    const labelText = workspace ? `${title} · ${workspace}` : title;
+    buttons.push({
+      label: truncateCardButtonLabel(labelText || `Agent ${index}`, 26),
+      cmd: `/agent use ${index}`,
+      type: line.startsWith('👉') ? 'primary' : 'default',
+    });
+  }
+  return buttons;
 }
 
 function buildAgentCardElements(text: string): Array<Record<string, unknown>> {
@@ -493,11 +524,11 @@ function buildAgentCardElements(text: string): Array<Record<string, unknown>> {
       { label: '工作区', value: workspaceLine?.replace(/^工作区：/, '').trim() ?? '' },
       { label: '当前会话', value: sessionLine?.replace(/^当前会话：/, '').trim() ?? '' },
     ]));
-    const detail = [workspaceLine, sessionLine].filter(Boolean).join('\n');
-    if (detail) {
-      elements.push(buildFeishuDivider());
-      elements.push(buildFeishuSectionBlock('状态', detail));
-    }
+    elements.push(buildFeishuDivider());
+    elements.push(...buildCommandButtonRows([
+      { label: 'Agent 列表', cmd: '/agents', type: 'primary' },
+      { label: '当前会话', cmd: '/sessions' },
+    ]));
   }
   if (elements.length === 0) {
     elements.push(buildFeishuTitleBlock('Agent', text));
@@ -588,10 +619,9 @@ function buildSearchCardElements(text: string): Array<Record<string, unknown>> {
     { label: '联网搜索', value: stateLine },
     { label: '推荐策略', value: state === 'on' ? '当前临时开启' : '默认关闭，按需开启' },
   ]));
-  if (lines.length > 0) {
-    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('当前配置', lines));
+  if (lines.some((line) => line.startsWith('⚠️'))) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('提示', lines.filter((line) => line.startsWith('⚠️'))));
   }
-  elements.push(buildFeishuTipsNote(CARD_COPY.searchAdvice));
   return elements;
 }
 

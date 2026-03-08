@@ -400,7 +400,6 @@ describe('createChatHandler', () => {
       .filter((item) => item.tag === 'markdown')
       .map((item) => String(item.content ?? ''));
     expect(markdownContents.join('\n')).toContain('**当前状态**');
-    expect(markdownContents.join('\n')).toContain('联网搜索：');
     const fieldGrid = (card.elements ?? []).find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
@@ -557,7 +556,7 @@ describe('createChatHandler', () => {
     expect(switchOther?.text?.content).toContain('world');
   });
 
-  it('renders agents command card with current agent and workspace sections', async () => {
+  it('renders agents command card with switch buttons', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
     sessionStore.createAgent('local-owner', {
@@ -589,13 +588,25 @@ describe('createChatHandler', () => {
     const markdownContents = (parsed.content?.elements ?? [])
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
-    expect(markdownContents.join('\n')).toContain('**Agent**');
-    expect(markdownContents.join('\n')).toContain('/repo/frontend');
+    expect(markdownContents.join('\n')).toContain('**Agent 切换**');
     const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**Agent 数量**'))).toBe(true);
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前 Agent**'))).toBe(true);
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
+    }>;
+    const useDefault = actionElements
+      .flatMap((item) => item.actions ?? [])
+      .find((action) => action.value?.gateway_cmd === '/agent use 1');
+    const useFrontend = actionElements
+      .flatMap((item) => item.actions ?? [])
+      .find((action) => action.value?.gateway_cmd === '/agent use 2');
+    expect(useDefault?.type).toBe('primary');
+    expect(useDefault?.text?.content).toContain('默认');
+    expect(useFrontend?.text?.content).toContain('前端工作区');
+    expect(useFrontend?.text?.content).toContain('frontend');
   });
 
   it('renders agent command card with agent status sections', async () => {
@@ -626,11 +637,16 @@ describe('createChatHandler', () => {
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**Agent**');
-    expect(markdownContents.join('\n')).toContain('**状态**');
     const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**工作区**'))).toBe(true);
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ value?: { gateway_cmd?: string } }>;
+    }>;
+    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    expect(cmds).toContain('/agents');
+    expect(cmds).toContain('/sessions');
   });
 
   it('renders model command card with current model section', async () => {
