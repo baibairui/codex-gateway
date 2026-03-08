@@ -39,6 +39,7 @@ describe('AgentWorkspaceManager', () => {
     expect(identity).toContain('- Success criteria:');
     expect(identity).toContain('- Language style:');
     expect(fs.existsSync(path.join(result.workspaceDir, 'browser-playbook.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'gateway-browser', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'agents', 'openai.yaml'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'shared-context.md'))).toBe(true);

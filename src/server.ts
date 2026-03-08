@@ -15,6 +15,7 @@ import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
 import { installReminderToolSkill } from './services/reminder-tool-skill.js';
 import { installFeishuOfficialOpsSkill } from './services/feishu-official-ops-skill.js';
+import { installGatewayBrowserSkill, syncManagedGlobalSkills } from './services/gateway-browser-skill.js';
 import { pushFeishuStartupHelp } from './services/startup-help.js';
 import { WeComApi } from './services/wecom-api.js';
 import { FeishuApi } from './services/feishu-api.js';
@@ -651,6 +652,7 @@ async function appDepsHandleText(input: {
 }
 
 function syncBuiltInSkills(agentsRootDir: string): void {
+  syncManagedGlobalSkills();
   installReminderToolSkill(path.resolve(agentsRootDir));
   installFeishuOfficialOpsSkill(path.resolve(agentsRootDir));
   const usersDir = path.join(agentsRootDir, 'users');
@@ -670,6 +672,7 @@ function syncBuiltInSkills(agentsRootDir: string): void {
       if (!fs.statSync(workspaceDir).isDirectory()) {
         continue;
       }
+      installGatewayBrowserSkill(workspaceDir);
       installReminderToolSkill(workspaceDir);
       installFeishuOfficialOpsSkill(workspaceDir);
     }

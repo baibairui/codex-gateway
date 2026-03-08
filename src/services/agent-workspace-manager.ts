@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { installReminderToolSkill } from './reminder-tool-skill.js';
 import { installFeishuOfficialOpsSkill } from './feishu-official-ops-skill.js';
+import { installGatewayBrowserSkill } from './gateway-browser-skill.js';
 
 export interface AgentWorkspaceRecord {
   agentId: string;
@@ -129,6 +130,7 @@ export class AgentWorkspaceManager {
       path.join(workspaceDir, 'feishu-ops-playbook.md'),
       renderFeishuOpsPlaybook(),
     );
+    installGatewayBrowserSkill(workspaceDir);
     installReminderToolSkill(workspaceDir);
     installFeishuOfficialOpsSkill(workspaceDir);
 
