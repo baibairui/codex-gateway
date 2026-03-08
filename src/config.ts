@@ -43,6 +43,15 @@ function optionalStringUndefined(name: string): string | undefined {
   return value ? value : undefined;
 }
 
+function optionalStringUndefinedRaw(name: string): string | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) {
+    return undefined;
+  }
+  const value = raw.trim();
+  return value.length > 0 ? value : undefined;
+}
+
 function codexSandboxMode(): 'full-auto' | 'none' {
   const value = process.env.CODEX_SANDBOX ?? 'full-auto';
   if (value === 'full-auto' || value === 'none') {
@@ -81,6 +90,7 @@ export const config = {
   codexModel: optionalStringUndefined('CODEX_MODEL'),
   codexSearch: process.env.CODEX_SEARCH === 'true',
   codexWorkdir: process.env.CODEX_WORKDIR ?? process.cwd(),
+  gatewayRootDir: optionalStringUndefinedRaw('GATEWAY_ROOT_DIR'),
   codexAgentsDir: optionalStringUndefined('CODEX_AGENTS_DIR'),
   /** 'full-auto' (默认，有沙箱) 或 'none' (跳过沙箱，适合服务器) */
   codexSandbox: codexSandboxMode(),

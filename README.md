@@ -101,6 +101,12 @@ npm link
 cp .env.example .env
 ```
 
+Windows PowerShell 可用：
+
+```powershell
+Copy-Item .env.example .env
+```
+
 ### 3. 填写基本配置
 
 至少先填这些：
@@ -132,6 +138,7 @@ CODEX_SEARCH=false
 - `WEWORK_ENCODING_AES_KEY`：企业微信回调解密密钥
 - `CODEX_BIN`：Codex CLI 可执行文件，默认是 `codex`
 - `CODEX_WORKDIR`：默认工作目录，建议填写你的主项目绝对路径
+- `GATEWAY_ROOT_DIR`：可选。workspace 发布命令运行目录（默认当前进程工作目录）
 - `CODEX_AGENTS_DIR`：可选。默认使用当前项目 `.data/agents`
 - `CODEX_SANDBOX`：Codex 执行沙箱模式，通常用 `full-auto`
 - `RUNNER_ENABLED`：是否允许网关实际调用 Codex
@@ -285,6 +292,16 @@ codexclaw check
 codexclaw check
 codexclaw up
 ```
+
+### 运行发布（跨平台）
+
+执行：
+
+```bash
+npm run publish:workspace
+```
+
+该命令现在默认走 Node 脚本（不依赖 bash），在 Windows/Linux 都可运行。
 
 ### 5. 健康检查
 

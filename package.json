@@ -10,7 +10,7 @@
     "up": "node ./bin/start-gateway.mjs dev",
     "build": "tsc -p tsconfig.json",
     "config:check": "node ./bin/config-check.mjs",
-    "publish:workspace": "bash ./bin/publish-workspace.sh"
+    "publish:workspace": "node ./bin/publish-workspace.mjs"
   },
   "keywords": [
     "wecom",

@@ -10,13 +10,14 @@ export class WorkspacePublisher {
   private readonly timeoutMs: number;
 
   constructor(options: WorkspacePublisherOptions = {}) {
-    this.cwd = options.cwd ?? '/opt/gateway';
+    this.cwd = options.cwd ?? process.cwd();
     this.timeoutMs = options.timeoutMs ?? 15 * 60_000;
   }
 
   publish(): Promise<{ output: string }> {
     return new Promise((resolve, reject) => {
-      const child = spawn('npm', ['run', 'publish:workspace'], {
+      const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+      const child = spawn(npmCommand, ['run', 'publish:workspace'], {
         cwd: this.cwd,
         env: process.env,
         stdio: ['ignore', 'pipe', 'pipe'],

@@ -17,6 +17,7 @@ function isGatewayProject(dir) {
 
 const runtimeRoot = isGatewayProject(invokedCwd) ? invokedCwd : projectRoot;
 process.chdir(runtimeRoot);
+const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const args = process.argv.slice(2);
 const command = args[0] ?? 'help';
@@ -70,10 +71,10 @@ switch (command) {
     run('node', ['./bin/update-gateway.mjs']);
     break;
   case 'build':
-    run('npm', ['run', 'build']);
+    run(npmBin, ['run', 'build']);
     break;
   case 'test':
-    run('npm', ['run', 'test']);
+    run(npmBin, ['run', 'test']);
     break;
   case 'help':
   default:

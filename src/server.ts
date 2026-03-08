@@ -27,6 +27,7 @@ import { createLogger } from './utils/logger.js';
 
 const log = createLogger('Server');
 const codexWorkdir = resolveCodexWorkdir(config.codexWorkdir);
+const gatewayRootDir = resolveGatewayRootDir(config.gatewayRootDir);
 
 log.info('服务启动初始化...', {
   port: config.port,
@@ -34,6 +35,7 @@ log.info('服务启动初始化...', {
   codexModel: config.codexModel ?? '(codex cli default)',
   codexSearch: config.codexSearch,
   codexWorkdir,
+  gatewayRootDir,
   codexAgentsDir: config.codexAgentsDir,
   commandTimeoutMs: config.commandTimeoutMs ?? '(adaptive)',
   commandTimeoutMinMs: config.commandTimeoutMinMs,
@@ -108,9 +110,9 @@ const codexRunner = new CodexRunner({
 log.debug('CodexRunner 已初始化');
 
 const workspacePublisher = new WorkspacePublisher({
-  cwd: '/opt/gateway',
+  cwd: gatewayRootDir,
 });
-log.debug('WorkspacePublisher 已初始化', { cwd: '/opt/gateway' });
+log.debug('WorkspacePublisher 已初始化', { cwd: gatewayRootDir });
 
 const weComApi = config.wecomEnabled && config.corpId && config.corpSecret && config.agentId !== undefined
   ? new WeComApi({
@@ -244,6 +246,20 @@ function resolveRuntimeDir(configuredDir: string | undefined, fallbackDir: strin
     return path.resolve(fallbackDir);
   }
   return path.resolve(configuredDir);
+}
+
+function resolveGatewayRootDir(configuredDir: string | undefined): string {
+  if (configuredDir && configuredDir.trim()) {
+    const resolved = path.resolve(configuredDir);
+    if (canUseDir(resolved)) {
+      return resolved;
+    }
+    log.warn('配置的 GATEWAY_ROOT_DIR 不可用，回退到当前目录', {
+      configured: resolved,
+      fallback: path.resolve(process.cwd()),
+    });
+  }
+  return path.resolve(process.cwd());
 }
 
 async function ensureBrowserMcpUrl(

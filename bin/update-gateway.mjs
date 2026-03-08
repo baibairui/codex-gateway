@@ -10,6 +10,7 @@ const c = {
   cyan: '\x1b[36m',
   bold: '\x1b[1m',
 };
+const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function paint(color, text) {
   return `${color}${text}${c.reset}`;
@@ -58,8 +59,8 @@ console.log(paint(c.yellow, `当前分支: ${currentBranch}`));
 
 run('git', ['fetch', '--all', '--prune'], '同步远端信息');
 run('git', ['pull', '--ff-only', 'origin', currentBranch], '拉取最新代码');
-run('npm', ['install'], '更新依赖');
-run('npm', ['run', 'build'], '重新构建');
+run(npmBin, ['install'], '更新依赖');
+run(npmBin, ['run', 'build'], '重新构建');
 
 console.log(paint(c.green, '\n✅ 更新完成。'));
 console.log('如服务正在运行，请重启服务使新版本生效。');

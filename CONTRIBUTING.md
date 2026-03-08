@@ -10,6 +10,14 @@ cp .env.example .env
 npm run dev
 ```
 
+Windows PowerShell:
+
+```powershell
+npm install
+Copy-Item .env.example .env
+npm run dev
+```
+
 ## Quality Gate
 
 Before opening a PR, run:
