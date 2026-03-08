@@ -260,9 +260,19 @@ function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
   return [
     '你必须遵循以下飞书回发协议：',
     '1. 默认输出普通文本，不要输出 JSON。',
-    '2. 仅当用户明确要求回发非文本消息时，输出单个 JSON 对象：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
-    '3. 用户消息包含 local_*_path 时，先读取并分析本地文件，再回复结果。',
-    '4. 输出 JSON 时禁止 markdown 代码块和解释文字。',
+    '2. 只有当用户明确要求“请发送/回发某种非文本消息”时，才输出单个 JSON 对象。',
+    '3. 输出 JSON 时禁止使用 markdown 代码块，禁止附加解释文字，只输出 JSON 本体。',
+    '4. JSON 格式必须为：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
+    '5. 飞书常用 msg_type：text、markdown、post、image、file、audio、media、sticker、interactive、share_chat、share_user。',
+    '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
+    '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path/local_sticker_path，必须先读取对应本地文件并给出分析结果，不要先追问目标。',
+    '8. 若明确需要回发飞书非文本消息，且你已经拿到本地文件路径，可在 JSON content 中直接提供 local_image_path/local_file_path/local_audio_path/local_media_path，网关会自动上传后发送。',
+    '9. 回发飞书 interactive 时，可优先使用简写 content：{"template_id":"...","template_variable":{...}}，网关会自动转换为模板卡片格式。',
+    '10. 回发飞书 post 时，若只是普通富文本段落，可直接把 content 写成字符串，网关会自动转换为基础 post 格式。',
+    '11. 回发飞书 sticker 时，若已有本地贴纸文件，可直接提供 local_sticker_path，网关会自动上传后发送。',
+    '12. 选择消息类型时遵循：简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。',
+    '13. image/file/audio/media/sticker/share_chat/share_user 只在用户明确要求发送对应类型，或你已经拿到可发送资源（如 key、本地路径、分享对象ID）时使用。',
+    '14. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 post 或 interactive。',
     '',
     '用户输入如下：',
     userPrompt,
@@ -273,9 +283,15 @@ function buildWeComOutboundMessageProtocolPrompt(userPrompt: string): string {
   return [
     '你必须遵循以下企微回发协议：',
     '1. 默认输出普通文本，不要输出 JSON。',
-    '2. 仅当用户明确要求回发非文本消息时，输出单个 JSON 对象：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
-    '3. 用户消息包含 local_*_path 时，先读取并分析本地文件，再回复结果。',
-    '4. 输出 JSON 时禁止 markdown 代码块和解释文字。',
+    '2. 只有当用户明确要求“请发送/回发某种非文本消息”时，才输出单个 JSON 对象。',
+    '3. 输出 JSON 时禁止使用 markdown 代码块，禁止附加解释文字，只输出 JSON 本体。',
+    '4. JSON 格式必须为：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
+    '5. 企微常用 msg_type：text、markdown、image、voice、video、file。',
+    '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
+    '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path，可先读取对应本地文件并给出分析结果；若明确需要回发企微非文本消息，且你已经拿到本地路径，可在 JSON content 中直接提供这些路径，网关会先上传再发送。',
+    '8. 选择消息类型时遵循：简单一句话优先 text；多段说明或列表优先 markdown；只有在用户明确要发送图片/语音/视频/文件时才用 image/voice/video/file。',
+    '9. image/voice/video/file 仅在用户明确要求发送对应类型，或你已拿到可发送资源（如 media_id、本地路径）时使用。',
+    '10. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 markdown 或媒体类型。',
     '',
     '用户输入如下：',
     userPrompt,
@@ -665,32 +681,17 @@ ${clipMessage(prompt, 500)}
     function normalizeVisibleCurrentAgent(userKey: string): AgentRecord {
       const selected = deps.sessionStore.getCurrentAgent(userKey);
       if (!isSystemAgentRecord(selected)) {
-        if (selected.agentId !== 'default') {
-          return selected;
-        }
+        return selected;
       }
 
       const listedAgents = deps.sessionStore.listAgents(userKey, { includeHidden: true });
       const customFallback = listedAgents.find((item) => !item.isDefault && !isSystemAgentRecord(item));
-      const fallback = customFallback
-        ?? listedAgents.find((item) => !item.isDefault);
+      const fallback = customFallback ?? listedAgents.find((item) => !isSystemAgentRecord(item));
       if (fallback) {
         deps.sessionStore.setCurrentAgent(userKey, fallback.agentId);
         return deps.sessionStore.getCurrentAgent(userKey);
       }
-
-      const workspace = deps.agentWorkspaceManager.createWorkspace({
-        userId: userKey,
-        agentName: '助理',
-        existingAgentIds: listedAgents.map((item) => item.agentId),
-      });
-      const agent = deps.sessionStore.createAgent(userKey, {
-        agentId: workspace.agentId,
-        name: '助理',
-        workspaceDir: workspace.workspaceDir,
-      });
-      deps.sessionStore.setCurrentAgent(userKey, agent.agentId);
-      return deps.sessionStore.getCurrentAgent(userKey);
+      return selected;
     }
 
     if (commandResult.handled) {

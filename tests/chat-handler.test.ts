@@ -1168,6 +1168,8 @@ describe('createChatHandler', () => {
     const prompt = run.mock.calls[0]?.[0]?.prompt as string;
     expect(prompt).toContain('你必须遵循以下企微回发协议：');
     expect(prompt).toContain('企微常用 msg_type：text、markdown、image、voice、video、file。');
+    expect(prompt).toContain('简单一句话优先 text；多段说明或列表优先 markdown');
+    expect(prompt).toContain('如果不确定该用哪种类型，优先退回 text');
     expect(prompt).not.toContain('飞书常用 msg_type');
   });
 
@@ -1264,7 +1266,7 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('shared-memory 为空'));
   });
 
-  it('bootstraps current agent identity directly when shared memory is ready', async () => {
+  it('starts onboarding when current agent identity is empty even if shared memory is ready', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async () => ({ threadId: 'thread_onboarding', rawOutput: '' }));
     const sessionStore = createSessionStore();
@@ -1295,13 +1297,16 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: '继续' });
 
-    expect(createWorkspace).not.toHaveBeenCalled();
-    expect(run).toHaveBeenCalledTimes(2);
-    expect(run).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      workdir: '/repo/default',
-      search: false,
-      prompt: expect.stringContaining('系统身份注入'),
+    expect(createWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      template: 'memory-onboarding',
     }));
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      workdir: '/tmp',
+      search: false,
+      prompt: expect.stringContaining('记忆初始化引导'),
+    }));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('当前 agent 自身份未初始化'));
   });
 
   it('routes follow-up user replies to hidden onboarding session while shared memory is still empty', async () => {
