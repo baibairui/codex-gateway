@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 
 const mode = process.argv[2] === 'start' ? 'start' : 'dev';
 const cwd = process.cwd();
+const forceXvfb = process.env.GATEWAY_FORCE_XVFB === 'true';
 
 function runConfigCheck() {
   return new Promise((resolve) => {
@@ -19,8 +20,44 @@ function runConfigCheck() {
   });
 }
 
+function hasDisplayServer() {
+  return Boolean(process.env.DISPLAY && process.env.DISPLAY.trim());
+}
+
+function findCommand(command) {
+  const pathEnv = process.env.PATH ?? '';
+  const pathEntries = pathEnv.split(path.delimiter).filter(Boolean);
+  for (const entry of pathEntries) {
+    const candidate = path.join(entry, command);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function resolveCommand(command, args) {
+  if (!forceXvfb && hasDisplayServer()) {
+    return { command, args };
+  }
+
+  const xvfbRun = findCommand('xvfb-run');
+  if (!xvfbRun) {
+    console.error(
+      '当前未检测到可用的 DISPLAY，且系统中未安装 xvfb-run。请安装 xvfb，或在有图形界面的会话中启动。',
+    );
+    process.exit(1);
+  }
+
+  return {
+    command: xvfbRun,
+    args: ['-a', '--server-args=-screen 0 1440x900x24', command, ...args],
+  };
+}
+
 function runCommand(command, args) {
-  const child = spawn(command, args, {
+  const resolved = resolveCommand(command, args);
+  const child = spawn(resolved.command, resolved.args, {
     cwd,
     stdio: 'inherit',
   });
