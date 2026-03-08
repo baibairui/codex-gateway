@@ -19,6 +19,8 @@ async function startTestServer(options?: {
     content: string;
     sourceMessageId?: string;
     allowReply?: boolean;
+    replyTargetId?: string;
+    replyTargetType?: 'open_id' | 'chat_id';
   }) => Promise<void>;
 }) {
   const app = createApp({
@@ -149,6 +151,8 @@ describe('createApp feishu callback', () => {
           sender: { sender_id: { open_id: 'ou_1' } },
           message: {
             message_id: 'om_1',
+            chat_id: 'oc_dm_1',
+            chat_type: 'p2p',
             message_type: 'image',
             content: JSON.stringify({ image_key: 'img_1' }),
           },
@@ -166,6 +170,8 @@ describe('createApp feishu callback', () => {
       content: '[飞书图片] image_key=img_1\nmessage_id=om_1',
       sourceMessageId: 'om_1',
       allowReply: true,
+      replyTargetId: 'ou_1',
+      replyTargetType: 'open_id',
     });
   });
 
@@ -192,6 +198,9 @@ describe('createApp feishu callback', () => {
               open_id: 'ou_card_1',
             },
           },
+          context: {
+            chat_id: 'oc_group_1',
+          },
           action: {
             value: {
               gateway_cmd: '/skills global',
@@ -208,6 +217,8 @@ describe('createApp feishu callback', () => {
       channel: 'feishu',
       userId: 'ou_card_1',
       content: '/skills global',
+      replyTargetId: 'oc_group_1',
+      replyTargetType: 'chat_id',
     });
   });
 });
@@ -224,6 +235,8 @@ describe('dispatchFeishuMessageReceiveEvent', () => {
       sender: { sender_id: { open_id: 'ou_ws_1' } },
       message: {
         message_id: 'om_ws_1',
+        chat_id: 'oc_dm_2',
+        chat_type: 'p2p',
         message_type: 'text',
         content: JSON.stringify({ text: 'hello from ws' }),
       },
@@ -236,6 +249,38 @@ describe('dispatchFeishuMessageReceiveEvent', () => {
       content: 'hello from ws',
       sourceMessageId: 'om_ws_1',
       allowReply: true,
+      replyTargetId: 'ou_ws_1',
+      replyTargetType: 'open_id',
+    });
+  });
+
+  it('uses chat_id as reply target for group messages', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_group_1' } },
+      message: {
+        message_id: 'om_group_1',
+        chat_id: 'oc_group_1',
+        chat_type: 'group',
+        message_type: 'text',
+        content: JSON.stringify({ text: 'hello group' }),
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).toHaveBeenCalledWith({
+      channel: 'feishu',
+      userId: 'ou_group_1',
+      content: 'hello group',
+      sourceMessageId: 'om_group_1',
+      allowReply: true,
+      replyTargetId: 'oc_group_1',
+      replyTargetType: 'chat_id',
     });
   });
 });
@@ -248,11 +293,13 @@ describe('dispatchFeishuCardActionEvent', () => {
       isDuplicateMessage: () => false,
       handleText,
     }, {
-      open_message_id: 'om_2',
       operator: {
         operator_id: {
           open_id: 'ou_2',
         },
+      },
+      context: {
+        chat_id: 'oc_2',
       },
       action: {
         value: {
@@ -265,6 +312,8 @@ describe('dispatchFeishuCardActionEvent', () => {
       channel: 'feishu',
       userId: 'ou_2',
       content: '/agents',
+      replyTargetId: 'oc_2',
+      replyTargetType: 'chat_id',
     });
   });
 });

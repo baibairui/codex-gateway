@@ -25,6 +25,8 @@ interface AppDeps {
     content: string;
     sourceMessageId?: string;
     allowReply?: boolean;
+    replyTargetId?: string;
+    replyTargetType?: 'open_id' | 'chat_id';
   }) => Promise<void>;
 }
 
@@ -51,6 +53,8 @@ export function dispatchFeishuMessageReceiveEvent(
   const openId = typeof senderId.open_id === 'string' ? senderId.open_id : '';
   const messageId = typeof message.message_id === 'string' ? message.message_id : '';
   const messageType = typeof message.message_type === 'string' ? message.message_type : '';
+  const chatId = typeof message.chat_id === 'string' ? message.chat_id : '';
+  const chatType = typeof message.chat_type === 'string' ? message.chat_type : '';
   const rawContent = typeof message.content === 'string' ? message.content : '';
 
   if (!openId || !messageId || !messageType || !rawContent) {
@@ -81,6 +85,8 @@ export function dispatchFeishuMessageReceiveEvent(
     content: contentWithMeta,
     sourceMessageId: messageId,
     allowReply: true,
+    replyTargetId: chatType === 'p2p' || !chatId ? openId : chatId,
+    replyTargetType: chatType === 'p2p' || !chatId ? 'open_id' : 'chat_id',
   }).catch((err) => {
     log.error('飞书事件异步处理失败', err);
   });
@@ -98,6 +104,8 @@ export function dispatchFeishuCardActionEvent(
     : (typeof operator.open_id === 'string' ? operator.open_id : '');
   const action = (event.action ?? {}) as Record<string, unknown>;
   const value = (action.value ?? {}) as Record<string, unknown>;
+  const context = (event.context ?? {}) as Record<string, unknown>;
+  const chatId = typeof context.chat_id === 'string' ? context.chat_id : '';
   const command = typeof value.gateway_cmd === 'string' ? value.gateway_cmd.trim() : '';
   if (!openId || !command) {
     return 'ignored';
@@ -111,6 +119,8 @@ export function dispatchFeishuCardActionEvent(
     channel: 'feishu',
     userId: openId,
     content: command,
+    replyTargetId: chatId || openId,
+    replyTargetType: chatId ? 'chat_id' : 'open_id',
   }).catch((err) => {
     log.error('飞书卡片回调异步处理失败', err);
   });

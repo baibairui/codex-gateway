@@ -150,7 +150,12 @@ if (wecomCrypto) {
 
 const userTaskQueue = new Map<string, Promise<void>>();
 const outboundSendQueue = new Map<string, Promise<void>>();
-const inboundReplyContext = new Map<string, { messageId?: string; allowReply: boolean }>();
+const inboundReplyContext = new Map<string, {
+  messageId?: string;
+  allowReply: boolean;
+  replyTargetId?: string;
+  replyTargetType?: 'open_id' | 'chat_id';
+}>();
 
 interface InboundEnrichResult {
   content: string;
@@ -332,6 +337,10 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
   await enqueueOutboundSend(channel, userId, async () => {
     const replyContext = inboundReplyContext.get(`${channel}:${userId}`);
     const replyToMessageId = replyContext?.allowReply ? replyContext.messageId : undefined;
+    const feishuReplyTarget = {
+      receiveId: replyContext?.replyTargetId ?? userId,
+      receiveIdType: replyContext?.replyTargetType ?? 'open_id',
+    } as const;
     if (structured) {
       if (!isGatewayMessageTypeSupported(channel, structured.msg_type)) {
         const message = `❌ 不支持的 ${channel === 'feishu' ? '飞书' : '企微'} msg_type：${structured.msg_type}`;
@@ -345,7 +354,7 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
         if (!feishuApi) {
           throw new Error('feishu api not configured');
         }
-        await feishuApi.sendText(userId, message, {
+        await feishuApi.sendText(feishuReplyTarget, message, {
           replyToMessageId,
         });
         return;
@@ -363,7 +372,7 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       if (!feishuApi) {
         throw new Error('feishu api not configured');
       }
-      await feishuApi.sendMessage(userId, {
+      await feishuApi.sendMessage(feishuReplyTarget, {
         msgType: structured.msg_type,
         content: structured.content,
         replyToMessageId,
@@ -381,7 +390,7 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
     if (!feishuApi) {
       throw new Error('feishu api not configured');
     }
-    await feishuApi.sendText(userId, content, {
+    await feishuApi.sendText(feishuReplyTarget, content, {
       replyToMessageId,
     });
   });
@@ -489,6 +498,8 @@ async function appDepsHandleText(input: {
   content: string;
   sourceMessageId?: string;
   allowReply?: boolean;
+  replyTargetId?: string;
+  replyTargetType?: 'open_id' | 'chat_id';
 }): Promise<void> {
   const enrichResult = await enrichInboundContent(input.channel, input.content);
   if (enrichResult.attachmentRequired && !enrichResult.attachmentDownloaded) {
@@ -505,6 +516,8 @@ async function appDepsHandleText(input: {
     inboundReplyContext.set(contextKey, {
       messageId: input.channel === 'feishu' ? input.sourceMessageId : undefined,
       allowReply: input.channel === 'feishu' ? input.allowReply === true : false,
+      replyTargetId: input.channel === 'feishu' ? input.replyTargetId : undefined,
+      replyTargetType: input.channel === 'feishu' ? input.replyTargetType : undefined,
     });
     try {
       await handleChatText({ channel: input.channel, userId: input.userId, content: enrichResult.content });

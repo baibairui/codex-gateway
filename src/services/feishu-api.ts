@@ -21,6 +21,11 @@ interface TokenCache {
   expiresAt: number;
 }
 
+export interface FeishuReceiveTarget {
+  receiveId: string;
+  receiveIdType: 'open_id' | 'chat_id';
+}
+
 export interface FeishuOutgoingMessage {
   msgType: string;
   content: Record<string, unknown> | string;
@@ -31,7 +36,7 @@ interface FeishuSdkClient {
   im: {
     message: {
       create: (payload: {
-        params: { receive_id_type: 'open_id' };
+        params: { receive_id_type: 'open_id' | 'chat_id' };
         data: {
           receive_id: string;
           msg_type: string;
@@ -174,12 +179,17 @@ export class FeishuApi {
     });
   }
 
-  async sendText(openId: string, content: string, options?: { replyToMessageId?: string }): Promise<string | undefined> {
+  async sendText(
+    target: string | FeishuReceiveTarget,
+    content: string,
+    options?: { replyToMessageId?: string },
+  ): Promise<string | undefined> {
+    const receiveTarget = resolveFeishuReceiveTarget(target);
     const textContent = requireNonEmptyText(content, 'feishu send failed: text content is required');
     const chunks = splitFeishuTextByUtf8Bytes(textContent);
     let lastMessageId: string | undefined;
     for (const chunk of chunks) {
-      lastMessageId = await this.sendSingleMessage(openId, {
+      lastMessageId = await this.sendSingleMessage(receiveTarget, {
         msgType: 'text',
         content: { text: chunk },
         replyToMessageId: options?.replyToMessageId,
@@ -188,7 +198,8 @@ export class FeishuApi {
     return lastMessageId;
   }
 
-  async sendMessage(openId: string, message: FeishuOutgoingMessage): Promise<string | undefined> {
+  async sendMessage(target: string | FeishuReceiveTarget, message: FeishuOutgoingMessage): Promise<string | undefined> {
+    const receiveTarget = resolveFeishuReceiveTarget(target);
     const msgType = message.msgType.trim().toLowerCase();
     if (!msgType) {
       throw new Error('feishu send failed: msgType is required');
@@ -202,7 +213,7 @@ export class FeishuApi {
       const chunks = splitFeishuTextByUtf8Bytes(textContent);
       let lastMessageId: string | undefined;
       for (const chunk of chunks) {
-        lastMessageId = await this.sendSingleMessage(openId, {
+        lastMessageId = await this.sendSingleMessage(receiveTarget, {
           msgType: 'text',
           content: { text: chunk },
           replyToMessageId: message.replyToMessageId,
@@ -211,7 +222,7 @@ export class FeishuApi {
       return lastMessageId;
     }
 
-    return this.sendSingleMessage(openId, {
+    return this.sendSingleMessage(receiveTarget, {
       ...message,
       msgType,
     });
@@ -343,7 +354,10 @@ export class FeishuApi {
     throw lastError ?? new Error(`feishu message resource download failed: unsupported type ${types.join(',')}`);
   }
 
-  private async sendSingleMessage(openId: string, message: FeishuOutgoingMessage): Promise<string | undefined> {
+  private async sendSingleMessage(
+    target: FeishuReceiveTarget,
+    message: FeishuOutgoingMessage,
+  ): Promise<string | undefined> {
     let lastError: Error | undefined;
     let lastMessageId: string | undefined;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -376,10 +390,10 @@ export class FeishuApi {
         }
         const response = await this.sdkClient.im.message.create({
           params: {
-            receive_id_type: 'open_id',
+            receive_id_type: target.receiveIdType,
           },
           data: {
-            receive_id: openId,
+            receive_id: target.receiveId,
             msg_type: message.msgType,
             content,
             uuid: randomUUID(),
@@ -571,6 +585,28 @@ function extractTextContent(content: FeishuOutgoingMessage['content']): string {
   }
   const text = content.text;
   return typeof text === 'string' ? text : '';
+}
+
+function resolveFeishuReceiveTarget(target: string | FeishuReceiveTarget): FeishuReceiveTarget {
+  if (typeof target === 'string') {
+    const receiveId = target.trim();
+    if (!receiveId) {
+      throw new Error('feishu send failed: receive target is required');
+    }
+    return {
+      receiveId,
+      receiveIdType: 'open_id',
+    };
+  }
+
+  const receiveId = target.receiveId.trim();
+  if (!receiveId) {
+    throw new Error('feishu send failed: receive target is required');
+  }
+  return {
+    receiveId,
+    receiveIdType: target.receiveIdType,
+  };
 }
 
 function requireNonEmptyText(text: string, errorMessage: string): string {

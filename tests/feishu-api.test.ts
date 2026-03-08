@@ -25,12 +25,23 @@ describe('FeishuApi', () => {
   });
 
   it('sends text via sdk create and preserves chunking', async () => {
-    const createCalls: Array<{ receive_id: string; msg_type: string; content: string }> = [];
+    const createCalls: Array<{
+      receive_id_type: string;
+      receive_id: string;
+      msg_type: string;
+      content: string;
+    }> = [];
     const sdkClient = {
       im: {
         message: {
-          create: vi.fn(async (payload: { data: { receive_id: string; msg_type: string; content: string } }) => {
-            createCalls.push(payload.data);
+          create: vi.fn(async (payload: {
+            params: { receive_id_type: string };
+            data: { receive_id: string; msg_type: string; content: string };
+          }) => {
+            createCalls.push({
+              receive_id_type: payload.params.receive_id_type,
+              ...payload.data,
+            });
             return { code: 0, msg: 'ok' };
           }),
           reply: vi.fn(),
@@ -51,8 +62,52 @@ describe('FeishuApi', () => {
     await api.sendText('ou_a', '你好hello'.repeat(300));
 
     expect(createCalls.length).toBeGreaterThan(1);
+    expect(createCalls.every((call) => call.receive_id_type === 'open_id')).toBe(true);
     expect(createCalls.every((call) => call.receive_id === 'ou_a')).toBe(true);
     expect(createCalls.every((call) => call.msg_type === 'text')).toBe(true);
+  });
+
+  it('supports chat_id as receive target', async () => {
+    const createCalls: Array<{ receive_id_type: string; receive_id: string }> = [];
+    const sdkClient = {
+      im: {
+        message: {
+          create: vi.fn(async (payload: {
+            params: { receive_id_type: string };
+            data: { receive_id: string };
+          }) => {
+            createCalls.push({
+              receive_id_type: payload.params.receive_id_type,
+              receive_id: payload.data.receive_id,
+            });
+            return { code: 0, msg: 'ok' };
+          }),
+          reply: vi.fn(),
+        },
+        image: { create: vi.fn() },
+        file: { create: vi.fn() },
+        messageResource: { get: vi.fn() },
+      },
+    };
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient,
+    });
+
+    await api.sendText({
+      receiveId: 'oc_group_1',
+      receiveIdType: 'chat_id',
+    }, 'hello group');
+
+    expect(createCalls).toEqual([
+      {
+        receive_id_type: 'chat_id',
+        receive_id: 'oc_group_1',
+      },
+    ]);
   });
 
   it('replies to source feishu message via sdk reply', async () => {
