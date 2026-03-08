@@ -1270,6 +1270,8 @@ describe('createChatHandler', () => {
 
     const prompt = run.mock.calls[0]?.[0]?.prompt as string;
     expect(prompt).toContain('简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。');
+    expect(prompt).toContain('若是在汇报浏览器执行中的阶段性进度');
+    expect(prompt).toContain('Action/Evidence/Result/Next step');
     expect(prompt).toContain('如果不确定该用哪种类型，优先退回 text');
   });
 
