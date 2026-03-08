@@ -118,6 +118,9 @@ describe('AgentWorkspaceManager', () => {
     const playbook = fs.readFileSync(path.join(result.workspaceDir, 'browser-playbook.md'), 'utf8');
 
     expect(agentsMd).toContain('浏览器操作职责');
+    expect(agentsMd).toContain('Action / Evidence / Result / Next step');
+    expect(agentsMd).toContain('多个相似目标并存');
+    expect(agentsMd).toContain('文件上传时，若用户未明确授权，先暂停并确认');
     expect(playbook).toContain('Browser Playbook');
     expect(playbook).toContain('回报格式固定：已执行动作 -> 页面证据 -> 当前结论 -> 下一步。');
     expect(playbook).toContain('## Stop Conditions');
