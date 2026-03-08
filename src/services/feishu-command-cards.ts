@@ -1,0 +1,859 @@
+type Channel = 'wecom' | 'feishu';
+
+type FeishuCardTemplate = 'blue' | 'wathet' | 'turquoise' | 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'grey';
+
+interface CommandQuickAction {
+  label: string;
+  cmd: string;
+  type?: 'default' | 'primary' | 'danger';
+}
+
+interface FeishuCardButton {
+  label: string;
+  cmd: string;
+  type?: 'default' | 'primary' | 'danger';
+}
+
+interface FeishuCardField {
+  label: string;
+  value: string;
+}
+
+type CardElementBuilder = (text: string) => Array<Record<string, unknown>>;
+const COMMAND_LABELS: Record<string, string> = {
+  '/help': '命令帮助',
+  '/new': '会话管理',
+  '/clear': '会话管理',
+  '/session': '当前会话',
+  '/sessions': '会话列表',
+  '/agents': 'Agent 列表',
+  '/agent': 'Agent 管理',
+  '/skill-agent': '技能扩展助手',
+  '/skillagent': '技能扩展助手',
+  '/skill': '技能扩展助手',
+  '/login': '登录授权',
+  '/rename': '会话重命名',
+  '/switch': '会话切换',
+  '/model': '模型管理',
+  '/models': '模型列表',
+  '/skills': 'Skill 管理',
+  '/search': '联网搜索',
+  '/deploy-workspace': 'Workspace 发布',
+  '/publish-workspace': 'Workspace 发布',
+  '/review': '代码审查',
+};
+
+const COMMAND_SUMMARIES: Record<string, string> = {
+  '/session': '查看当前会话上下文，并进入切换或重命名流程。',
+  '/sessions': '管理当前 agent 的历史会话，快速定位并切换目标会话。',
+  '/agents': '查看可用 agent 列表，并在不同工作区之间切换。',
+  '/agent': '查看当前 agent 状态，包括工作区和会话绑定情况。',
+  '/skills': '查看当前会话生效的 skills，并快速切换不同范围。',
+  '/model': '查看或切换当前模型，并在需要时恢复默认值。',
+  '/models': '查看当前支持的模型集合，并回到当前模型设置。',
+  '/search': '控制本会话的联网搜索开关，按需临时开启。',
+  '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
+  '/login': '重新触发登录授权流程，恢复 Codex 执行能力。',
+};
+
+const COMMAND_TEMPLATES: Record<string, FeishuCardTemplate> = {
+  '/help': 'blue',
+  '/session': 'wathet',
+  '/sessions': 'wathet',
+  '/switch': 'wathet',
+  '/rename': 'wathet',
+  '/agents': 'green',
+  '/agent': 'green',
+  '/skills': 'turquoise',
+  '/model': 'blue',
+  '/models': 'blue',
+  '/search': 'wathet',
+  '/review': 'orange',
+  '/login': 'blue',
+};
+
+const CARD_COPY = {
+  genericTitle: '命令结果',
+  actionTitle: '快捷操作',
+  actionHint: '点击按钮可继续执行相关命令',
+  actionFallback: '若平台未启用卡片回调，也可手动发送对应命令文本。',
+  usagePrefix: '提示：',
+  sessionsTitle: '会话总览',
+  agentsTitle: 'Agent 列表',
+  helpTitle: '帮助目录',
+  helpGroupLabel: '当前分组',
+  searchTitle: '当前状态',
+  searchAdvice: '建议：默认关闭，按需临时开启。',
+  statusTitles: {
+    success: '执行成功',
+    error: '执行失败',
+    warning: '风险提示',
+    pending: '执行中',
+  },
+} as const;
+
+const STATIC_QUICK_ACTIONS: Record<string, CommandQuickAction[]> = {
+  '/agents': [
+    { label: '查看 Agents', cmd: '/agents', type: 'primary' },
+    { label: '当前 Agent', cmd: '/agent' },
+    { label: '切换会话', cmd: '/sessions' },
+  ],
+  '/agent': [
+    { label: '查看 Agents', cmd: '/agents', type: 'primary' },
+    { label: '当前 Agent', cmd: '/agent' },
+    { label: '切换会话', cmd: '/sessions' },
+  ],
+  '/skills': [
+    { label: '生效 Skills', cmd: '/skills', type: 'primary' },
+    { label: '全局 Skills', cmd: '/skills global' },
+    { label: 'Agent Skills', cmd: '/skills agent' },
+  ],
+  '/review': [
+    { label: '审查当前改动', cmd: '/review', type: 'primary' },
+    { label: '按分支审查', cmd: '/review base main' },
+    { label: '按提交审查', cmd: '/review commit <SHA>' },
+  ],
+  '/session': [
+    { label: '当前会话', cmd: '/session', type: 'primary' },
+    { label: '会话列表', cmd: '/sessions' },
+    { label: '切换会话', cmd: '/switch <编号|threadId>' },
+  ],
+  '/sessions': [
+    { label: '当前会话', cmd: '/session', type: 'primary' },
+    { label: '会话列表', cmd: '/sessions' },
+    { label: '切换会话', cmd: '/switch <编号|threadId>' },
+  ],
+  '/switch': [
+    { label: '当前会话', cmd: '/session', type: 'primary' },
+    { label: '会话列表', cmd: '/sessions' },
+    { label: '切换会话', cmd: '/switch <编号|threadId>' },
+  ],
+  '/rename': [
+    { label: '当前会话', cmd: '/session', type: 'primary' },
+    { label: '会话列表', cmd: '/sessions' },
+    { label: '切换会话', cmd: '/switch <编号|threadId>' },
+  ],
+  '/login': [
+    { label: '重新登录', cmd: '/login', type: 'primary' },
+    { label: '查看帮助', cmd: '/help' },
+  ],
+};
+
+function buildGatewayStructuredMessage(msgType: string, content: Record<string, unknown> | string): string {
+  return JSON.stringify({
+    __gateway_message__: true,
+    msg_type: msgType,
+    content,
+  });
+}
+
+function resolveCommandLabel(commandName: string): string {
+  const normalized = commandName.toLowerCase();
+  return COMMAND_LABELS[normalized] ?? CARD_COPY.genericTitle;
+}
+
+function resolveCardTemplate(commandName: string, text: string): FeishuCardTemplate {
+  const normalized = text.trim();
+  if (normalized.startsWith('✅')) {
+    return 'green';
+  }
+  if (normalized.startsWith('❌')) {
+    return 'red';
+  }
+  if (normalized.startsWith('⚠️')) {
+    return 'orange';
+  }
+  if (normalized.startsWith('⏳')) {
+    return 'wathet';
+  }
+  if (normalized.startsWith('可用命令：') || normalized.startsWith('用法：')) {
+    return 'blue';
+  }
+  return COMMAND_TEMPLATES[commandName.toLowerCase()] ?? 'grey';
+}
+
+function resolveSearchState(text: string): 'on' | 'off' | 'unknown' {
+  const normalized = text.trim();
+  if (normalized.includes('联网搜索：on') || normalized.includes('已开启联网搜索')) {
+    return 'on';
+  }
+  if (normalized.includes('联网搜索：off') || normalized.includes('已关闭联网搜索')) {
+    return 'off';
+  }
+  return 'unknown';
+}
+
+function resolveHelpPageInfo(text: string): { page: number; total: number } | undefined {
+  const match = text.match(/帮助页\s+(\d+)\/(\d+)/);
+  if (!match) {
+    return undefined;
+  }
+  const page = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isFinite(page) || !Number.isFinite(total) || total <= 0) {
+    return undefined;
+  }
+  return {
+    page: Math.trunc(page),
+    total: Math.trunc(total),
+  };
+}
+
+function resolveCommandQuickActions(commandName: string, text: string): CommandQuickAction[] {
+  const normalized = commandName.toLowerCase();
+  if (normalized === '/help') {
+    const pageInfo = resolveHelpPageInfo(text);
+    const page = pageInfo?.page ?? 1;
+    const total = pageInfo?.total ?? 1;
+    const prev = Math.max(1, page - 1);
+    const next = Math.min(total, page + 1);
+    return [
+      { label: '⬅️ 上一页', cmd: `/help ${prev}`, type: page > 1 ? 'primary' : 'default' },
+      { label: '下一页 ➡️', cmd: `/help ${next}`, type: page < total ? 'primary' : 'default' },
+    ];
+  }
+  const staticActions = STATIC_QUICK_ACTIONS[normalized];
+  if (staticActions) {
+    return staticActions;
+  }
+  if (normalized === '/search') {
+    const state = resolveSearchState(text);
+    return [
+      { label: '查看状态', cmd: '/search', type: state === 'unknown' ? 'primary' : 'default' },
+      { label: '开启', cmd: '/search on', type: state === 'off' ? 'primary' : 'default' },
+      { label: '关闭', cmd: '/search off', type: state === 'on' ? 'danger' : 'default' },
+    ];
+  }
+  return [
+    { label: '命令帮助', cmd: '/help', type: 'primary' },
+  ];
+}
+
+function buildFeishuTextBlock(content: string): Record<string, unknown> {
+  const escaped = content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return {
+    tag: 'markdown',
+    content: escaped,
+  };
+}
+
+function buildFeishuDivider(): Record<string, unknown> {
+  return { tag: 'hr' };
+}
+
+function buildFeishuTitleBlock(title: string, summary: string): Record<string, unknown> {
+  return buildFeishuTextBlock(`**${title}**\n${summary}`);
+}
+
+function buildFeishuSectionBlock(title: string, body: string | string[]): Record<string, unknown> {
+  const normalizedBody = Array.isArray(body) ? body.filter(Boolean).join('\n') : body;
+  const content = normalizedBody ? `**${title}**\n${normalizedBody}` : `**${title}**`;
+  return buildFeishuTextBlock(content);
+}
+
+function buildFeishuFieldGrid(fields: FeishuCardField[]): Record<string, unknown> {
+  return {
+    tag: 'div',
+    fields: fields
+      .filter((field) => field.value.trim())
+      .map((field) => ({
+        is_short: true,
+        text: {
+          tag: 'lark_md',
+          content: `**${field.label}**\n${field.value}`,
+        },
+      })),
+  };
+}
+
+function buildFeishuTipsNote(content: string): Record<string, unknown> {
+  return {
+    tag: 'note',
+    elements: [
+      {
+        tag: 'plain_text',
+        content,
+      },
+    ],
+  };
+}
+
+function buildFeishuLeadNote(content: string): Record<string, unknown> {
+  return {
+    tag: 'note',
+    elements: [
+      {
+        tag: 'plain_text',
+        content,
+      },
+    ],
+  };
+}
+
+function extractIndexedLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^\d+\.\s+/.test(line) || /^👉\s+\d+\.\s+/.test(line));
+}
+
+function extractBulletedLines(text: string, sectionTitle: string): string[] {
+  const lines = text.split('\n').map((line) => line.trim());
+  const startIndex = lines.findIndex((line) => line === sectionTitle);
+  if (startIndex < 0) {
+    return [];
+  }
+  const collected: string[] = [];
+  for (let i = startIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (!line) {
+      continue;
+    }
+    if (line.endsWith('：') && !line.startsWith('- ')) {
+      break;
+    }
+    if (line.startsWith('- ')) {
+      collected.push(line.slice(2).trim());
+      continue;
+    }
+    break;
+  }
+  return collected;
+}
+
+function stripListMarker(line: string): string {
+  return line.replace(/^👉\s+/, '').replace(/^\d+\.\s+/, '').trim();
+}
+
+function extractCurrentModelName(currentLine: string | undefined): string | undefined {
+  if (!currentLine) {
+    return undefined;
+  }
+  const normalized = currentLine.replace(/^(当前模型：|✅ 已切换模型为：|✅ 已重置模型：)/, '').trim();
+  return normalized || undefined;
+}
+
+function prioritizeCurrentModel(models: string[], currentModel: string | undefined): string[] {
+  if (!currentModel) {
+    return models;
+  }
+  const selected = models.find((model) => model === currentModel);
+  if (!selected) {
+    return models;
+  }
+  return [selected, ...models.filter((model) => model !== selected)];
+}
+
+function resolveModelPageInfo(text: string): { page: number; total: number } | undefined {
+  const match = text.match(/模型页\s+(\d+)\/(\d+)/);
+  if (!match) {
+    return undefined;
+  }
+  const page = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isFinite(page) || !Number.isFinite(total) || total <= 0) {
+    return undefined;
+  }
+  return {
+    page: Math.trunc(page),
+    total: Math.trunc(total),
+  };
+}
+
+function formatModelDisplayName(slug: string): string {
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => {
+      if (/^gpt$/i.test(part)) {
+        return 'GPT';
+      }
+      if (/^o\d+$/i.test(part)) {
+        return part.toUpperCase();
+      }
+      if (/^\d+$/.test(part)) {
+        return part;
+      }
+      if (/^codex$/i.test(part)) {
+        return 'Codex';
+      }
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(' ');
+}
+
+function buildSessionsCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const indexed = extractIndexedLines(text);
+  const currentSession = indexed.find((line) => line.startsWith('👉'));
+  const usage = lines.find((line) => line.startsWith('使用 /switch '));
+  const summary = lines[0] ?? text;
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTitleBlock(CARD_COPY.sessionsTitle, summary),
+  ];
+  if (indexed.length > 0) {
+    elements.push(buildFeishuFieldGrid([
+      { label: '会话数量', value: String(indexed.length) },
+      { label: '当前会话', value: currentSession ? stripListMarker(currentSession) : '未标记' },
+      { label: '可执行操作', value: '切换 / 重命名' },
+    ]));
+  }
+  if (indexed.length > 0) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('会话项', indexed));
+  }
+  if (usage) {
+    elements.push(buildFeishuTipsNote(`${CARD_COPY.usagePrefix}${usage}`));
+  }
+  return elements;
+}
+
+function buildAgentsCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const indexed = compactAgentEntries(lines);
+  const currentAgent = indexed.find((line) => line.startsWith('👉'));
+  const summary = lines[0] ?? text;
+  const workspaceLines = lines.filter((line) => line.startsWith('/'));
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTitleBlock(CARD_COPY.agentsTitle, summary),
+  ];
+  if (indexed.length > 0) {
+    elements.push(buildFeishuFieldGrid([
+      { label: 'Agent 数量', value: String(indexed.length) },
+      { label: '当前 Agent', value: currentAgent ? stripListMarker(currentAgent) : '未标记' },
+      { label: '切换', value: '/agent use' },
+    ]));
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('Agent', indexed));
+  } else if (workspaceLines.length > 0) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('工作区', workspaceLines));
+  }
+  return elements;
+}
+
+function buildSkillsCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const indexed = extractIndexedLines(text);
+  const summary = lines[0] ?? text;
+  const scopeMatch = summary.match(/范围：([^，)]+).*agent：(.+)）$/);
+  const scope = scopeMatch?.[1]?.trim() ?? '';
+  const agent = scopeMatch?.[2]?.trim() ?? '';
+  const titleSummary = [scope || 'effective', agent].filter(Boolean).join(' · ');
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTitleBlock('Skills', titleSummary || summary),
+  ];
+  if (scope || agent || indexed.length > 0) {
+    elements.push(buildFeishuFieldGrid([
+      { label: '范围', value: scope || 'effective' },
+      { label: 'Agent', value: agent },
+      { label: '数量', value: indexed.length > 0 ? String(indexed.length) : '' },
+    ]));
+  }
+  if (indexed.length > 0) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('技能', compactSkillEntries(indexed)));
+  } else if (lines.length > 1) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('详情', lines.slice(1)));
+  }
+  return elements;
+}
+
+function compactAgentEntries(lines: string[]): string[] {
+  const results: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (!/^\d+\.\s+|^👉\s+\d+\.\s+/.test(line)) {
+      continue;
+    }
+    const workspace = lines[i + 1]?.startsWith('/') ? lines[i + 1] : '';
+    results.push(workspace ? `${line} · ${workspace}` : line);
+  }
+  return results;
+}
+
+function compactSkillEntries(lines: string[]): string[] {
+  return lines.map((line) => stripListMarker(line));
+}
+
+function buildAgentCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const elements: Array<Record<string, unknown>> = [];
+  const agentLine = lines.find((line) => line.startsWith('当前 agent：') || line.startsWith('✅ 已切换到 agent：') || line.startsWith('✅ 已创建并切换到 agent：'));
+  const workspaceLine = lines.find((line) => line.startsWith('工作区：'));
+  const sessionLine = lines.find((line) => line.startsWith('当前会话：'));
+  if (agentLine) {
+    elements.push(buildFeishuTitleBlock('Agent', agentLine));
+  }
+  if (workspaceLine || sessionLine) {
+    elements.push(buildFeishuFieldGrid([
+      { label: '工作区', value: workspaceLine?.replace(/^工作区：/, '').trim() ?? '' },
+      { label: '当前会话', value: sessionLine?.replace(/^当前会话：/, '').trim() ?? '' },
+    ]));
+    const detail = [workspaceLine, sessionLine].filter(Boolean).join('\n');
+    if (detail) {
+      elements.push(buildFeishuDivider());
+      elements.push(buildFeishuSectionBlock('状态', detail));
+    }
+  }
+  if (elements.length === 0) {
+    elements.push(buildFeishuTitleBlock('Agent', text));
+  }
+  return elements;
+}
+
+function buildModelCardElements(text: string): Array<Record<string, unknown>> {
+  const maxVisibleModelButtons = 9;
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const elements: Array<Record<string, unknown>> = [];
+  const visibleModels = extractBulletedLines(text, '可见模型：');
+  const hiddenModels = extractBulletedLines(text, '隐藏/兼容模型：');
+  const currentLine = lines.find((line) => line.startsWith('当前模型：') || line.startsWith('✅ 已切换模型为：') || line.startsWith('✅ 已重置模型：'));
+  const currentModel = extractCurrentModelName(currentLine);
+  const prioritizedVisibleModels = prioritizeCurrentModel(visibleModels, currentModel);
+  const visibleModelButtons = prioritizedVisibleModels.slice(0, maxVisibleModelButtons);
+  const remainingVisibleCount = Math.max(0, prioritizedVisibleModels.length - visibleModelButtons.length);
+  const pageInfo = resolveModelPageInfo(text);
+  if (currentLine) {
+    elements.push(buildFeishuTitleBlock('当前模型', currentLine));
+    elements.push(buildFeishuFieldGrid([
+      { label: '模型状态', value: currentModel ?? '' },
+      { label: '可见模型数', value: visibleModels.length > 0 ? String(visibleModels.length) : '' },
+      { label: '隐藏模型数', value: hiddenModels.length > 0 ? String(hiddenModels.length) : '' },
+      { label: '页码', value: pageInfo ? `${pageInfo.page}/${pageInfo.total}` : '' },
+    ]));
+  }
+  const warnings = lines.filter((line) => line.startsWith('⚠️'));
+  if (warnings.length > 0) {
+    if (elements.length > 0) {
+      elements.push(buildFeishuDivider());
+    }
+    elements.push(buildFeishuSectionBlock('提示', warnings));
+  }
+  if (visibleModelButtons.length > 0) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('可选模型', `点击即可切换，共显示 ${visibleModelButtons.length} 个`));
+    elements.push(...buildCommandButtonRows(
+      visibleModelButtons.map((model) => ({
+        label: model === currentModel ? `当前 · ${formatModelDisplayName(model)}` : formatModelDisplayName(model),
+        cmd: `/model ${model}`,
+        type: model === currentModel ? 'primary' : 'default',
+      })),
+      3,
+    ));
+    if (remainingVisibleCount > 0) {
+      elements.push(buildFeishuTipsNote(`还有 ${remainingVisibleCount} 个可见模型未展开，点击下方按钮查看完整列表。`));
+      elements.push(...buildCommandButtonRows([
+        { label: '查看全部模型', cmd: '/models', type: 'primary' },
+      ]));
+    }
+  }
+  if (pageInfo && pageInfo.total > 1) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('模型翻页', `当前第 ${pageInfo.page} / ${pageInfo.total} 页`));
+    elements.push(...buildCommandButtonRows([
+      { label: '上一页', cmd: `/models ${Math.max(1, pageInfo.page - 1)}`, type: pageInfo.page > 1 ? 'primary' : 'default' },
+      { label: '下一页', cmd: `/models ${Math.min(pageInfo.total, pageInfo.page + 1)}`, type: pageInfo.page < pageInfo.total ? 'primary' : 'default' },
+    ]));
+  }
+  if (hiddenModels.length > 0) {
+    elements.push(buildFeishuTipsNote(`还有 ${hiddenModels.length} 个隐藏/兼容模型，已默认收起。`));
+  }
+  if (currentModel) {
+    elements.push(buildFeishuDivider());
+    elements.push(...buildCommandButtonRows([
+      { label: '重置模型', cmd: '/model reset', type: 'default' },
+    ]));
+  }
+  if (elements.length === 0) {
+    elements.push(buildFeishuTitleBlock('当前模型', text));
+  }
+  return elements;
+}
+
+function buildSearchCardElements(text: string): Array<Record<string, unknown>> {
+  const state = resolveSearchState(text);
+  const stateLine = state === 'on'
+    ? '🟢 已开启'
+    : state === 'off'
+    ? '⚪ 已关闭'
+    : '🟡 状态未知';
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTitleBlock(CARD_COPY.searchTitle, stateLine),
+  ];
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  elements.push(buildFeishuFieldGrid([
+    { label: '联网搜索', value: stateLine },
+    { label: '推荐策略', value: state === 'on' ? '当前临时开启' : '默认关闭，按需开启' },
+  ]));
+  if (lines.length > 0) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('当前配置', lines));
+  }
+  elements.push(buildFeishuTipsNote(CARD_COPY.searchAdvice));
+  return elements;
+}
+
+function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const pager = lines.find((line) => line.startsWith('翻页：'));
+  const groupLine = lines.find((line) => line.startsWith('【') && line.endsWith('】'));
+  const commandLines = lines.filter((line) => line.startsWith('/'));
+  const pageInfo = resolveHelpPageInfo(text);
+  const groupName = groupLine?.replace(/^【/, '').replace(/】$/, '') ?? '';
+  const compactCommands = compactHelpCommands(commandLines);
+  const summary = groupName && pageInfo
+    ? `${groupName} · ${pageInfo.page}/${pageInfo.total}`
+    : pageInfo
+    ? `帮助页 ${pageInfo.page}/${pageInfo.total}`
+    : groupName || '可用命令';
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTitleBlock(CARD_COPY.helpTitle, summary),
+  ];
+  elements.push(buildFeishuFieldGrid([
+    { label: CARD_COPY.helpGroupLabel, value: groupName },
+    { label: '页码', value: pageInfo ? `${pageInfo.page}/${pageInfo.total}` : '' },
+    { label: '命令数', value: compactCommands ? String(compactCommands.split('  |  ').length) : '' },
+  ]));
+  if (compactCommands) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('命令', compactCommands));
+  } else {
+    elements.push(buildFeishuDivider());
+  }
+  const shortcutButtons = resolveHelpShortcutButtons(groupName);
+  if (shortcutButtons.length > 0) {
+    elements.push(...buildCommandButtonRows(shortcutButtons, 3));
+  }
+  if (pager) {
+    elements.push(buildFeishuTipsNote(pager));
+  }
+  return elements;
+}
+
+function compactHelpCommands(lines: string[]): string {
+  const groups = new Map<string, Set<string>>();
+  for (const line of lines) {
+    const signature = line.split(' - ')[0]?.trim() ?? '';
+    if (!signature.startsWith('/')) {
+      continue;
+    }
+    const parts = signature.split(/\s+/).filter(Boolean);
+    const base = normalizeHelpBaseCommand(parts[0] ?? '');
+    if (!base) {
+      continue;
+    }
+    const suffix = parts.length > 1 ? parts.slice(1).join(' ') : '';
+    const set = groups.get(base) ?? new Set<string>();
+    if (suffix) {
+      set.add(suffix);
+    }
+    groups.set(base, set);
+  }
+  return Array.from(groups.entries())
+    .map(([base, suffixes]) => {
+      const normalizedSuffixes = Array.from(suffixes)
+        .map((item) => item.replace(/\[[^\]]+\]/g, '').trim())
+        .filter(Boolean);
+      const uniqueSuffixes = Array.from(new Set(normalizedSuffixes));
+      if (uniqueSuffixes.length === 0) {
+        return base;
+      }
+      if (uniqueSuffixes.length === 1) {
+        return `${base} ${uniqueSuffixes[0]}`;
+      }
+      return `${base} (${uniqueSuffixes.join(' / ')})`;
+    })
+    .join('  |  ');
+}
+
+function normalizeHelpBaseCommand(command: string): string {
+  if (command === '/clear') {
+    return '/new';
+  }
+  if (command === '/skillagent') {
+    return '/skill-agent';
+  }
+  return command;
+}
+
+function resolveHelpShortcutButtons(groupName: string): FeishuCardButton[] {
+  if (groupName === '会话与 Agent') {
+    return [
+      { label: '新建会话', cmd: '/new', type: 'primary' },
+      { label: '会话列表', cmd: '/sessions' },
+      { label: 'Agent 列表', cmd: '/agents' },
+    ];
+  }
+  if (groupName === '模型与技能') {
+    return [
+      { label: '当前模型', cmd: '/model', type: 'primary' },
+      { label: '模型列表', cmd: '/models' },
+      { label: '生效 Skills', cmd: '/skills' },
+    ];
+  }
+  if (groupName === '执行控制') {
+    return [
+      { label: '搜索状态', cmd: '/search', type: 'primary' },
+      { label: '代码审查', cmd: '/review' },
+      { label: '登录授权', cmd: '/login' },
+    ];
+  }
+  return [
+    { label: '查看帮助', cmd: '/help', type: 'primary' },
+  ];
+}
+
+function buildCommandButtonRows(buttons: FeishuCardButton[], buttonsPerRow = 2): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = [];
+  const step = Math.max(1, buttonsPerRow);
+  for (let i = 0; i < buttons.length; i += step) {
+    const chunk = buttons.slice(i, i + step);
+    rows.push({
+      tag: 'action',
+      actions: chunk.map((item) => ({
+        tag: 'button',
+        type: item.type ?? 'default',
+        text: {
+          tag: 'plain_text',
+          content: item.label,
+        },
+        value: {
+          gateway_cmd: item.cmd,
+          command: item.cmd,
+          text: item.cmd,
+        },
+      })),
+    });
+  }
+  return rows;
+}
+
+function buildStatusCardElements(text: string): Array<Record<string, unknown>> {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const firstLine = lines[0] ?? text;
+  const icon = firstLine[0] ?? '';
+  const title = icon === '✅'
+    ? CARD_COPY.statusTitles.success
+    : icon === '❌'
+    ? CARD_COPY.statusTitles.error
+    : icon === '⚠'
+    ? CARD_COPY.statusTitles.warning
+    : icon === '⏳'
+    ? CARD_COPY.statusTitles.pending
+    : CARD_COPY.genericTitle;
+  const summary = firstLine.replace(/^[✅❌⚠️⏳]\s*/, '').trim() || firstLine;
+  const details = lines.slice(1);
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTitleBlock(title, summary),
+    buildFeishuFieldGrid([
+      { label: '状态', value: firstLine },
+      { label: '类型', value: title },
+    ]),
+  ];
+  if (details.length > 0) {
+    elements.push(buildFeishuDivider(), buildFeishuSectionBlock('详情', details));
+  }
+  return elements;
+}
+
+function buildFeishuActionSection(actions: CommandQuickAction[]): Array<Record<string, unknown>> {
+  if (actions.length === 0) {
+    return [];
+  }
+  return [
+    buildFeishuDivider(),
+    buildFeishuSectionBlock(CARD_COPY.actionTitle, CARD_COPY.actionHint),
+    ...buildCommandButtonRows(actions.map((item) => ({
+      label: item.label,
+      cmd: item.cmd,
+      type: item.type,
+    })), 3),
+    buildFeishuTipsNote(CARD_COPY.actionFallback),
+  ];
+}
+
+function buildGenericCardElements(text: string): Array<Record<string, unknown>> {
+  if (/^[✅❌⚠️⏳]/.test(text.trim())) {
+    return buildStatusCardElements(text);
+  }
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const summary = lines[0] ?? text;
+  if (lines.length <= 1) {
+    return [buildFeishuTitleBlock(CARD_COPY.genericTitle, summary)];
+  }
+  return [
+    buildFeishuTitleBlock(CARD_COPY.genericTitle, summary),
+    buildFeishuDivider(),
+    buildFeishuSectionBlock('详情', lines.slice(1)),
+  ];
+}
+
+function isModelRichText(text: string): boolean {
+  return text.includes('当前模型：')
+    || text.includes('✅ 已切换模型为：')
+    || text.includes('✅ 已重置模型：')
+    || text.includes('可见模型：')
+    || text.includes('隐藏/兼容模型：');
+}
+
+const COMMAND_CARD_RENDERERS: Record<string, CardElementBuilder> = {
+  '/session': buildSessionsCardElements,
+  '/sessions': buildSessionsCardElements,
+  '/switch': buildSessionsCardElements,
+  '/rename': buildSessionsCardElements,
+  '/agents': buildAgentsCardElements,
+  '/skills': buildSkillsCardElements,
+  '/agent': buildAgentCardElements,
+  '/model': buildModelCardElements,
+  '/models': buildModelCardElements,
+  '/search': buildSearchCardElements,
+  '/help': buildHelpCardElements,
+};
+
+function resolveCommandCardElements(commandName: string, text: string): Array<Record<string, unknown>> {
+  const normalized = commandName.toLowerCase();
+  if ((normalized === '/model' || normalized === '/models') && isModelRichText(text)) {
+    return buildModelCardElements(text);
+  }
+  if (/^[✅❌⚠️⏳]/.test(text.trim())) {
+    return buildStatusCardElements(text);
+  }
+  const renderer = COMMAND_CARD_RENDERERS[normalized];
+  if (renderer) {
+    return renderer(text);
+  }
+  return buildGenericCardElements(text);
+}
+
+function buildFeishuInteractiveCommandCard(commandName: string, text: string): Record<string, unknown> {
+  const title = resolveCommandLabel(commandName);
+  const normalized = commandName.toLowerCase();
+  const actions = resolveCommandQuickActions(commandName, text);
+  const elements = resolveCommandCardElements(commandName, text);
+  const summary = COMMAND_SUMMARIES[normalized];
+  return {
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+    },
+    header: {
+      template: resolveCardTemplate(commandName, text),
+      title: {
+        tag: 'plain_text',
+        content: `${title} · ${commandName}`,
+      },
+    },
+    elements: [
+      ...(summary ? [buildFeishuLeadNote(summary)] : []),
+      ...elements,
+      ...buildFeishuActionSection(actions),
+    ],
+  };
+}
+
+export function formatCommandOutboundMessage(channel: Channel, commandName: string, text: string): string {
+  if (channel !== 'feishu') {
+    return text;
+  }
+  const normalized = text.trim();
+  if (!normalized) {
+    return text;
+  }
+  return buildGatewayStructuredMessage('interactive', buildFeishuInteractiveCommandCard(commandName, normalized));
+}
