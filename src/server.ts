@@ -14,6 +14,7 @@ import { MemorySteward } from './services/memory-steward.js';
 import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
 import { installReminderToolSkill } from './services/reminder-tool-skill.js';
+import { installFeishuOfficialOpsSkill } from './services/feishu-official-ops-skill.js';
 import { WeComApi } from './services/wecom-api.js';
 import { FeishuApi } from './services/feishu-api.js';
 import { WeComCrypto } from './utils/wecom-crypto.js';
@@ -85,7 +86,7 @@ const sessionStore = new SessionStore(path.join(dataDir, 'sessions.db'), {
 log.debug('SessionStore 已初始化');
 const agentWorkspaceManager = new AgentWorkspaceManager(agentsDir);
 log.debug('AgentWorkspaceManager 已初始化', { agentsDir });
-syncReminderToolSkills(codexWorkdir, agentsDir);
+syncBuiltInSkills(codexWorkdir, agentsDir);
 const dedupStore = new MessageDedupStore(config.dedupWindowSeconds);
 log.debug('MessageDedupStore 已初始化', { dedupWindowSeconds: config.dedupWindowSeconds });
 const rateLimitStore = new RateLimitStore(config.rateLimitMaxMessages, config.rateLimitWindowSeconds);
@@ -569,8 +570,9 @@ async function appDepsHandleText(input: {
   });
 }
 
-function syncReminderToolSkills(defaultWorkspaceDir: string, customAgentsRootDir: string): void {
+function syncBuiltInSkills(defaultWorkspaceDir: string, customAgentsRootDir: string): void {
   installReminderToolSkill(path.resolve(defaultWorkspaceDir));
+  installFeishuOfficialOpsSkill(path.resolve(defaultWorkspaceDir));
   const usersDir = path.join(customAgentsRootDir, 'users');
   if (!fs.existsSync(usersDir)) {
     return;
@@ -589,6 +591,7 @@ function syncReminderToolSkills(defaultWorkspaceDir: string, customAgentsRootDir
         continue;
       }
       installReminderToolSkill(workspaceDir);
+      installFeishuOfficialOpsSkill(workspaceDir);
     }
   }
 }

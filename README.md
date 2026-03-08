@@ -51,6 +51,15 @@
 
 像打开浏览器执行页面操作、做周期提醒、持续跟进任务，本质上都属于给 agent 安装 skill 后获得的能力。包括你自己的业务脚本、运营流程、外部平台动作，也都可以逐步接进来。
 
+当前内置的飞书官方操作 skill 还可以让 agent 执行真实的飞书 OpenAPI 动作，例如：
+
+- 创建新版飞书文档（DocX）
+- 列出知识库空间
+- 在知识库里创建节点（例如 DocX 节点）
+- 查询知识库节点信息
+
+这类动作不是“回复一段话假装完成”，而是通过飞书官方 OpenAPI 实际执行。
+
 ## 环境准备
 
 必须项：
@@ -185,6 +194,24 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 - 默认开启 `@` 触发：群消息只有明确 `@机器人` 才会进入 Codex
 - 私聊始终直接触发，不要求 `@`
 - 文本消息会优先使用 `text_without_at_bot`，避免把 `@机器人` 前缀一并传给模型
+
+### 飞书官方操作 skill（当前实现）
+
+当用户要求 agent 创建飞书文档、知识库节点等真实飞书对象时，agent 可以使用本地 skill：
+
+- `./.codex/skills/feishu-official-ops/SKILL.md`
+
+它当前封装了飞书官方 OpenAPI 的这些能力：
+
+- `docx create`：创建新版文档
+- `wiki list-spaces`：列出知识空间
+- `wiki get-node`：查询知识空间节点
+- `wiki create-node`：在知识空间创建节点
+
+前提：
+
+- 已配置 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`
+- 飞书应用已开通对应的 DocX / Wiki OpenAPI 权限
 
 完整配置模板见 [.env.example](./.env.example)。
 
