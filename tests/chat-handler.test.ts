@@ -1240,6 +1240,8 @@ describe('createChatHandler', () => {
     expect(prompt).toContain('你必须遵循以下企微回发协议：');
     expect(prompt).toContain('企微常用 msg_type：text、markdown、image、voice、video、file。');
     expect(prompt).toContain('简单一句话优先 text；多段说明或列表优先 markdown');
+    expect(prompt).toContain('若是在汇报浏览器执行中的阶段性进度、阻塞原因、用户接管请求或完成态总结');
+    expect(prompt).toContain('优先使用 markdown');
     expect(prompt).toContain('如果不确定该用哪种类型，优先退回 text');
     expect(prompt).not.toContain('飞书常用 msg_type');
   });

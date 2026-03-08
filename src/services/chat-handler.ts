@@ -293,6 +293,7 @@ function buildWeComOutboundMessageProtocolPrompt(userPrompt: string): string {
     '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
     '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path，可先读取对应本地文件并给出分析结果；若明确需要回发企微非文本消息，且你已经拿到本地路径，可在 JSON content 中直接提供这些路径，网关会先上传再发送。',
     '8. 选择消息类型时遵循：简单一句话优先 text；多段说明或列表优先 markdown；只有在用户明确要发送图片/语音/视频/文件时才用 image/voice/video/file。',
+    '8.1 若是在汇报浏览器执行中的阶段性进度、阻塞原因、用户接管请求或完成态总结，且内容天然是多段说明/清单，优先使用 markdown。',
     '9. image/voice/video/file 仅在用户明确要求发送对应类型，或你已拿到可发送资源（如 media_id、本地路径）时使用。',
     '10. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 markdown 或媒体类型。',
     '',
