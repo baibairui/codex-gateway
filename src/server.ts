@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EventDispatcher as LarkEventDispatcher, LoggerLevel as LarkSdkLoggerLevel, WSClient as LarkWSClient } from '@larksuiteoapi/node-sdk';
 
-import { createApp, dispatchFeishuMessageReceiveEvent } from './app.js';
+import { createApp, dispatchFeishuCardActionEvent, dispatchFeishuMessageReceiveEvent } from './app.js';
 import { config } from './config.js';
 import { WorkspacePublisher } from './services/workspace-publisher.js';
 import { AgentWorkspaceManager } from './services/agent-workspace-manager.js';
@@ -475,7 +475,16 @@ app.listen(config.port, () => {
       loggerLevel: LarkSdkLoggerLevel.error,
     }).register({
       'im.message.receive_v1': async (data: Record<string, unknown>) => {
+        log.info('飞书长连接收到事件', { eventType: 'im.message.receive_v1' });
         dispatchFeishuMessageReceiveEvent({
+          allowFrom: config.allowFrom,
+          isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
+          handleText: async (input) => appDepsHandleText(input),
+        }, data);
+      },
+      'card.action.trigger': async (data: Record<string, unknown>) => {
+        log.info('飞书长连接收到事件', { eventType: 'card.action.trigger' });
+        dispatchFeishuCardActionEvent({
           allowFrom: config.allowFrom,
           isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
           handleText: async (input) => appDepsHandleText(input),
