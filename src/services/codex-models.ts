@@ -71,6 +71,38 @@ export function formatCodexModelsText(snapshot: CodexModelsSnapshot): string {
   return lines.join('\n');
 }
 
+export function formatPaginatedCodexModelsText(
+  snapshot: CodexModelsSnapshot,
+  page: number,
+  pageSize = 9,
+): string {
+  if (snapshot.models.length === 0) {
+    return '未找到模型缓存。先在本机执行一次 codex 命令后再试 /models。';
+  }
+  const listed = snapshot.models
+    .filter((m) => m.visibility === 'list')
+    .map((m) => m.slug);
+  const hidden = snapshot.models
+    .filter((m) => m.visibility !== 'list')
+    .map((m) => m.slug);
+  const safePageSize = Math.max(1, Math.trunc(pageSize));
+  const totalPages = Math.max(1, Math.ceil(Math.max(listed.length, 1) / safePageSize));
+  const safePage = Math.max(1, Math.min(Math.trunc(page), totalPages));
+  const start = (safePage - 1) * safePageSize;
+  const visiblePage = listed.slice(start, start + safePageSize).map((slug) => `- ${slug}`);
+  const lines = [`Codex 模型列表（来自本机缓存，模型页 ${safePage}/${totalPages}）：`];
+  if (visiblePage.length > 0) {
+    lines.push('可见模型：', ...visiblePage);
+  }
+  if (hidden.length > 0) {
+    lines.push(`隐藏/兼容模型：共 ${hidden.length} 个`);
+  }
+  if (snapshot.fetchedAt) {
+    lines.push(`缓存时间：${snapshot.fetchedAt}`);
+  }
+  return lines.join('\n');
+}
+
 export interface ResolveModelResult {
   ok: boolean;
   model?: string;

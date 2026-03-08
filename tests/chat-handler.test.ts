@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createChatHandler } from '../src/services/chat-handler.js';
@@ -118,6 +121,7 @@ describe('createChatHandler', () => {
         isSharedMemoryEmpty: () => false,
       },
       runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
@@ -164,6 +168,7 @@ describe('createChatHandler', () => {
         isSharedMemoryEmpty: () => false,
       },
       runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
@@ -192,6 +197,7 @@ describe('createChatHandler', () => {
         isWorkspaceIdentityEmpty: () => false,
       },
       runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
@@ -229,6 +235,7 @@ describe('createChatHandler', () => {
         isSharedMemoryEmpty: () => false,
       },
       runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
@@ -287,6 +294,7 @@ describe('createChatHandler', () => {
         isSharedMemoryEmpty: () => false,
       },
       runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
@@ -310,13 +318,27 @@ describe('createChatHandler', () => {
     expect(card.header?.title?.content).toContain('/help');
     const merged = (card.elements ?? []).map((item) => String(item.content ?? '')).join('\n');
     expect(merged).toContain('帮助目录');
-    expect(merged).toContain('帮助页 1/3');
+    expect(merged).toContain('会话与 Agent · 1/3');
+    expect(merged).toContain('**命令**');
+    expect(merged).toContain('/new');
+    expect(merged).toContain('/agent (create / use)');
+    expect(merged).toContain('快捷操作');
+    const noteContents = (card.elements ?? [])
+      .filter((item) => (item as { tag?: string }).tag === 'note')
+      .flatMap((item) => ((item as { elements?: Array<{ content?: string }> }).elements ?? []).map((element) => String(element.content ?? '')));
+    expect(noteContents).not.toContain('按功能分组浏览可用命令，并直接点击执行常用操作。');
+    expect(noteContents).toContain('翻页：/help 1 | /help 2');
+    const fieldGrid = (card.elements ?? []).find((item) => (item as { tag?: string }).tag === 'div') as {
+      fields?: Array<{ text?: { content?: string } }>;
+    } | undefined;
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前分组**'))).toBe(true);
     const actionElements = (card.elements ?? []).filter((item) => (item as { tag?: string }).tag === 'action') as Array<{
       actions?: Array<{ value?: { gateway_cmd?: string } }>;
     }>;
     const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
-    expect(cmds).toContain('/help');
     expect(cmds).toContain('/new');
+    expect(cmds).toContain('/sessions');
+    expect(cmds).toContain('/agents');
     expect(cmds).toContain('/help 1');
     expect(cmds).toContain('/help 2');
   });
@@ -336,6 +358,7 @@ describe('createChatHandler', () => {
         isSharedMemoryEmpty: () => false,
       },
       runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
@@ -361,8 +384,15 @@ describe('createChatHandler', () => {
       .map((item) => String(item.content ?? ''));
     expect(markdownContents.join('\n')).toContain('**当前状态**');
     expect(markdownContents.join('\n')).toContain('联网搜索：');
-    const actionElement = (card.elements ?? []).find((item) => item.tag === 'action');
-    const cmds = (actionElement?.actions ?? []).map((item) => item.value?.gateway_cmd);
+    const fieldGrid = (card.elements ?? []).find((item) => item.tag === 'div') as {
+      fields?: Array<{ text?: { content?: string } }>;
+    } | undefined;
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**联网搜索**'))).toBe(true);
+    const actionElements = (card.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ value?: { gateway_cmd?: string } }>;
+    }>;
+    expect(actionElements).toHaveLength(1);
+    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
     expect(cmds).toContain('/search on');
     expect(cmds).toContain('/search off');
   });
@@ -393,8 +423,12 @@ describe('createChatHandler', () => {
     const parsed = JSON.parse(payload) as {
       content?: { elements?: Array<{ tag?: string; actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }> }> };
     };
-    const actionElement = parsed.content?.elements?.find((item) => item.tag === 'action');
-    const offAction = (actionElement?.actions ?? []).find((item) => item.value?.gateway_cmd === '/search off');
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }>;
+    }>;
+    const offAction = actionElements
+      .flatMap((item) => item.actions ?? [])
+      .find((item) => item.value?.gateway_cmd === '/search off');
     expect(offAction?.type).toBe('danger');
   });
 
@@ -432,13 +466,21 @@ describe('createChatHandler', () => {
     await handler({ channel: 'feishu', userId: 'u1', content: '/skills' });
 
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const parsed = JSON.parse(payload) as { content?: { header?: { template?: string }; elements?: Array<Record<string, unknown>> } };
+    expect(parsed.content?.header?.template).toBe('turquoise');
     const markdownContents = (parsed.content?.elements ?? [])
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**Skills**');
-    const actionElement = parsed.content?.elements?.find((item) => item.tag === 'action') as { actions?: Array<{ value?: { gateway_cmd?: string } }> } | undefined;
-    const cmds = (actionElement?.actions ?? []).map((item) => item.value?.gateway_cmd);
+    expect(markdownContents.join('\n')).toContain('**技能**');
+    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+      fields?: Array<{ text?: { content?: string } }>;
+    } | undefined;
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**范围**'))).toBe(true);
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ value?: { gateway_cmd?: string } }>;
+    }>;
+    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
     expect(cmds).toContain('/skills');
     expect(cmds).toContain('/skills global');
     expect(cmds).toContain('/skills agent');
@@ -477,6 +519,52 @@ describe('createChatHandler', () => {
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**会话项**');
+    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+      fields?: Array<{ text?: { content?: string } }>;
+    } | undefined;
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**会话数量**'))).toBe(true);
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前会话**'))).toBe(true);
+  });
+
+  it('renders agents command card with current agent and workspace sections', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.createAgent('local-owner', {
+      agentId: 'frontend',
+      name: '前端工作区',
+      workspaceDir: '/repo/frontend',
+    });
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/agents' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    expect(markdownContents.join('\n')).toContain('**Agent**');
+    expect(markdownContents.join('\n')).toContain('/repo/frontend');
+    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+      fields?: Array<{ text?: { content?: string } }>;
+    } | undefined;
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**Agent 数量**'))).toBe(true);
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前 Agent**'))).toBe(true);
   });
 
   it('renders agent command card with agent status sections', async () => {
@@ -508,11 +596,229 @@ describe('createChatHandler', () => {
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**Agent**');
     expect(markdownContents.join('\n')).toContain('**状态**');
+    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+      fields?: Array<{ text?: { content?: string } }>;
+    } | undefined;
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**工作区**'))).toBe(true);
   });
 
   it('renders model command card with current model section', async () => {
+    const cacheDir = path.join(os.homedir(), '.codex');
+    const cachePath = path.join(cacheDir, 'models_cache.json');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({
+      fetched_at: '2026-03-08T11:00:00Z',
+      models: [
+        { slug: 'gpt-5-codex', visibility: 'list', supported_in_api: true },
+        { slug: 'gpt-5', visibility: 'list', supported_in_api: true },
+        { slug: 'legacy-hidden', visibility: 'hide', supported_in_api: true },
+      ],
+    }));
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    expect(markdownContents.join('\n')).toContain('**当前模型**');
+    expect(markdownContents.join('\n')).toContain('**可选模型**');
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
+    }>;
+    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    expect(cmds).toContain('/model gpt-5-codex');
+    expect(cmds).toContain('/model gpt-5');
+    const currentModelAction = actionElements
+      .flatMap((item) => item.actions ?? [])
+      .find((action) => action.value?.gateway_cmd === '/model gpt-5-codex');
+    expect(currentModelAction?.text?.content).toBe('当前 · GPT 5 Codex');
+    expect(currentModelAction?.type).toBe('primary');
+  });
+
+  it('keeps model switch card interactive after changing model', async () => {
+    const cacheDir = path.join(os.homedir(), '.codex');
+    const cachePath = path.join(cacheDir, 'models_cache.json');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({
+      fetched_at: '2026-03-08T11:00:00Z',
+      models: [
+        { slug: 'gpt-5-codex', visibility: 'list', supported_in_api: true },
+        { slug: 'gpt-5', visibility: 'list', supported_in_api: true },
+      ],
+    }));
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/model gpt-5' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    expect(markdownContents.join('\n')).toContain('**当前模型**');
+    expect(markdownContents.join('\n')).toContain('**可选模型**');
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }>;
+    }>;
+    const currentModelAction = actionElements
+      .flatMap((item) => item.actions ?? [])
+      .find((action) => action.value?.gateway_cmd === '/model gpt-5');
+    expect(currentModelAction?.type).toBe('primary');
+  });
+
+  it('truncates long model list and adds full-list entry', async () => {
+    const cacheDir = path.join(os.homedir(), '.codex');
+    const cachePath = path.join(cacheDir, 'models_cache.json');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({
+      fetched_at: '2026-03-08T11:00:00Z',
+      models: Array.from({ length: 12 }, (_, index) => ({
+        slug: `model-${index + 1}`,
+        visibility: 'list',
+        supported_in_api: true,
+      })),
+    }));
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'model-1',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    const noteContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'note')
+      .flatMap((item) => ((item as { elements?: Array<{ content?: string }> }).elements ?? []).map((element) => String(element.content ?? '')));
+    expect(noteContents).toContain('还有 3 个可见模型未展开，点击下方按钮查看完整列表。');
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ value?: { gateway_cmd?: string } }>;
+    }>;
+    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    expect(cmds).toContain('/models');
+  });
+
+  it('renders paginated models card with page navigation buttons', async () => {
+    const cacheDir = path.join(os.homedir(), '.codex');
+    const cachePath = path.join(cacheDir, 'models_cache.json');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({
+      fetched_at: '2026-03-08T11:00:00Z',
+      models: Array.from({ length: 12 }, (_, index) => ({
+        slug: `page-model-${index + 1}`,
+        visibility: 'list',
+        supported_in_api: true,
+      })),
+    }));
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'page-model-1',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/models 2' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
+    const markdownContents = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String((item as { content?: unknown }).content ?? ''));
+    expect(markdownContents.join('\n')).toContain('模型翻页');
+    expect(markdownContents.join('\n')).toContain('模型翻页');
+    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
+      actions?: Array<{ text?: { content?: string }; value?: { gateway_cmd?: string } }>;
+    }>;
+    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    expect(cmds).toContain('/models 1');
+    expect(cmds).toContain('/models 2');
+    const pageModelAction = actionElements
+      .flatMap((item) => item.actions ?? [])
+      .find((action) => action.value?.gateway_cmd === '/model page-model-10');
+    expect(pageModelAction?.text?.content).toBe('Page Model 10');
+  });
+
+  it('renders status change response as structured feishu card', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const skillManager = {
+      listEffectiveSkills: vi.fn(() => []),
+      listGlobalSkills: vi.fn(() => []),
+      listAgentLocalSkills: vi.fn(() => []),
+      disableGlobalSkill: vi.fn(() => ({ ok: true })),
+      enableGlobalSkill: vi.fn(() => ({ ok: true })),
+      disableAgentSkill: vi.fn(() => ({ ok: true })),
+    };
     const handler = createChatHandler({
       sessionStore,
       rateLimitStore: { allow: () => true },
@@ -528,16 +834,21 @@ describe('createChatHandler', () => {
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
+      skillManager,
     });
 
-    await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
+    await handler({ channel: 'feishu', userId: 'u1', content: '/skills disable global using-superpowers' });
 
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
     const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
     const markdownContents = (parsed.content?.elements ?? [])
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
-    expect(markdownContents.join('\n')).toContain('**当前模型**');
+    expect(markdownContents.join('\n')).toContain('**执行成功**');
+    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+      fields?: Array<{ text?: { content?: string } }>;
+    } | undefined;
+    expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**状态**'))).toBe(true);
   });
 
   it('lists merged skills for current agent by /skills command', async () => {

@@ -1,8 +1,9 @@
 import { commandNeedsAgentList, commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from '../features/user-command.js';
 import path from 'node:path';
 import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/session-store.js';
-import { formatCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
+import { formatCodexModelsText, formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
+import { formatCommandOutboundMessage } from './feishu-command-cards.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -292,470 +293,6 @@ function buildOutboundMessageProtocolPrompt(channel: Channel, userPrompt: string
     return buildFeishuOutboundMessageProtocolPrompt(userPrompt);
   }
   return buildWeComOutboundMessageProtocolPrompt(userPrompt);
-}
-
-function buildGatewayStructuredMessage(msgType: string, content: Record<string, unknown> | string): string {
-  return JSON.stringify({
-    __gateway_message__: true,
-    msg_type: msgType,
-    content,
-  });
-}
-
-type FeishuCardTemplate = 'blue' | 'wathet' | 'turquoise' | 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'grey';
-
-function resolveCommandLabel(commandName: string): string {
-  const normalized = commandName.toLowerCase();
-  const labels: Record<string, string> = {
-    '/help': '命令帮助',
-    '/new': '会话管理',
-    '/clear': '会话管理',
-    '/session': '当前会话',
-    '/sessions': '会话列表',
-    '/agents': 'Agent 列表',
-    '/agent': 'Agent 管理',
-    '/skill-agent': '技能扩展助手',
-    '/skillagent': '技能扩展助手',
-    '/skill': '技能扩展助手',
-    '/login': '登录授权',
-    '/rename': '会话重命名',
-    '/switch': '会话切换',
-    '/model': '模型管理',
-    '/models': '模型列表',
-    '/skills': 'Skill 管理',
-    '/search': '联网搜索',
-    '/deploy-workspace': 'Workspace 发布',
-    '/publish-workspace': 'Workspace 发布',
-    '/review': '代码审查',
-  };
-  return labels[normalized] ?? '命令结果';
-}
-
-function resolveCardTemplate(text: string): FeishuCardTemplate {
-  const normalized = text.trim();
-  if (normalized.startsWith('✅')) {
-    return 'green';
-  }
-  if (normalized.startsWith('❌')) {
-    return 'red';
-  }
-  if (normalized.startsWith('⚠️')) {
-    return 'orange';
-  }
-  if (normalized.startsWith('⏳')) {
-    return 'wathet';
-  }
-  if (normalized.startsWith('可用命令：') || normalized.startsWith('用法：')) {
-    return 'blue';
-  }
-  return 'grey';
-}
-
-interface CommandQuickAction {
-  label: string;
-  cmd: string;
-  type?: 'default' | 'primary' | 'danger';
-}
-
-interface FeishuCardButton {
-  label: string;
-  cmd: string;
-  type?: 'default' | 'primary' | 'danger';
-}
-
-function resolveSearchState(text: string): 'on' | 'off' | 'unknown' {
-  const normalized = text.trim();
-  if (normalized.includes('联网搜索：on') || normalized.includes('已开启联网搜索')) {
-    return 'on';
-  }
-  if (normalized.includes('联网搜索：off') || normalized.includes('已关闭联网搜索')) {
-    return 'off';
-  }
-  return 'unknown';
-}
-
-function resolveHelpPageInfo(text: string): { page: number; total: number } | undefined {
-  const match = text.match(/帮助页\s+(\d+)\/(\d+)/);
-  if (!match) {
-    return undefined;
-  }
-  const page = Number(match[1]);
-  const total = Number(match[2]);
-  if (!Number.isFinite(page) || !Number.isFinite(total) || total <= 0) {
-    return undefined;
-  }
-  return {
-    page: Math.trunc(page),
-    total: Math.trunc(total),
-  };
-}
-
-function resolveCommandQuickActions(commandName: string, text: string): CommandQuickAction[] {
-  const normalized = commandName.toLowerCase();
-  if (normalized === '/help') {
-    const pageInfo = resolveHelpPageInfo(text);
-    const page = pageInfo?.page ?? 1;
-    const total = pageInfo?.total ?? 1;
-    const prev = Math.max(1, page - 1);
-    const next = Math.min(total, page + 1);
-    return [
-      { label: '⬅️ 上一页', cmd: `/help ${prev}`, type: page > 1 ? 'primary' : 'default' },
-      { label: '下一页 ➡️', cmd: `/help ${next}`, type: page < total ? 'primary' : 'default' },
-    ];
-  }
-  if (normalized === '/agents' || normalized === '/agent') {
-    return [
-      { label: '查看 Agents', cmd: '/agents', type: 'primary' },
-      { label: '当前 Agent', cmd: '/agent' },
-      { label: '切换会话', cmd: '/sessions' },
-    ];
-  }
-  if (normalized === '/skills') {
-    return [
-      { label: '生效 Skills', cmd: '/skills', type: 'primary' },
-      { label: '全局 Skills', cmd: '/skills global' },
-      { label: 'Agent Skills', cmd: '/skills agent' },
-    ];
-  }
-  if (normalized === '/model' || normalized === '/models') {
-    return [
-      { label: '当前模型', cmd: '/model', type: 'primary' },
-      { label: '模型列表', cmd: '/models' },
-      { label: '重置模型', cmd: '/model reset' },
-    ];
-  }
-  if (normalized === '/search') {
-    const state = resolveSearchState(text);
-    return [
-      { label: '查看状态', cmd: '/search', type: state === 'unknown' ? 'primary' : 'default' },
-      { label: '开启', cmd: '/search on', type: state === 'off' ? 'primary' : 'default' },
-      { label: '关闭', cmd: '/search off', type: state === 'on' ? 'danger' : 'default' },
-    ];
-  }
-  if (normalized === '/review') {
-    return [
-      { label: '审查当前改动', cmd: '/review', type: 'primary' },
-      { label: '按分支审查', cmd: '/review base main' },
-      { label: '按提交审查', cmd: '/review commit <SHA>' },
-    ];
-  }
-  if (normalized === '/session' || normalized === '/sessions' || normalized === '/switch' || normalized === '/rename') {
-    return [
-      { label: '当前会话', cmd: '/session', type: 'primary' },
-      { label: '会话列表', cmd: '/sessions' },
-      { label: '切换会话', cmd: '/switch <编号|threadId>' },
-    ];
-  }
-  if (normalized === '/login') {
-    return [
-      { label: '重新登录', cmd: '/login', type: 'primary' },
-      { label: '查看帮助', cmd: '/help' },
-    ];
-  }
-  return [
-    { label: '命令帮助', cmd: '/help', type: 'primary' },
-  ];
-}
-
-function buildFeishuTextBlock(content: string): Record<string, unknown> {
-  const escaped = content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  return {
-    tag: 'markdown',
-    content: escaped,
-  };
-}
-
-function extractIndexedLines(text: string): string[] {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => /^\d+\.\s+/.test(line) || /^👉\s+\d+\.\s+/.test(line));
-}
-
-function buildSessionsCardElements(text: string): Array<Record<string, unknown>> {
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const indexed = extractIndexedLines(text);
-  const usage = lines.find((line) => line.startsWith('使用 /switch '));
-  const summary = lines[0] ?? text;
-  const elements: Array<Record<string, unknown>> = [buildFeishuTextBlock(summary)];
-  if (indexed.length > 0) {
-    elements.push(buildFeishuTextBlock(`**会话项**\n${indexed.join('\n')}`));
-  }
-  if (usage) {
-    elements.push(buildFeishuTextBlock(`💡 ${usage}`));
-  }
-  return elements;
-}
-
-function buildSkillsCardElements(text: string): Array<Record<string, unknown>> {
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const indexed = extractIndexedLines(text);
-  const summary = lines[0] ?? text;
-  const elements: Array<Record<string, unknown>> = [buildFeishuTextBlock(summary)];
-  if (indexed.length > 0) {
-    elements.push(buildFeishuTextBlock(`**Skills**\n${indexed.join('\n')}`));
-  } else if (lines.length > 1) {
-    elements.push(buildFeishuTextBlock(lines.slice(1).join('\n')));
-  }
-  elements.push(buildFeishuTextBlock('💡 可用按钮快速切换范围或重新查询。'));
-  return elements;
-}
-
-function buildAgentCardElements(text: string): Array<Record<string, unknown>> {
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const elements: Array<Record<string, unknown>> = [];
-  const agentLine = lines.find((line) => line.startsWith('当前 agent：') || line.startsWith('✅ 已切换到 agent：') || line.startsWith('✅ 已创建并切换到 agent：'));
-  const workspaceLine = lines.find((line) => line.startsWith('工作区：'));
-  const sessionLine = lines.find((line) => line.startsWith('当前会话：'));
-  if (agentLine) {
-    elements.push(buildFeishuTextBlock(`**Agent**\n${agentLine}`));
-  }
-  if (workspaceLine || sessionLine) {
-    const detail = [workspaceLine, sessionLine].filter(Boolean).join('\n');
-    if (detail) {
-      elements.push(buildFeishuTextBlock(`**状态**\n${detail}`));
-    }
-  }
-  if (elements.length === 0) {
-    elements.push(buildFeishuTextBlock(text));
-  }
-  return elements;
-}
-
-function buildModelCardElements(text: string): Array<Record<string, unknown>> {
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const elements: Array<Record<string, unknown>> = [];
-  const currentLine = lines.find((line) => line.startsWith('当前模型：') || line.startsWith('✅ 已切换模型为：') || line.startsWith('✅ 已重置模型：'));
-  if (currentLine) {
-    elements.push(buildFeishuTextBlock(`**当前模型**\n${currentLine}`));
-  }
-  const warnings = lines.filter((line) => line.startsWith('⚠️'));
-  if (warnings.length > 0) {
-    elements.push(buildFeishuTextBlock(`**提示**\n${warnings.join('\n')}`));
-  }
-  const numbered = extractIndexedLines(text);
-  if (numbered.length > 0) {
-    elements.push(buildFeishuTextBlock(`**模型候选**\n${numbered.join('\n')}`));
-  } else if (lines.length > 1) {
-    const rest = lines.filter((line) => line !== currentLine && !line.startsWith('⚠️'));
-    if (rest.length > 0) {
-      elements.push(buildFeishuTextBlock(rest.join('\n')));
-    }
-  }
-  if (elements.length === 0) {
-    elements.push(buildFeishuTextBlock(text));
-  }
-  return elements;
-}
-
-function buildSearchCardElements(text: string): Array<Record<string, unknown>> {
-  const state = resolveSearchState(text);
-  const stateLine = state === 'on'
-    ? '🟢 已开启'
-    : state === 'off'
-    ? '⚪ 已关闭'
-    : '🟡 状态未知';
-  const elements: Array<Record<string, unknown>> = [
-    buildFeishuTextBlock(`**当前状态**\n${stateLine}`),
-  ];
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  if (lines.length > 0) {
-    elements.push(buildFeishuTextBlock(lines.join('\n')));
-  }
-  elements.push(buildFeishuTextBlock('💡 建议：默认关闭，按需临时开启。'));
-  return elements;
-}
-
-function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
-  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const header = lines[0] ?? '可用命令';
-  const pager = lines.find((line) => line.startsWith('翻页：'));
-  const commandLines = lines.filter((line) => line.startsWith('/'));
-  const elements: Array<Record<string, unknown>> = [
-    buildFeishuTextBlock(`**帮助目录**\n${header}`),
-    buildFeishuTextBlock('💡 点击下方命令选项可直接执行；带参数命令已填入可运行示例。'),
-  ];
-  const buttons = toHelpCommandButtons(commandLines);
-  elements.push(...buildCommandButtonRows(buttons));
-  if (pager) {
-    elements.push(buildFeishuTextBlock(`💡 ${pager}`));
-  }
-  return elements;
-}
-
-function normalizeHelpCommand(raw: string): string {
-  return raw
-    .replace(/\s+\[[^\]]+]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function resolveHelpButtonMeta(commandPart: string): FeishuCardButton {
-  const normalized = commandPart.trim();
-  const normalizedKey = normalized.replace(/\s+/g, ' ');
-  const mapping: Record<string, FeishuCardButton> = {
-    '/help': { label: '查看帮助', cmd: '/help' },
-    '/new': { label: '新建会话', cmd: '/new' },
-    '/clear': { label: '清空会话', cmd: '/clear' },
-    '/session': { label: '当前会话', cmd: '/session' },
-    '/sessions': { label: '会话列表', cmd: '/sessions' },
-    '/rename [编号|threadId] [名称]': { label: '重命名会话', cmd: '/rename 1 新名称' },
-    '/switch [编号|threadId]': { label: '切换会话', cmd: '/switch 1' },
-    '/agents': { label: 'Agent 列表', cmd: '/agents' },
-    '/agent': { label: '当前 Agent', cmd: '/agent' },
-    '/agent create [名称]': { label: '创建 Agent', cmd: '/agent create 前端工作区' },
-    '/agent use [编号|agentId]': { label: '切换 Agent', cmd: '/agent use 1' },
-    '/skill-agent': { label: '技能助手', cmd: '/skill-agent' },
-    '/model': { label: '当前模型', cmd: '/model' },
-    '/model [模型名]': { label: '切换模型', cmd: '/model gpt-5-codex' },
-    '/model reset': { label: '重置模型', cmd: '/model reset' },
-    '/models': { label: '模型列表', cmd: '/models' },
-    '/skills': { label: '生效 Skills', cmd: '/skills' },
-    '/skills global': { label: '全局 Skills', cmd: '/skills global' },
-    '/skills agent': { label: 'Agent Skills', cmd: '/skills agent' },
-    '/skills disable global [skillName]': { label: '禁用全局 Skill', cmd: '/skills disable global using-superpowers' },
-    '/skills add global [skillName]': { label: '启用全局 Skill', cmd: '/skills add global using-superpowers' },
-    '/skills disable agent [skillName]': { label: '禁用 Agent Skill', cmd: '/skills disable agent reminder-tool' },
-    '/search': { label: '搜索状态', cmd: '/search' },
-    '/search on|off': { label: '搜索开关', cmd: '/search on' },
-    '/review': { label: '审查改动', cmd: '/review' },
-    '/review base [分支]': { label: '按分支审查', cmd: '/review base main' },
-    '/review commit [SHA]': { label: '按提交审查', cmd: '/review commit HEAD' },
-    '/login': { label: '登录授权', cmd: '/login' },
-  };
-  const mapped = mapping[normalizedKey];
-  if (mapped) {
-    return mapped;
-  }
-  const normalizedCmd = normalizeHelpCommand(normalized);
-  return {
-    label: normalizedCmd || normalized,
-    cmd: normalizedCmd || normalized,
-  };
-}
-
-function toHelpCommandButtons(lines: string[]): FeishuCardButton[] {
-  return lines
-    .map((line) => {
-      const commandPart = line.split(' - ')[0]?.trim() ?? '';
-      if (!commandPart.startsWith('/')) {
-        return undefined;
-      }
-      return resolveHelpButtonMeta(commandPart);
-    })
-    .filter((item): item is FeishuCardButton => Boolean(item));
-}
-
-function buildCommandButtonRows(buttons: FeishuCardButton[]): Array<Record<string, unknown>> {
-  const rows: Array<Record<string, unknown>> = [];
-  for (let i = 0; i < buttons.length; i += 2) {
-    const chunk = buttons.slice(i, i + 2);
-    rows.push({
-      tag: 'action',
-      actions: chunk.map((item) => ({
-        tag: 'button',
-        type: item.type ?? 'default',
-        text: {
-          tag: 'plain_text',
-          content: item.label,
-        },
-        value: {
-          gateway_cmd: item.cmd,
-          command: item.cmd,
-          text: item.cmd,
-        },
-      })),
-    });
-  }
-  return rows;
-}
-
-function buildGenericCardElements(text: string): Array<Record<string, unknown>> {
-  return [buildFeishuTextBlock(text)];
-}
-
-function resolveCommandCardElements(commandName: string, text: string): Array<Record<string, unknown>> {
-  const normalized = commandName.toLowerCase();
-  if (normalized === '/sessions' || normalized === '/session' || normalized === '/switch' || normalized === '/rename') {
-    return buildSessionsCardElements(text);
-  }
-  if (normalized === '/skills') {
-    return buildSkillsCardElements(text);
-  }
-  if (normalized === '/agent' || normalized === '/agents') {
-    return buildAgentCardElements(text);
-  }
-  if (normalized === '/model' || normalized === '/models') {
-    return buildModelCardElements(text);
-  }
-  if (normalized === '/search') {
-    return buildSearchCardElements(text);
-  }
-  if (normalized === '/help') {
-    return buildHelpCardElements(text);
-  }
-  return buildGenericCardElements(text);
-}
-
-function buildFeishuInteractiveCommandCard(commandName: string, text: string): Record<string, unknown> {
-  const title = resolveCommandLabel(commandName);
-  const actions = resolveCommandQuickActions(commandName, text);
-  const elements = resolveCommandCardElements(commandName, text);
-  return {
-    config: {
-      wide_screen_mode: true,
-      enable_forward: true,
-    },
-    header: {
-      template: resolveCardTemplate(text),
-      title: {
-        tag: 'plain_text',
-        content: `${title} · ${commandName}`,
-      },
-    },
-    elements: [
-      ...elements,
-      {
-        tag: 'note',
-        elements: [
-          {
-            tag: 'plain_text',
-            content: '可直接点击按钮继续执行命令；若平台未启用卡片回调，也可手动发送命令文本。',
-          },
-        ],
-      },
-      {
-        tag: 'action',
-        actions: actions.map((item) => ({
-          tag: 'button',
-          type: item.type ?? 'default',
-          text: {
-            tag: 'plain_text',
-            content: item.label,
-          },
-          value: {
-            gateway_cmd: item.cmd,
-            command: item.cmd,
-            text: item.cmd,
-          },
-        })),
-      },
-    ],
-  };
-}
-
-function formatCommandOutboundMessage(channel: Channel, commandName: string, text: string): string {
-  if (channel !== 'feishu') {
-    return text;
-  }
-  const normalized = text.trim();
-  if (!normalized) {
-    return text;
-  }
-  return buildGatewayStructuredMessage('interactive', buildFeishuInteractiveCommandCard(commandName, normalized));
 }
 
 function buildInboundNonTextAck(prompt: string): string | undefined {
@@ -1319,11 +856,16 @@ ${clipMessage(text, 500)}
         return;
       }
       if (commandResult.queryModel) {
-        await sendCommandText(`当前模型：${currentModel ?? '(codex cli 默认模型)'}`);
+        const snapshot = loadCodexModels();
+        const lines = [`当前模型：${currentModel ?? '(codex cli 默认模型)'}`];
+        if (snapshot.models.length > 0) {
+          lines.push(formatCodexModelsText(snapshot));
+        }
+        await sendCommandText(lines.join('\n'));
         return;
       }
       if (commandResult.queryModels) {
-        await sendCommandText(formatCodexModelsText(loadCodexModels()));
+        await sendCommandText(formatPaginatedCodexModelsText(loadCodexModels(), commandResult.queryModelsPage ?? 1));
         return;
       }
       if (commandResult.querySkills) {
@@ -1378,7 +920,11 @@ ${clipMessage(text, 500)}
       }
       if (commandResult.clearModel) {
         userModelOverrides.delete(sessionUserKey);
-        await sendCommandText(`✅ 已重置模型：${deps.defaultModel ?? '(codex cli 默认模型)'}`);
+        const snapshot = loadCodexModels();
+        await sendCommandText([
+          `✅ 已重置模型：${deps.defaultModel ?? '(codex cli 默认模型)'}`,
+          ...(snapshot.models.length > 0 ? [formatCodexModelsText(snapshot)] : []),
+        ].join('\n'));
         return;
       }
       if (commandResult.setModel) {
@@ -1390,7 +936,10 @@ ${clipMessage(text, 500)}
         }
         userModelOverrides.set(sessionUserKey, resolved.model);
         const note = resolved.reason ? `\n⚠️ ${resolved.reason}` : '';
-        await sendCommandText(`✅ 已切换模型为：${resolved.model}${note}`);
+        await sendCommandText([
+          `✅ 已切换模型为：${resolved.model}${note}`,
+          ...(snapshot.models.length > 0 ? [formatCodexModelsText(snapshot)] : []),
+        ].join('\n'));
         return;
       }
       if (commandResult.querySearch) {

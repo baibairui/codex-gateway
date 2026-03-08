@@ -16,6 +16,7 @@ export interface UserCommandResult {
   renameName?: string;
   queryModel?: boolean;
   queryModels?: boolean;
+  queryModelsPage?: number;
   querySkills?: boolean;
   querySkillsScope?: 'effective' | 'global' | 'agent';
   disableGlobalSkillName?: string;
@@ -109,7 +110,7 @@ const HELP_PAGES: Array<{ title: string; lines: string[] }> = [
       '/model - 查看当前模型',
       '/model [模型名] - 切换模型',
       '/model reset - 重置为默认模型',
-      '/models - 查看当前 Codex 支持的模型',
+      '/models [页码] - 查看当前 Codex 支持的模型',
       '/skills - 查看当前会话生效 skill 列表（全局 + 当前 agent）',
       '/skills global - 查看全局 skill',
       '/skills agent - 查看当前 agent skill',
@@ -305,10 +306,15 @@ export function handleUserCommand(content: string, context: UserCommandContext =
       };
     }
     case '/models':
-      return {
-        handled: true,
-        queryModels: true,
-      };
+      {
+        const rawPage = Number(parts[1] ?? '1');
+        const page = Number.isFinite(rawPage) ? Math.max(1, Math.trunc(rawPage)) : 1;
+        return {
+          handled: true,
+          queryModels: true,
+          queryModelsPage: page,
+        };
+      }
     case '/skills': {
       const action = (parts[1] ?? '').toLowerCase();
       const scope = (parts[2] ?? '').toLowerCase();
