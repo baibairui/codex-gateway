@@ -273,6 +273,7 @@ function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
     '12. 选择消息类型时遵循：简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。',
     '12.1 若是在汇报浏览器执行中的阶段性进度，且内容天然包含 Action/Evidence/Result/Next step 这类多段结构，优先使用 post，不要把多段进度压成一条 text。',
     '12.2 若是在请求用户接管浏览器步骤，或说明阻塞原因、风险点、待确认项，且内容天然是多段说明/清单，优先使用 post。',
+    '12.3 若是在汇报浏览器任务已完成，并需要总结已执行动作、最终结果、产出物和后续建议，且内容天然是多段摘要，优先使用 post。',
     '13. image/file/audio/media/sticker/share_chat/share_user 只在用户明确要求发送对应类型，或你已经拿到可发送资源（如 key、本地路径、分享对象ID）时使用。',
     '14. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 post 或 interactive。',
     '',

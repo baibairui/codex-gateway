@@ -1274,6 +1274,8 @@ describe('createChatHandler', () => {
     expect(prompt).toContain('Action/Evidence/Result/Next step');
     expect(prompt).toContain('若是在请求用户接管浏览器步骤');
     expect(prompt).toContain('阻塞原因、风险点、待确认项');
+    expect(prompt).toContain('若是在汇报浏览器任务已完成');
+    expect(prompt).toContain('最终结果、产出物和后续建议');
     expect(prompt).toContain('如果不确定该用哪种类型，优先退回 text');
   });
 
