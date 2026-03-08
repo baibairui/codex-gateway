@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs';
 import process from 'node:process';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
@@ -43,7 +44,7 @@ function printHelp() {
     '  FEISHU_APP_SECRET',
     '',
     'Commands:',
-    '  docx create --title <title> [--folder-token <token>]',
+    '  docx create --title <title> [--folder-token <token>] [--markdown <text>] [--markdown-file <path>]',
     '  wiki list-spaces [--page-size <n>] [--page-token <token>]',
     '  wiki get-node --token <token> [--obj-type <wiki|docx|doc|sheet|bitable|mindnote|file|slides>]',
     '  wiki create-node --space-id <id> --obj-type <docx|doc|sheet|bitable|mindnote|file|slides> [--title <title>] [--parent-node-token <token>] [--node-type <origin|shortcut>] [--origin-node-token <token>]',
@@ -96,18 +97,32 @@ async function getTenantAccessToken(input) {
 
 async function createDocx(token, args) {
   const title = args.title?.trim() || '未命名文档';
+  const markdownContent = resolveMarkdownInput(args);
   const body = {
     title,
     ...(args['folder-token'] ? { folder_token: args['folder-token'] } : {}),
   };
   const payload = await apiRequest(token, 'POST', '/docx/v1/documents', body);
   const document = payload?.data?.document ?? {};
+  const documentId = document.document_id ?? null;
+  let writeResult = undefined;
+  if (documentId && markdownContent) {
+    try {
+      writeResult = await appendMarkdownToDocx(token, documentId, markdownContent);
+    } catch (error) {
+      writeResult = {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
   return {
     ok: true,
     operation: 'docx.create',
     title: document.title ?? title,
-    document_id: document.document_id ?? null,
+    document_id: documentId,
     revision_id: document.revision_id ?? null,
+    content_write: writeResult ?? null,
     raw: payload.data ?? null,
   };
 }
@@ -192,6 +207,97 @@ async function apiRequest(token, method, path, body) {
     throw new Error(`feishu api failed: ${payload.code ?? response.status} ${payload.msg ?? 'unknown error'}`);
   }
   return payload;
+}
+
+function resolveMarkdownInput(args) {
+  if (typeof args.markdown === 'string' && args.markdown.trim()) {
+    return args.markdown;
+  }
+  const filePath = typeof args['markdown-file'] === 'string' ? args['markdown-file'].trim() : '';
+  if (!filePath) {
+    return undefined;
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`markdown file not found: ${filePath}`);
+  }
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+async function appendMarkdownToDocx(token, documentId, markdown) {
+  const lines = String(markdown)
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trimEnd());
+  const normalizedLines = lines
+    .map(normalizeMarkdownLine)
+    .filter((line, index, arr) => line !== '' || (index > 0 && arr[index - 1] !== ''));
+
+  if (normalizedLines.length === 0) {
+    return { ok: true, blocks_appended: 0 };
+  }
+
+  const children = normalizedLines.map((line) => ({
+    block_type: 2,
+    text: {
+      elements: [
+        {
+          text_run: {
+            content: line || ' ',
+          },
+        },
+      ],
+    },
+  }));
+
+  let appended = 0;
+  for (const chunk of chunkArray(children, 20)) {
+    await apiRequest(
+      token,
+      'POST',
+      `/docx/v1/documents/${encodeURIComponent(documentId)}/blocks/${encodeURIComponent(documentId)}/children`,
+      {
+        index: -1,
+        children: chunk,
+      },
+    );
+    appended += chunk.length;
+  }
+  return {
+    ok: true,
+    blocks_appended: appended,
+  };
+}
+
+function normalizeMarkdownLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+  if (heading) {
+    return heading[2]?.trim() || '';
+  }
+  const bullet = trimmed.match(/^[-*+]\s+(.*)$/);
+  if (bullet) {
+    return `• ${bullet[1]?.trim() || ''}`;
+  }
+  const ordered = trimmed.match(/^\d+\.\s+(.*)$/);
+  if (ordered) {
+    return ordered[1]?.trim() || '';
+  }
+  const quote = trimmed.match(/^>\s*(.*)$/);
+  if (quote) {
+    return quote[1]?.trim() || '';
+  }
+  return trimmed;
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
 }
 
 main().catch((error) => {

@@ -194,6 +194,46 @@ function extractFeishuReplyOptions(
   };
 }
 
+function normalizeFeishuStructuredMessage(
+  msgType: string,
+  content: Record<string, unknown> | string,
+): {
+  msgType: string;
+  content: Record<string, unknown> | string;
+} {
+  if (msgType !== 'markdown') {
+    return { msgType, content };
+  }
+  const markdownText = typeof content === 'string'
+    ? content
+    : (typeof content.content === 'string'
+      ? content.content
+      : (typeof content.text === 'string' ? content.text : ''));
+  const normalized = markdownText.trim();
+  return {
+    msgType: 'interactive',
+    content: {
+      config: {
+        wide_screen_mode: true,
+        enable_forward: true,
+      },
+      header: {
+        template: 'blue',
+        title: {
+          tag: 'plain_text',
+          content: 'Markdown',
+        },
+      },
+      elements: [
+        {
+          tag: 'markdown',
+          content: normalized || '(empty markdown)',
+        },
+      ],
+    },
+  };
+}
+
 function resolveUserKey(userId: string): string {
   void userId;
   return 'local-owner';
@@ -417,9 +457,10 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       if (!feishuApi) {
         throw new Error('feishu api not configured');
       }
-      const feishuReplyOptions = extractFeishuReplyOptions(structured.content);
+      const normalizedFeishuMessage = normalizeFeishuStructuredMessage(structured.msg_type, structured.content);
+      const feishuReplyOptions = extractFeishuReplyOptions(normalizedFeishuMessage.content);
       await feishuApi.sendMessage(feishuReplyTarget, {
-        msgType: structured.msg_type,
+        msgType: normalizedFeishuMessage.msgType,
         content: feishuReplyOptions.content,
         replyToMessageId,
         replyInThread: feishuReplyOptions.replyInThread,

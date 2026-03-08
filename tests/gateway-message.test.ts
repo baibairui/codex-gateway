@@ -33,7 +33,7 @@ describe('parseGatewayStructuredMessage', () => {
 describe('isGatewayMessageTypeSupported', () => {
   it('checks feishu supported message types', () => {
     expect(isGatewayMessageTypeSupported('feishu', 'interactive')).toBe(true);
-    expect(isGatewayMessageTypeSupported('feishu', 'markdown')).toBe(false);
+    expect(isGatewayMessageTypeSupported('feishu', 'markdown')).toBe(true);
   });
 
   it('checks wecom supported message types', () => {
@@ -41,4 +41,3 @@ describe('isGatewayMessageTypeSupported', () => {
     expect(isGatewayMessageTypeSupported('wecom', 'interactive')).toBe(false);
   });
 });
-

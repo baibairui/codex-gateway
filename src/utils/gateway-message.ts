@@ -8,6 +8,7 @@ export interface GatewayStructuredMessage {
 
 const FEISHU_SUPPORTED_TYPES = new Set([
   'text',
+  'markdown',
   'post',
   'image',
   'file',
@@ -87,4 +88,3 @@ export function isGatewayMessageTypeSupported(channel: Channel, msgType: string)
   }
   return WECOM_SUPPORTED_TYPES.has(normalized);
 }
-

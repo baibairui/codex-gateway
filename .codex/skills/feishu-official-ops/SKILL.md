@@ -55,6 +55,12 @@ Create a DocX document in a folder:
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx create --title "项目周报" --folder-token fldcnxxxxxxxx
 ```
 
+Create a DocX document and write markdown content:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx create --title "项目周报" --markdown-file ./weekly.md
+```
+
 List Wiki spaces:
 
 ```bash
