@@ -13,6 +13,7 @@ afterAll(() => {
 async function startTestServer(options?: {
   feishuVerificationToken?: string;
   feishuLongConnection?: boolean;
+  feishuGroupRequireMention?: boolean;
   handleText?: (input: {
     channel: 'wecom' | 'feishu';
     userId: string;
@@ -32,6 +33,7 @@ async function startTestServer(options?: {
     allowFrom: '*',
     feishuVerificationToken: options?.feishuVerificationToken,
     feishuLongConnection: options?.feishuLongConnection,
+    feishuGroupRequireMention: options?.feishuGroupRequireMention,
     isDuplicateMessage: () => false,
     handleText: options?.handleText ?? (async () => undefined),
   });
@@ -52,6 +54,7 @@ async function startWecomDisabledServer() {
   const app = createApp({
     wecomEnabled: false,
     allowFrom: '*',
+    feishuGroupRequireMention: true,
     isDuplicateMessage: () => false,
     handleText: async () => undefined,
   });
@@ -229,6 +232,7 @@ describe('dispatchFeishuMessageReceiveEvent', () => {
 
     const result = dispatchFeishuMessageReceiveEvent({
       allowFrom: '*',
+      feishuGroupRequireMention: false,
       isDuplicateMessage: () => false,
       handleText,
     }, {
@@ -259,6 +263,7 @@ describe('dispatchFeishuMessageReceiveEvent', () => {
 
     const result = dispatchFeishuMessageReceiveEvent({
       allowFrom: '*',
+      feishuGroupRequireMention: false,
       isDuplicateMessage: () => false,
       handleText,
     }, {
@@ -280,6 +285,63 @@ describe('dispatchFeishuMessageReceiveEvent', () => {
       sourceMessageId: 'om_group_1',
       allowReply: true,
       replyTargetId: 'oc_group_1',
+      replyTargetType: 'chat_id',
+    });
+  });
+
+  it('ignores group messages without @ mention when mention trigger is enabled', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      feishuGroupRequireMention: true,
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_group_2' } },
+      message: {
+        message_id: 'om_group_2',
+        chat_id: 'oc_group_2',
+        chat_type: 'group',
+        message_type: 'text',
+        content: JSON.stringify({ text: 'plain group message' }),
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).not.toHaveBeenCalled();
+  });
+
+  it('accepts group messages with text_without_at_bot when mention trigger is enabled', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      feishuGroupRequireMention: true,
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_group_3' } },
+      message: {
+        message_id: 'om_group_3',
+        chat_id: 'oc_group_3',
+        chat_type: 'group',
+        message_type: 'text',
+        content: JSON.stringify({
+          text: '@机器人 帮我总结',
+          text_without_at_bot: '帮我总结',
+        }),
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).toHaveBeenCalledWith({
+      channel: 'feishu',
+      userId: 'ou_group_3',
+      content: '帮我总结',
+      sourceMessageId: 'om_group_3',
+      allowReply: true,
+      replyTargetId: 'oc_group_3',
       replyTargetType: 'chat_id',
     });
   });

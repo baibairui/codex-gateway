@@ -164,6 +164,34 @@ interface InboundEnrichResult {
   errorMessage?: string;
 }
 
+function extractFeishuReplyOptions(
+  content: Record<string, unknown> | string,
+): {
+  content: Record<string, unknown> | string;
+  replyInThread?: boolean;
+} {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) {
+    return { content };
+  }
+
+  const replyInThread = typeof content.reply_in_thread === 'boolean'
+    ? content.reply_in_thread
+    : (typeof content.replyInThread === 'boolean' ? content.replyInThread : undefined);
+
+  if (replyInThread === undefined) {
+    return { content };
+  }
+
+  const normalizedContent = { ...content };
+  delete normalizedContent.reply_in_thread;
+  delete normalizedContent.replyInThread;
+
+  return {
+    content: normalizedContent,
+    replyInThread,
+  };
+}
+
 function resolveUserKey(userId: string): string {
   void userId;
   return 'local-owner';
@@ -324,6 +352,7 @@ const app = createApp({
   allowFrom: config.allowFrom,
   feishuVerificationToken: config.feishuVerificationToken,
   feishuLongConnection: config.feishuLongConnection,
+  feishuGroupRequireMention: config.feishuGroupRequireMention,
   isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
   handleText: appDepsHandleText,
 });
@@ -372,10 +401,12 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       if (!feishuApi) {
         throw new Error('feishu api not configured');
       }
+      const feishuReplyOptions = extractFeishuReplyOptions(structured.content);
       await feishuApi.sendMessage(feishuReplyTarget, {
         msgType: structured.msg_type,
-        content: structured.content,
+        content: feishuReplyOptions.content,
         replyToMessageId,
+        replyInThread: feishuReplyOptions.replyInThread,
       });
       return;
     }
@@ -478,6 +509,7 @@ app.listen(config.port, () => {
         log.info('飞书长连接收到事件', { eventType: 'im.message.receive_v1' });
         dispatchFeishuMessageReceiveEvent({
           allowFrom: config.allowFrom,
+          feishuGroupRequireMention: config.feishuGroupRequireMention,
           isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
           handleText: async (input) => appDepsHandleText(input),
         }, data);
@@ -486,6 +518,7 @@ app.listen(config.port, () => {
         log.info('飞书长连接收到事件', { eventType: 'card.action.trigger' });
         dispatchFeishuCardActionEvent({
           allowFrom: config.allowFrom,
+          feishuGroupRequireMention: config.feishuGroupRequireMention,
           isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
           handleText: async (input) => appDepsHandleText(input),
         }, data);

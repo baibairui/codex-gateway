@@ -111,16 +111,25 @@ describe('FeishuApi', () => {
   });
 
   it('replies to source feishu message via sdk reply', async () => {
-    const replyCalls: Array<{ message_id: string; msg_type: string; content: string }> = [];
+    const replyCalls: Array<{
+      message_id: string;
+      msg_type: string;
+      content: string;
+      reply_in_thread?: boolean;
+    }> = [];
     const sdkClient = {
       im: {
         message: {
           create: vi.fn(),
-          reply: vi.fn(async (payload: { path: { message_id: string }; data: { msg_type: string; content: string } }) => {
+          reply: vi.fn(async (payload: {
+            path: { message_id: string };
+            data: { msg_type: string; content: string; reply_in_thread?: boolean };
+          }) => {
             replyCalls.push({
               message_id: payload.path.message_id,
               msg_type: payload.data.msg_type,
               content: payload.data.content,
+              reply_in_thread: payload.data.reply_in_thread,
             });
             return { code: 0, msg: 'ok' };
           }),
@@ -155,8 +164,49 @@ describe('FeishuApi', () => {
           type: 'template',
           data: { template_id: 'AAqC5c9997YMX' },
         }),
+        reply_in_thread: false,
       },
     ]);
+  });
+
+  it('supports reply_in_thread when replying to source message', async () => {
+    const replyCalls: Array<{ reply_in_thread?: boolean; content: string }> = [];
+    const sdkClient = {
+      im: {
+        message: {
+          create: vi.fn(),
+          reply: vi.fn(async (payload: {
+            data: { reply_in_thread?: boolean; content: string };
+          }) => {
+            replyCalls.push(payload.data);
+            return { code: 0, msg: 'ok' };
+          }),
+        },
+        image: { create: vi.fn() },
+        file: { create: vi.fn() },
+        messageResource: { get: vi.fn() },
+      },
+    };
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient,
+    });
+
+    await api.sendMessage('ou_a', {
+      msgType: 'text',
+      content: { text: 'thread reply' },
+      replyToMessageId: 'om_source_2',
+      replyInThread: true,
+    });
+
+    expect(replyCalls).toHaveLength(1);
+    expect(replyCalls[0]).toMatchObject({
+      content: JSON.stringify({ text: 'thread reply' }),
+      reply_in_thread: true,
+    });
   });
 
   it('normalizes interactive template shorthand before sending', async () => {

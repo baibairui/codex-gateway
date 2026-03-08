@@ -242,7 +242,7 @@ export class BrowserManager {
 
     return {
       page: `- Page URL: ${state.url}\n- Page Title: ${state.title}`,
-      snapshot: renderSnapshotEntries((state.entries as BrowserSnapshotEntry[] | undefined) ?? []),
+      snapshot: renderSnapshotEntries(normalizeSnapshotEntries(state.entries)),
     };
   }
 
@@ -446,6 +446,40 @@ function selectorForRef(ref: string): string {
   return `[${DEFAULT_REF_ATTR}="${ref}"]`;
 }
 
+function normalizeSnapshotEntries(value: unknown): BrowserSnapshotEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(toBrowserSnapshotEntry)
+    .filter((entry): entry is BrowserSnapshotEntry => !!entry);
+}
+
+function toBrowserSnapshotEntry(value: unknown): BrowserSnapshotEntry | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const ref = optionalString(record.ref);
+  const tag = optionalString(record.tag);
+  if (!ref || !tag) {
+    return undefined;
+  }
+  return {
+    ref,
+    tag,
+    role: optionalString(record.role),
+    ariaLabel: optionalString(record.ariaLabel),
+    placeholder: optionalString(record.placeholder),
+    text: optionalString(record.text),
+    value: optionalString(record.value),
+    checked: typeof record.checked === 'boolean' ? record.checked : undefined,
+    disabled: typeof record.disabled === 'boolean' ? record.disabled : undefined,
+    selectedText: optionalString(record.selectedText),
+    label: optionalString(record.label),
+  };
+}
+
 function renderSnapshotEntries(entries: BrowserSnapshotEntry[]): string {
   return entries
     .map((entry) => {
@@ -505,6 +539,10 @@ function truncateSnapshotText(value: string, max: number): string {
     return value;
   }
   return `${value.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
 }
 
 function createDefaultLauncher(profileDir = '.data/browser/profile'): BrowserLauncher {

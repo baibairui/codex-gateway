@@ -8,6 +8,14 @@ describe('normalizeFeishuIncomingMessage', () => {
     expect(content).toBe('你好');
   });
 
+  it('prefers text_without_at_bot for text messages', () => {
+    const content = normalizeFeishuIncomingMessage('text', JSON.stringify({
+      text: '@机器人 帮我总结',
+      text_without_at_bot: '帮我总结',
+    }));
+    expect(content).toBe('帮我总结');
+  });
+
   it('parses image messages', () => {
     const content = normalizeFeishuIncomingMessage('image', JSON.stringify({ image_key: 'img_123' }));
     expect(content).toBe('[飞书图片] image_key=img_123');

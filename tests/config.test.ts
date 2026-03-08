@@ -49,3 +49,27 @@ describe('config browser mcp defaults', () => {
     expect(config.browserMcpEnabled).toBe(false);
   });
 });
+
+describe('config feishu mention trigger', () => {
+  it('requires @ mention in feishu groups by default', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'false',
+      CODEX_SANDBOX: 'full-auto',
+      FEISHU_GROUP_REQUIRE_MENTION: undefined,
+    });
+
+    expect(config.feishuGroupRequireMention).toBe(true);
+  });
+
+  it('allows disabling feishu group mention trigger explicitly', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'false',
+      CODEX_SANDBOX: 'full-auto',
+      FEISHU_GROUP_REQUIRE_MENTION: 'false',
+    });
+
+    expect(config.feishuGroupRequireMention).toBe(false);
+  });
+});

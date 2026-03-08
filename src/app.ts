@@ -14,6 +14,7 @@ interface AppDeps {
   allowFrom: string;
   feishuVerificationToken?: string;
   feishuLongConnection?: boolean;
+  feishuGroupRequireMention?: boolean;
   isDuplicateMessage: (msgId?: string) => boolean;
   /**
    * 处理文本消息，业务回复统一走主动发消息 API，无需返回值。
@@ -32,6 +33,7 @@ interface AppDeps {
 
 interface FeishuEventDeps {
   allowFrom: string;
+  feishuGroupRequireMention?: boolean;
   isDuplicateMessage: (msgId?: string) => boolean;
   handleText: AppDeps['handleText'];
 }
@@ -56,6 +58,70 @@ function clipText(input: string, max = 200): string {
   return input.length <= max ? input : `${input.slice(0, max)}...`;
 }
 
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> | undefined {
+  try {
+    return asObject(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+function hasFeishuPostAtTag(value: unknown): boolean {
+  const content = asObject(value);
+  if (!content) {
+    return false;
+  }
+  for (const locale of Object.values(content)) {
+    const localeObject = asObject(locale);
+    const rows = Array.isArray(localeObject?.content) ? localeObject.content : [];
+    for (const row of rows) {
+      if (!Array.isArray(row)) {
+        continue;
+      }
+      for (const item of row) {
+        const segment = asObject(item);
+        if (typeof segment?.tag === 'string' && segment.tag.trim().toLowerCase() === 'at') {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function shouldHandleFeishuMessage(input: {
+  chatType: string;
+  messageType: string;
+  rawContent: string;
+  mentions: unknown;
+  requireMentionInGroup: boolean;
+}): boolean {
+  if (!input.requireMentionInGroup || input.chatType === 'p2p' || !input.chatType) {
+    return true;
+  }
+  if (Array.isArray(input.mentions) && input.mentions.length > 0) {
+    return true;
+  }
+  const parsed = parseJsonObject(input.rawContent);
+  if (!parsed) {
+    return false;
+  }
+  if (typeof parsed.text_without_at_bot === 'string') {
+    return true;
+  }
+  if (input.messageType.trim().toLowerCase() === 'post') {
+    return hasFeishuPostAtTag(parsed);
+  }
+  return false;
+}
+
 export function dispatchFeishuMessageReceiveEvent(
   deps: FeishuEventDeps,
   event: Record<string, unknown>,
@@ -69,9 +135,26 @@ export function dispatchFeishuMessageReceiveEvent(
   const chatId = typeof message.chat_id === 'string' ? message.chat_id : '';
   const chatType = typeof message.chat_type === 'string' ? message.chat_type : '';
   const rawContent = typeof message.content === 'string' ? message.content : '';
+  const mentions = message.mentions;
 
   if (!openId || !messageId || !messageType || !rawContent) {
     return 'ignored';
+  }
+  if (!shouldHandleFeishuMessage({
+    chatType,
+    messageType,
+    rawContent,
+    mentions,
+    requireMentionInGroup: deps.feishuGroupRequireMention !== false,
+  })) {
+    log.info('飞书群消息忽略：未命中 @ 触发条件', {
+      openId,
+      chatId: chatId || '(empty)',
+      chatType: chatType || '(empty)',
+      messageId,
+      messageType,
+    });
+    return 'success';
   }
 
   const content = normalizeFeishuIncomingMessage(messageType, rawContent);

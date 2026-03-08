@@ -30,6 +30,7 @@ export interface FeishuOutgoingMessage {
   msgType: string;
   content: Record<string, unknown> | string;
   replyToMessageId?: string;
+  replyInThread?: boolean;
 }
 
 interface FeishuSdkClient {
@@ -182,7 +183,7 @@ export class FeishuApi {
   async sendText(
     target: string | FeishuReceiveTarget,
     content: string,
-    options?: { replyToMessageId?: string },
+    options?: { replyToMessageId?: string; replyInThread?: boolean },
   ): Promise<string | undefined> {
     const receiveTarget = resolveFeishuReceiveTarget(target);
     const textContent = requireNonEmptyText(content, 'feishu send failed: text content is required');
@@ -193,6 +194,7 @@ export class FeishuApi {
         msgType: 'text',
         content: { text: chunk },
         replyToMessageId: options?.replyToMessageId,
+        replyInThread: options?.replyInThread,
       });
     }
     return lastMessageId;
@@ -217,6 +219,7 @@ export class FeishuApi {
           msgType: 'text',
           content: { text: chunk },
           replyToMessageId: message.replyToMessageId,
+          replyInThread: message.replyInThread,
         });
       }
       return lastMessageId;
@@ -366,6 +369,7 @@ export class FeishuApi {
       receiveId: target.receiveId,
       hasReplyToMessageId: !!message.replyToMessageId,
       replyToMessageId: message.replyToMessageId ?? '(none)',
+      replyInThread: message.replyInThread === true,
     });
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -382,7 +386,7 @@ export class FeishuApi {
               data: {
                 content,
                 msg_type: message.msgType,
-                reply_in_thread: false,
+                reply_in_thread: message.replyInThread === true,
                 uuid: randomUUID(),
               },
             });

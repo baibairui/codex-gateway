@@ -154,6 +154,7 @@ FEISHU_APP_ID=你的飞书AppID
 FEISHU_APP_SECRET=你的飞书AppSecret
 FEISHU_LONG_CONNECTION=true
 FEISHU_VERIFICATION_TOKEN=你的校验Token
+FEISHU_GROUP_REQUIRE_MENTION=true
 ```
 
 说明：
@@ -161,6 +162,7 @@ FEISHU_VERIFICATION_TOKEN=你的校验Token
 - `FEISHU_LONG_CONNECTION=true`：启用官方 SDK 长连接收事件，不需要公网回调地址
 - 开启 `FEISHU_LONG_CONNECTION=true` 后，会关闭 `/feishu/callback` webhook 接口（不再做兜底双通道）
 - `FEISHU_VERIFICATION_TOKEN`：仅 webhook 模式需要；长连接模式可留空
+- `FEISHU_GROUP_REQUIRE_MENTION=true`：群聊默认要求 `@机器人` 才触发；私聊不受影响。显式设为 `false` 可恢复“群里任何消息都触发”
 
 ### 飞书能力说明（当前实现）
 
@@ -177,6 +179,12 @@ FEISHU_VERIFICATION_TOKEN=你的校验Token
 推送行为：
 
 - 当前飞书文本回复采用“多条消息推送”模式（分片逐条发送）
+
+群聊触发规则：
+
+- 默认开启 `@` 触发：群消息只有明确 `@机器人` 才会进入 Codex
+- 私聊始终直接触发，不要求 `@`
+- 文本消息会优先使用 `text_without_at_bot`，避免把 `@机器人` 前缀一并传给模型
 
 完整配置模板见 [.env.example](./.env.example)。
 

@@ -189,7 +189,7 @@ export function normalizeFeishuIncomingMessage(messageType: string, rawContent: 
   }
 
   if (type === 'text') {
-    return asString(obj.text);
+    return firstNonEmpty([obj.text_without_at_bot, obj.text]);
   }
   if (type === 'image') {
     const kv = summarizeKVs([['image_key', obj.image_key]]);
