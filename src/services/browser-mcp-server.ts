@@ -58,6 +58,8 @@ export function createBrowserMcpBackend(manager: Pick<
   | 'handleDialog'
   | 'resize'
   | 'takeScreenshot'
+  | 'startRecording'
+  | 'stopRecording'
   | 'listTabs'
   | 'selectTab'
   | 'newTab'
@@ -148,6 +150,14 @@ export function createBrowserMcpBackend(manager: Pick<
         }),
         tool('browser_navigate_back', 'Navigate back in history', {}),
         tool('browser_close', 'Close current tab', {}),
+        tool('browser_start_recording', 'Start recording current tab into a local mp4 file', {
+          type: 'object',
+          properties: {
+            filename: { type: 'string' },
+            intervalMs: { type: 'number' },
+          },
+        }),
+        tool('browser_stop_recording', 'Stop active recording and return the local mp4 path', {}),
         tool('browser_tabs', 'List, create, or select tabs', {
           type: 'object',
           properties: {
@@ -250,6 +260,17 @@ export function createBrowserMcpBackend(manager: Pick<
         case 'browser_close':
           await manager.closeCurrentTab();
           return textResult('OK');
+        case 'browser_start_recording': {
+          const result = await manager.startRecording({
+            filename: typeof args.filename === 'string' ? args.filename : undefined,
+            intervalMs: typeof args.intervalMs === 'number' ? args.intervalMs : undefined,
+          });
+          return textResult(`recording started: session=${result.sessionId} output=${result.outputPath}`);
+        }
+        case 'browser_stop_recording': {
+          const result = await manager.stopRecording();
+          return textResult(`recording saved: ${result.outputPath} (session=${result.sessionId}, frames=${result.frames})`);
+        }
         case 'browser_tabs':
           return textResult(await handleTabsTool(manager, args));
         default:
@@ -574,6 +595,8 @@ function createSdkBrowserServer(
     | 'handleDialog'
     | 'resize'
     | 'takeScreenshot'
+    | 'startRecording'
+    | 'stopRecording'
     | 'listTabs'
     | 'selectTab'
     | 'newTab'
@@ -746,6 +769,19 @@ function createSdkBrowserServer(
     description: 'Close current tab',
     inputSchema: {},
   }, async () => backend.callTool('browser_close', {}));
+
+  server.registerTool('browser_start_recording', {
+    description: 'Start recording current tab into a local mp4 file',
+    inputSchema: {
+      filename: z.string().optional(),
+      intervalMs: z.number().optional(),
+    },
+  }, async ({ filename, intervalMs }) => backend.callTool('browser_start_recording', { filename, intervalMs }));
+
+  server.registerTool('browser_stop_recording', {
+    description: 'Stop active recording and return the local mp4 path',
+    inputSchema: {},
+  }, async () => backend.callTool('browser_stop_recording', {}));
 
   server.registerTool('browser_tabs', {
     description: 'List, create, or select tabs',

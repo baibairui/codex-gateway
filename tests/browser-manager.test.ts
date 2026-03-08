@@ -20,6 +20,7 @@ class FakePage implements BrowserPageLike {
   public readonly keyboard = new FakeKeyboard();
   public waitedMs?: number;
   public snapshotEntries: Array<Record<string, unknown>> = [];
+  public screenshotCount = 0;
 
   constructor(url = 'about:blank') {
     this.currentUrl = url;
@@ -52,6 +53,11 @@ class FakePage implements BrowserPageLike {
   async waitForSelector(): Promise<void> {}
 
   async waitForFunction(): Promise<void> {}
+
+  async screenshot(): Promise<Buffer> {
+    this.screenshotCount += 1;
+    return Buffer.from(`frame-${this.screenshotCount}`);
+  }
 
   async evaluate<T>(fn: ((arg: unknown) => T) | (() => T), arg?: unknown): Promise<T> {
     void fn;
@@ -166,5 +172,30 @@ describe('BrowserManager', () => {
     });
 
     expect(filePath).toBe('/tmp/browser-manager-tests/field.png');
+  });
+
+  it('records current tab into a video file via injected encoder', async () => {
+    const page = new FakePage('https://example.com/record');
+    const encoded: Array<{ framesDir: string; outputPath: string; fps: number }> = [];
+    const manager = new BrowserManager({
+      launcher: async () => new FakeContext([page]),
+      recordingDir: '/tmp/browser-manager-record-tests',
+      videoEncoder: async (input) => {
+        encoded.push(input);
+      },
+    });
+
+    const started = await manager.startRecording({
+      filename: 'demo.mp4',
+      intervalMs: 200,
+    });
+    const stopped = await manager.stopRecording();
+
+    expect(started.outputPath).toBe('/tmp/browser-manager-record-tests/demo.mp4');
+    expect(stopped.outputPath).toBe('/tmp/browser-manager-record-tests/demo.mp4');
+    expect(stopped.frames).toBeGreaterThan(0);
+    expect(encoded).toHaveLength(1);
+    expect(encoded[0]?.outputPath).toBe('/tmp/browser-manager-record-tests/demo.mp4');
+    expect(encoded[0]?.fps).toBe(5);
   });
 });

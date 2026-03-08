@@ -155,6 +155,7 @@ CODEX_SEARCH=false
 - 运行时注入使用独立的 MCP server 名 `gateway_browser`，避免和用户自己 `~/.codex/config.toml` 里的浏览器配置发生合并冲突
 - 所有 agent 默认共用同一套浏览器 profile，所以登录态可以复用
 - 浏览器窗口只有在手动关闭它或 gateway 退出时才会结束
+- 录屏工具已支持：`browser_start_recording` 开始录制、`browser_stop_recording` 停止并产出本地 mp4；宿主机需安装 `ffmpeg`
 
 如果你不接企业微信，可以这样关掉：
 

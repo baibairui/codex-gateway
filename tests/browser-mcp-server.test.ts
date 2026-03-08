@@ -24,6 +24,8 @@ describe('createBrowserMcpBackend', () => {
       handleDialog: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
       takeScreenshot: vi.fn(async () => '/tmp/s.png'),
+      startRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4' })),
+      stopRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4', frames: 10 })),
       listTabs: vi.fn(async () => []),
       selectTab: vi.fn(async () => undefined),
       newTab: vi.fn(async () => undefined),
@@ -61,6 +63,8 @@ describe('createBrowserMcpBackend', () => {
       handleDialog: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
       takeScreenshot: vi.fn(async () => '/tmp/s.png'),
+      startRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4' })),
+      stopRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4', frames: 10 })),
       listTabs: vi.fn(async () => []),
       selectTab: vi.fn(async () => undefined),
       newTab: vi.fn(async () => undefined),
@@ -96,6 +100,8 @@ describe('createBrowserMcpBackend', () => {
       handleDialog: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
       takeScreenshot: vi.fn(async () => '/tmp/s.png'),
+      startRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4' })),
+      stopRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4', frames: 10 })),
       listTabs: vi.fn(async () => [{ index: 0, url: 'https://example.com', title: 'Example', current: true }]),
       selectTab: vi.fn(async () => undefined),
       newTab: vi.fn(async () => undefined),
@@ -130,6 +136,8 @@ describe('createBrowserMcpBackend', () => {
       handleDialog: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
       takeScreenshot: vi.fn(async () => '/tmp/field.png'),
+      startRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4' })),
+      stopRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4', frames: 10 })),
       listTabs: vi.fn(async () => []),
       selectTab: vi.fn(async () => undefined),
       newTab: vi.fn(async () => undefined),
@@ -146,5 +154,44 @@ describe('createBrowserMcpBackend', () => {
       ref: 'e2',
     });
     expect(result.content[0]?.text).toBe('/tmp/field.png');
+  });
+
+  it('supports recording start/stop actions', async () => {
+    const manager = {
+      snapshot: vi.fn(async () => ({ page: '', snapshot: '' })),
+      navigate: vi.fn(async () => undefined),
+      navigateBack: vi.fn(async () => undefined),
+      click: vi.fn(async () => undefined),
+      hover: vi.fn(async () => undefined),
+      drag: vi.fn(async () => undefined),
+      type: vi.fn(async () => undefined),
+      selectOption: vi.fn(async () => undefined),
+      pressKey: vi.fn(async () => undefined),
+      waitFor: vi.fn(async () => undefined),
+      evaluate: vi.fn(async () => 'ok'),
+      fileUpload: vi.fn(async () => undefined),
+      fillForm: vi.fn(async () => undefined),
+      handleDialog: vi.fn(async () => undefined),
+      resize: vi.fn(async () => undefined),
+      takeScreenshot: vi.fn(async () => '/tmp/field.png'),
+      startRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4' })),
+      stopRecording: vi.fn(async () => ({ sessionId: 'rec-1', outputPath: '/tmp/rec.mp4', frames: 24 })),
+      listTabs: vi.fn(async () => []),
+      selectTab: vi.fn(async () => undefined),
+      newTab: vi.fn(async () => undefined),
+      closeCurrentTab: vi.fn(async () => undefined),
+    };
+    const backend = createBrowserMcpBackend(manager);
+
+    const start = await backend.callTool('browser_start_recording', { filename: 'demo.mp4', intervalMs: 400 });
+    const stop = await backend.callTool('browser_stop_recording', {});
+
+    expect(manager.startRecording).toHaveBeenCalledWith({
+      filename: 'demo.mp4',
+      intervalMs: 400,
+    });
+    expect(manager.stopRecording).toHaveBeenCalledTimes(1);
+    expect(start.content[0]?.text).toContain('recording started');
+    expect(stop.content[0]?.text).toContain('/tmp/rec.mp4');
   });
 });

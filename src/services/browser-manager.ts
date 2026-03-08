@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
 
 export interface BrowserLocatorLike {
@@ -75,9 +76,28 @@ interface BrowserManagerOptions {
   launcher?: BrowserLauncher;
   profileDir?: string;
   screenshotDir?: string;
+  recordingDir?: string;
+  videoEncoder?: BrowserVideoEncoder;
 }
 
 const DEFAULT_REF_ATTR = 'data-gateway-ref';
+
+type BrowserVideoEncoder = (input: {
+  framesDir: string;
+  outputPath: string;
+  fps: number;
+}) => Promise<void>;
+
+interface BrowserRecordingState {
+  sessionId: string;
+  page: BrowserPageLike;
+  framesDir: string;
+  outputPath: string;
+  fps: number;
+  nextFrame: number;
+  timer: NodeJS.Timeout;
+  captureInFlight?: Promise<void>;
+}
 
 export class BrowserManager {
   private readonly launcher: BrowserLauncher;
@@ -86,10 +106,15 @@ export class BrowserManager {
   private nextTabId = 0;
   private contextPromise?: Promise<BrowserContextLike>;
   private readonly screenshotDir: string;
+  private readonly recordingDir: string;
+  private readonly videoEncoder: BrowserVideoEncoder;
+  private recording?: BrowserRecordingState;
 
   constructor(options: BrowserManagerOptions = {}) {
     this.launcher = options.launcher ?? createDefaultLauncher(options.profileDir);
     this.screenshotDir = path.resolve(options.screenshotDir ?? '.data/browser/screenshots');
+    this.recordingDir = path.resolve(options.recordingDir ?? '.data/browser/recordings');
+    this.videoEncoder = options.videoEncoder ?? encodeRecordingWithFfmpeg;
   }
 
   async ensureCurrentTab(): Promise<BrowserPageLike> {
@@ -390,6 +415,73 @@ export class BrowserManager {
     return filePath;
   }
 
+  async startRecording(input: {
+    filename?: string;
+    intervalMs?: number;
+  } = {}): Promise<{ sessionId: string; outputPath: string }> {
+    if (this.recording) {
+      throw new Error(`recording is already active (session=${this.recording.sessionId})`);
+    }
+    const page = await this.ensureCurrentTab();
+    if (!page.screenshot) {
+      throw new Error('recording is not supported for this page');
+    }
+    const intervalMs = Number.isFinite(input.intervalMs) ? Math.max(100, Number(input.intervalMs)) : 500;
+    const fps = Math.max(1, Math.round(1000 / intervalMs));
+    const sessionId = `rec-${Date.now()}`;
+    fs.mkdirSync(this.recordingDir, { recursive: true });
+    const outputName = input.filename?.trim() || `recording-${Date.now()}.mp4`;
+    const outputPath = path.isAbsolute(outputName) ? outputName : path.join(this.recordingDir, outputName);
+    const framesDir = path.join(this.recordingDir, `${sessionId}-frames`);
+    fs.mkdirSync(framesDir, { recursive: true });
+
+    const state: BrowserRecordingState = {
+      sessionId,
+      page,
+      framesDir,
+      outputPath,
+      fps,
+      nextFrame: 0,
+      timer: setInterval(() => {
+        void this.captureRecordingFrameSafe(state);
+      }, intervalMs),
+    };
+
+    this.recording = state;
+    await this.captureRecordingFrameSafe(state);
+    return {
+      sessionId,
+      outputPath,
+    };
+  }
+
+  async stopRecording(): Promise<{ sessionId: string; outputPath: string; frames: number }> {
+    const state = this.recording;
+    if (!state) {
+      throw new Error('no active recording');
+    }
+    this.recording = undefined;
+    clearInterval(state.timer);
+    await this.captureRecordingFrameSafe(state);
+    if (state.captureInFlight) {
+      await state.captureInFlight;
+    }
+    if (state.nextFrame === 0) {
+      throw new Error('recording captured no frames');
+    }
+    await this.videoEncoder({
+      framesDir: state.framesDir,
+      outputPath: state.outputPath,
+      fps: state.fps,
+    });
+    fs.rmSync(state.framesDir, { recursive: true, force: true });
+    return {
+      sessionId: state.sessionId,
+      outputPath: state.outputPath,
+      frames: state.nextFrame,
+    };
+  }
+
   async waitFor(input: { time?: number; text?: string; textGone?: string }): Promise<void> {
     const page = await this.ensureCurrentTab();
     if (typeof input.time === 'number') {
@@ -407,6 +499,10 @@ export class BrowserManager {
   }
 
   async dispose(): Promise<void> {
+    if (this.recording) {
+      clearInterval(this.recording.timer);
+      this.recording = undefined;
+    }
     if (!this.contextPromise) {
       return;
     }
@@ -439,6 +535,28 @@ export class BrowserManager {
     this.tabs.set(id, page);
     this.currentTabId = id;
     return page;
+  }
+
+  private async captureRecordingFrameSafe(state: BrowserRecordingState): Promise<void> {
+    if (state.captureInFlight) {
+      return state.captureInFlight;
+    }
+    const next = this.captureRecordingFrame(state).finally(() => {
+      state.captureInFlight = undefined;
+    });
+    state.captureInFlight = next;
+    return next;
+  }
+
+  private async captureRecordingFrame(state: BrowserRecordingState): Promise<void> {
+    if (!state.page.screenshot) {
+      throw new Error('recording is not supported for this page');
+    }
+    state.nextFrame += 1;
+    const frameName = `frame-${String(state.nextFrame).padStart(6, '0')}.png`;
+    const framePath = path.join(state.framesDir, frameName);
+    const buffer = await state.page.screenshot({ type: 'png' });
+    fs.writeFileSync(framePath, buffer);
   }
 }
 
@@ -554,6 +672,37 @@ function createDefaultLauncher(profileDir = '.data/browser/profile'): BrowserLau
     });
     return adaptContext(context);
   };
+}
+
+async function encodeRecordingWithFfmpeg(input: {
+  framesDir: string;
+  outputPath: string;
+  fps: number;
+}): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    execFile(
+      'ffmpeg',
+      [
+        '-y',
+        '-framerate',
+        String(input.fps),
+        '-i',
+        path.join(input.framesDir, 'frame-%06d.png'),
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        input.outputPath,
+      ],
+      (error, _stdout, stderr) => {
+        if (error) {
+          reject(new Error(`ffmpeg encode failed: ${stderr || error.message}`));
+          return;
+        }
+        resolve();
+      },
+    );
+  });
 }
 
 function adaptContext(context: BrowserContext): BrowserContextLike {
