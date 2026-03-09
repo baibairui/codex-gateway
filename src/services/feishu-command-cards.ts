@@ -55,7 +55,7 @@ const COMMAND_SUMMARIES: Record<string, string> = {
   '/search': '控制本会话的联网搜索开关，按需临时开启。',
   '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
   '/login': '重新触发登录授权流程，恢复 Codex 执行能力。',
-  '/repair-users': '批量清理并升级已部署用户工作区，修复内置 skill 与规则注入。',
+  '/repair-users': '批量清理并升级已部署用户工作区，修复内置 skill、规则注入与工作目录状态。',
 };
 
 const COMMAND_TEMPLATES: Record<string, FeishuCardTemplate> = {

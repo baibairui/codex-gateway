@@ -47,6 +47,7 @@ Commands:
   setup         逐行交互配置向导（写入 .env）
   check         仅执行配置检查
   doctor        同 check，更适合做安装自检
+  doc-log       追加本轮迭代内容到飞书 DocX
   update        拉取远程最新代码并更新依赖/构建
   build         执行构建
   test          执行测试
@@ -71,6 +72,9 @@ switch (command) {
     break;
   case 'update':
     run('node', ['./bin/update-gateway.mjs']);
+    break;
+  case 'doc-log':
+    run('node', ['./bin/log-iteration-docx.mjs', ...args.slice(1)]);
     break;
   case 'build':
     run(npmBin, ['run', 'build']);

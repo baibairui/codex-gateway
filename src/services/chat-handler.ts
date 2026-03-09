@@ -191,6 +191,19 @@ function renderMemoryOnboardingResumeMessage(): string {
   return '🧭 记忆初始化已在进行中，请继续回答当前问题即可。';
 }
 
+function renderMemoryOnboardingSuggestion(reason: 'shared' | 'agent' | 'both'): string {
+  const reasonLine = reason === 'shared'
+    ? '检测到 shared-memory 尚未初始化。'
+    : reason === 'agent'
+    ? '检测到当前 agent 自身份尚未初始化。'
+    : '检测到 shared-memory 和当前 agent 自身份都尚未初始化。';
+  return [
+    `🧭 ${reasonLine}`,
+    '当前不会自动劫持到隐藏初始化 agent，先继续按当前 agent 执行。',
+    '如需补齐初始化，请手动执行 `/agent init-memory`。',
+  ].join('\n');
+}
+
 function renderSkillOnboardingStartMessage(agent: { name: string; agentId: string; workspaceDir: string }): string {
   return [
     `🛠️ 已切换到技能扩展助手：${agent.name} (${agent.agentId})`,
@@ -1196,37 +1209,12 @@ ${clipMessage(text, 500)}
       : isSharedMemoryEmpty
       ? 'shared'
       : 'agent';
-    const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, MEMORY_ONBOARDING_AGENT_ID);
     const shouldPushStartupHelp = !existingThreadId
       && !shouldStartMemoryOnboarding
       && !isSystemAgentRecord(currentAgent);
 
-    if (shouldStartMemoryOnboarding) {
-      if (!onboardingThreadId) {
-        if (onboardingKickoffInFlight.has(sessionUserKey)) {
-          await deps.sendText(channel, userId, renderMemoryOnboardingPendingMessage());
-          return;
-        }
-
-        const agent = ensureMemoryOnboardingAgent();
-        await deps.sendText(
-          channel,
-          userId,
-          [
-            onboardingReason === 'shared'
-              ? '🧭 检测到 shared-memory 为空，先进行记忆初始化。'
-              : onboardingReason === 'agent'
-              ? '🧭 检测到当前 agent 自身份未初始化，先进行记忆初始化。'
-              : '🧭 检测到 shared-memory 与当前 agent 自身份都未初始化，先进行记忆初始化。',
-            renderMemoryOnboardingStartMessage(onboardingReason),
-          ].join('\n'),
-        );
-        await startMemoryOnboarding(agent, currentModel, {
-          reason: onboardingReason,
-          targetAgent: currentAgent,
-        });
-        return;
-      }
+    if (shouldStartMemoryOnboarding && !existingThreadId) {
+      await deps.sendText(channel, userId, renderMemoryOnboardingSuggestion(onboardingReason));
     }
 
     if (shouldPushStartupHelp) {
