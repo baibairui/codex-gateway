@@ -12,16 +12,47 @@ describe('gateway-browser-skill', () => {
     installGatewayBrowserSkill(dir);
 
     const skillFile = path.join(dir, '.codex', 'skills', 'gateway-browser', 'SKILL.md');
+    const scriptFile = path.join(dir, '.codex', 'skills', 'gateway-browser', 'scripts', 'gateway-browser.mjs');
     expect(fs.existsSync(skillFile)).toBe(true);
+    expect(fs.existsSync(scriptFile)).toBe(true);
     expect(fs.readFileSync(skillFile, 'utf8')).toContain('name: gateway-browser');
+  });
+
+  it('upgrades legacy browser rules in AGENTS.md to the skill-only workflow', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gateway-browser-skill-'));
+    fs.writeFileSync(
+      path.join(dir, 'AGENTS.md'),
+      [
+        '# AGENTS.md',
+        '',
+        '浏览器操作职责：',
+        '- 当任务需要网页交互时，只允许使用 gateway 提供的 browser_* MCP 工具完成操作，而不是让用户手工点击。',
+        '- 禁止使用 playwright-cli、npx @playwright/mcp、任何自定义 wrapper script、/open 或其他 shell/browser 启动通道。',
+        '- 每次操作前先说明计划步骤，操作后回报关键结果与下一步。',
+        '',
+        '定时提醒职责：',
+        '- 当用户提出“稍后提醒我”这类需求时，不要要求用户输入 `/remind` 命令。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    installGatewayBrowserSkill(dir);
+
+    const agentsMd = fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8');
+    expect(agentsMd).toContain('<!-- gateway:browser-rule:start -->');
+    expect(agentsMd).toContain('./.codex/skills/gateway-browser/SKILL.md');
+    expect(agentsMd).toContain('自带脚本完成操作');
+    expect(agentsMd).not.toContain('browser_* MCP 工具');
+    expect(agentsMd).not.toContain('@playwright/mcp');
   });
 
   it('renders browser workflow with evidence and safety rules', () => {
     const skill = renderGatewayBrowserSkill();
 
-    expect(skill).toContain('Read current page state with `browser_snapshot` before deciding the next action.');
+    expect(skill).toContain('gateway-browser.mjs snapshot');
     expect(skill).toContain('refs are not stable across navigations');
-    expect(skill).toContain('use screenshot/console/network tools to collect evidence');
+    expect(skill).toContain('use `screenshot`, `tabs`, `evaluate`, or recording commands to collect evidence');
     expect(skill).toContain('Report format:');
     expect(skill).toContain('Evidence: snapshot/screenshot/console/network findings');
     expect(skill).toContain('Next step: the next minimal action or the exact user takeover request.');

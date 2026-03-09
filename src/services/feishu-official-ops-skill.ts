@@ -36,8 +36,9 @@ function ensureAgentsFeishuOpsRule(workspaceDir: string): void {
     '飞书官方操作规则：',
     '- 用户要求创建飞书文档、知识库节点等真实飞书对象时，优先使用 `./.codex/skills/feishu-official-ops/SKILL.md`。',
     '- 按 `./feishu-ops-playbook.md` 的标准流程执行，先探测后写入。',
-    '- 必须调用该 skill 附带的 OpenAPI CLI 执行真实操作，不要口头声称“已创建”。',
-    '- 禁止在未执行任何 OpenAPI CLI 探测前，直接下结论“没有飞书 wiki/docx 能力”。',
+    '- 必须执行该 skill 自带脚本完成真实操作，不要口头声称“已创建”。',
+    '- 若用户要求往飞书文档插入图片，或上下文里已经有 `local_image_path=...`，优先使用 `docx create/append` 的 `--image-file` 参数，不要假设 markdown 会自动带图。',
+    '- 禁止在未执行任何只读探测前，直接下结论“没有飞书 wiki/docx 能力”。',
     '- 若用户问“有没有接入/有没有能力”，先执行一次只读探测（优先 `wiki list-spaces`）；按真实返回给结论：鉴权缺失、权限不足、接口可用三者必须区分清楚。',
     FEISHU_RULE_END,
   ].join('\n');

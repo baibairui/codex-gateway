@@ -21,9 +21,14 @@ interface BuildCodexSpawnSpecInput {
 
 const DEFAULT_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const RUNTIME_HOME_DIR = '.codex-runtime/home';
+const RUNTIME_HOME_MOUNT_DIR = '/workspace/.codex-runtime/home';
 const CODEx_SYNC_FILES = ['auth.json', 'config.toml', 'models_cache.json'] as const;
+const DEFAULT_HOME_READONLY_PATHS = ['.gitconfig', '.ssh/config', '.ssh/known_hosts'] as const;
+const SSH_CONFIG_RELATIVE_PATH = '.ssh/config';
+const EXTRA_READS_ENV_NAME = 'CODEX_WORKDIR_ISOLATION_EXTRA_READS';
 
 export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawnSpec {
+  const hostHomeDir = resolveHostHomeDir(input.env);
   const hostEnv = buildHostCodexEnv(input.env, input.codexHomeDir);
   if (input.isolationMode === 'off') {
     return {
@@ -40,14 +45,29 @@ export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawn
 
   return {
     command: 'bwrap',
-    args: buildBubblewrapArgs(input.codexBin, input.args, workspaceDir, runtimeHomeDir),
+    args: buildBubblewrapArgs(
+      input.codexBin,
+      input.args,
+      workspaceDir,
+      runtimeHomeDir,
+      hostHomeDir,
+      input.env[EXTRA_READS_ENV_NAME],
+    ),
     cwd: workspaceDir,
     env: buildIsolatedEnv(hostEnv, runtimeHomeDir),
   };
 }
 
-function buildBubblewrapArgs(codexBin: string, args: string[], workspaceDir: string, runtimeHomeDir: string): string[] {
+function buildBubblewrapArgs(
+  codexBin: string,
+  args: string[],
+  workspaceDir: string,
+  runtimeHomeDir: string,
+  hostHomeDir: string | undefined,
+  extraReadsRaw: string | undefined,
+): string[] {
   const sandboxArgs = normalizeArgsForWorkspace(args, workspaceDir);
+  const readonlyMounts = collectReadonlyMounts(runtimeHomeDir, hostHomeDir, extraReadsRaw);
   const result = [
     '--die-with-parent',
     '--new-session',
@@ -73,7 +93,14 @@ function buildBubblewrapArgs(codexBin: string, args: string[], workspaceDir: str
     '/workspace',
     '--bind',
     runtimeHomeDir,
-    '/workspace/.codex-runtime/home',
+    RUNTIME_HOME_MOUNT_DIR,
+  );
+
+  for (const mount of readonlyMounts) {
+    result.push('--ro-bind', mount.source, mount.sandboxTarget);
+  }
+
+  result.push(
     '--chdir',
     '/workspace',
     '--setenv',
@@ -107,14 +134,9 @@ function buildHostCodexEnv(env: NodeJS.ProcessEnv, codexHomeDir?: string): NodeJ
   }
   const resolvedHome = path.resolve(codexHomeDir);
   fs.mkdirSync(resolvedHome, { recursive: true });
-  fs.mkdirSync(path.join(resolvedHome, '.config'), { recursive: true });
-  fs.mkdirSync(path.join(resolvedHome, '.cache'), { recursive: true });
   return {
     ...env,
-    HOME: resolvedHome,
     CODEX_HOME: resolvedHome,
-    XDG_CONFIG_HOME: path.join(resolvedHome, '.config'),
-    XDG_CACHE_HOME: path.join(resolvedHome, '.cache'),
   };
 }
 
@@ -145,6 +167,15 @@ function buildIsolatedEnv(env: NodeJS.ProcessEnv, runtimeHomeDir: string): NodeJ
     CODEX_DISABLE_WRITES_OUTSIDE_CWD: 'true',
   };
 
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (key.startsWith('FEISHU_') || key.startsWith('GATEWAY_')) {
+      nextEnv[key] = value;
+    }
+  }
+
   for (const [key, value] of Object.entries(nextEnv)) {
     if (value === undefined) {
       delete nextEnv[key];
@@ -174,6 +205,174 @@ function syncCodexRuntimeHome(sourceDir: string | undefined, targetDir: string):
     }
     fs.copyFileSync(sourceFile, targetFile);
   }
+}
+
+function collectReadonlyMounts(
+  runtimeHomeDir: string,
+  hostHomeDir: string | undefined,
+  extraReadsRaw: string | undefined,
+): Array<{ source: string; hostTarget: string; sandboxTarget: string }> {
+  if (!hostHomeDir) {
+    return [];
+  }
+
+  const mounts = new Map<string, { source: string; hostTarget: string; sandboxTarget: string }>();
+  for (const relativePath of DEFAULT_HOME_READONLY_PATHS) {
+    const source = path.join(hostHomeDir, relativePath);
+    appendReadonlyMount(
+      mounts,
+      source,
+      path.join(runtimeHomeDir, relativePath),
+      path.posix.join(RUNTIME_HOME_MOUNT_DIR, relativePath.split(path.sep).join('/')),
+    );
+  }
+
+  for (const identityPath of resolveSshIdentityFiles(hostHomeDir)) {
+    const target = resolveRuntimeTargetForHostPath(runtimeHomeDir, hostHomeDir, identityPath);
+    if (!target) {
+      continue;
+    }
+    const relativeTarget = path.relative(runtimeHomeDir, target);
+    appendReadonlyMount(
+      mounts,
+      identityPath,
+      target,
+      path.posix.join(RUNTIME_HOME_MOUNT_DIR, relativeTarget.split(path.sep).join('/')),
+    );
+  }
+
+  for (const rawPath of parseExtraReadPaths(extraReadsRaw)) {
+    const source = expandHomePath(rawPath, hostHomeDir);
+    const target = resolveRuntimeTargetForHostPath(runtimeHomeDir, hostHomeDir, source);
+    if (!target) {
+      continue;
+    }
+    const relativeTarget = path.relative(runtimeHomeDir, target);
+    appendReadonlyMount(
+      mounts,
+      source,
+      target,
+      path.posix.join(RUNTIME_HOME_MOUNT_DIR, relativeTarget.split(path.sep).join('/')),
+    );
+  }
+
+  return Array.from(mounts.values());
+}
+
+function appendReadonlyMount(
+  mounts: Map<string, { source: string; hostTarget: string; sandboxTarget: string }>,
+  source: string,
+  hostTarget: string,
+  sandboxTarget: string,
+): void {
+  if (!fs.existsSync(source)) {
+    return;
+  }
+  ensureMountTargetExists(source, hostTarget);
+  mounts.set(sandboxTarget, { source, hostTarget, sandboxTarget });
+}
+
+function ensureMountTargetExists(source: string, target: string): void {
+  const stat = fs.statSync(source);
+  if (stat.isDirectory()) {
+    fs.mkdirSync(target, { recursive: true });
+    return;
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  if (!fs.existsSync(target)) {
+    fs.writeFileSync(target, '', 'utf8');
+  }
+}
+
+function parseExtraReadPaths(raw: string | undefined): string[] {
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function expandHomePath(rawPath: string, hostHomeDir: string): string {
+  if (rawPath === '~') {
+    return hostHomeDir;
+  }
+  if (rawPath.startsWith('~/')) {
+    return path.join(hostHomeDir, rawPath.slice(2));
+  }
+  return path.resolve(rawPath);
+}
+
+function resolveRuntimeTargetForHostPath(
+  runtimeHomeDir: string,
+  hostHomeDir: string,
+  sourcePath: string,
+): string | undefined {
+  const relativePath = path.relative(hostHomeDir, sourcePath);
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return undefined;
+  }
+  return path.join(runtimeHomeDir, relativePath);
+}
+
+function resolveHostHomeDir(env: NodeJS.ProcessEnv): string | undefined {
+  const home = env.HOME?.trim();
+  if (home) {
+    return path.resolve(home);
+  }
+  return undefined;
+}
+
+function resolveSshIdentityFiles(hostHomeDir: string): string[] {
+  const configPath = path.join(hostHomeDir, SSH_CONFIG_RELATIVE_PATH);
+  if (!fs.existsSync(configPath) || !fs.statSync(configPath).isFile()) {
+    return [];
+  }
+
+  const results = new Set<string>();
+  const content = fs.readFileSync(configPath, 'utf8');
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+    const match = line.match(/^IdentityFile\s+(.+)$/i);
+    if (!match) {
+      continue;
+    }
+    const sourcePath = normalizeSshIdentityPath(match[1] ?? '', hostHomeDir);
+    if (!sourcePath) {
+      continue;
+    }
+    results.add(sourcePath);
+    const publicKeyPath = `${sourcePath}.pub`;
+    if (fs.existsSync(publicKeyPath) && fs.statSync(publicKeyPath).isFile()) {
+      results.add(publicKeyPath);
+    }
+  }
+  return Array.from(results);
+}
+
+function normalizeSshIdentityPath(rawValue: string, hostHomeDir: string): string | undefined {
+  const strippedComment = rawValue.replace(/\s+#.*$/, '').trim();
+  if (!strippedComment) {
+    return undefined;
+  }
+  const unquoted = strippedComment.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
+  if (!unquoted) {
+    return undefined;
+  }
+  if (unquoted === '~' || unquoted.startsWith('~/')) {
+    return expandHomePath(unquoted, hostHomeDir);
+  }
+  if (unquoted.startsWith('%d/')) {
+    return path.join(hostHomeDir, unquoted.slice(3));
+  }
+  if (path.isAbsolute(unquoted)) {
+    return path.resolve(unquoted);
+  }
+  return path.join(hostHomeDir, '.ssh', unquoted);
 }
 
 function normalizeArgsForWorkspace(args: string[], workspaceDir: string): string[] {

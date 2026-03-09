@@ -53,6 +53,11 @@
 
 当前内置的飞书官方操作 skill 还可以让 agent 执行真实的飞书 OpenAPI 动作，例如：
 
+- 读取历史消息、搜索消息
+- 读取 DocX / 云文档内容
+- 查询多维表格数据表和记录
+- 查询日历、日程和忙闲时间
+- 创建和查询任务、子任务
 - 创建新版飞书文档（DocX）
 - 列出知识库空间
 - 在知识库里创建节点（例如 DocX 节点）
@@ -269,6 +274,11 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 
 它当前封装了飞书官方 OpenAPI 的这些能力：
 
+- `im get-message` / `im list-messages` / `im search-messages`：读取历史消息、搜索消息
+- `doc get-content` / `doc get-raw-content`：读取 DocX markdown / 纯文本内容
+- `bitable list-tables` / `bitable list-records` / `bitable search-records`：查询多维表格结构与记录
+- `calendar list-calendars` / `calendar list-events` / `calendar freebusy`：查询日历、日程和忙闲时间
+- `task create` / `task list` / `task get` / `task update` / `task create-subtask`：任务与子任务操作
 - `docx create`：创建新版文档
 - `wiki list-spaces`：列出知识空间
 - `wiki get-node`：查询知识空间节点
@@ -277,7 +287,7 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 前提：
 
 - 已配置 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`
-- 飞书应用已开通对应的 DocX / Wiki OpenAPI 权限
+- 飞书应用已开通对应的 IM / Docs / Bitable / Calendar / Task / Wiki OpenAPI 权限
 
 完整配置模板见 [.env.example](./.env.example)。
 

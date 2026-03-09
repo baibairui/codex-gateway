@@ -8,6 +8,7 @@ describe('parseGatewayStructuredMessage', () => {
     const parsed = parseGatewayStructuredMessage(input);
     expect(parsed).toEqual({
       __gateway_message__: true,
+      op: 'send',
       msg_type: 'text',
       content: { text: 'hello' },
     });
@@ -18,8 +19,31 @@ describe('parseGatewayStructuredMessage', () => {
     const parsed = parseGatewayStructuredMessage(input);
     expect(parsed).toEqual({
       __gateway_message__: true,
+      op: 'send',
       msg_type: 'post',
       content: 'hello',
+    });
+  });
+
+  it('parses update operation payloads', () => {
+    const input = '{"__gateway_message__":true,"op":"update","message_id":"om_1","msg_type":"INTERACTIVE","content":{"template_id":"tpl_1"}}';
+    const parsed = parseGatewayStructuredMessage(input);
+    expect(parsed).toEqual({
+      __gateway_message__: true,
+      op: 'update',
+      message_id: 'om_1',
+      msg_type: 'interactive',
+      content: { template_id: 'tpl_1' },
+    });
+  });
+
+  it('parses recall operation payloads', () => {
+    const input = '{"__gateway_message__":true,"op":"recall","message_id":"om_1"}';
+    const parsed = parseGatewayStructuredMessage(input);
+    expect(parsed).toEqual({
+      __gateway_message__: true,
+      op: 'recall',
+      message_id: 'om_1',
     });
   });
 

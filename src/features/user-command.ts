@@ -127,7 +127,7 @@ const HELP_PAGES: Array<{ title: string; lines: string[] }> = [
       '/review commit [SHA] - 审查指定提交',
       '/repair-users - 清理并修复已部署用户工作区（技能注入、规则升级、工作目录自愈）',
       '/login - 使用设备码登录 Codex',
-      '提醒任务请直接用自然语言描述，由已安装的 reminder-tool skill 调用提醒工具执行。',
+      '提醒任务请直接用自然语言描述，由已安装的 reminder-tool skill 执行内置脚本创建提醒。',
     ],
   },
 ];

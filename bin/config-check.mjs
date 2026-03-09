@@ -57,7 +57,7 @@ if (runnerEnabled && missingIfEmpty('CODEX_WORKDIR')) {
 }
 
 if (!missingIfEmpty('BROWSER_MCP_URL')) {
-  warnings.push('BROWSER_MCP_URL 已废弃且会被忽略；gateway 现在只允许使用内置浏览器 MCP。');
+  warnings.push('BROWSER_MCP_URL 已废弃且会被忽略；gateway 现在通过 gateway-browser skill 驱动内置浏览器。');
 }
 
 if (!commandExists(process.env.CODEX_BIN || 'codex')) {

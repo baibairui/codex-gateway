@@ -4,7 +4,11 @@ import { createLogger } from '../utils/logger.js';
 import { buildCodexSpawnSpec, type CodexWorkdirIsolationMode } from './codex-bwrap.js';
 
 const log = createLogger('CodexRunner');
-const BROWSER_MCP_SERVER_NAME = 'gateway_browser';
+
+export interface BrowserAutomationRuntimeConfig {
+  apiBaseUrl: string;
+  internalApiToken: string;
+}
 
 export interface CodexRunInput {
   prompt: string;
@@ -55,7 +59,9 @@ interface CodexRunnerOptions {
   timeoutMinMs?: number;
   timeoutMaxMs?: number;
   timeoutPerCharMs?: number;
-  browserMcpUrl?: string;
+  browserApiBaseUrl?: string;
+  internalApiToken?: string;
+  gatewayRootDir?: string;
   /** 'full-auto' (沙箱) 或 'none' (无沙箱) */
   sandbox?: 'full-auto' | 'none';
   workdirIsolation?: CodexWorkdirIsolationMode;
@@ -110,7 +116,8 @@ export class CodexRunner {
   private readonly timeoutMinMs: number;
   private readonly timeoutMaxMs: number;
   private readonly timeoutPerCharMs: number;
-  private readonly browserMcpUrl?: string;
+  private readonly browserAutomation?: BrowserAutomationRuntimeConfig;
+  private readonly gatewayRootDir?: string;
   private readonly sandbox: 'full-auto' | 'none';
   private readonly workdirIsolation: CodexWorkdirIsolationMode;
   private readonly codexHomeDir?: string;
@@ -122,7 +129,15 @@ export class CodexRunner {
     this.timeoutMinMs = options.timeoutMinMs ?? DEFAULT_TIMEOUT_MIN_MS;
     this.timeoutMaxMs = options.timeoutMaxMs ?? DEFAULT_TIMEOUT_MAX_MS;
     this.timeoutPerCharMs = options.timeoutPerCharMs ?? DEFAULT_TIMEOUT_PER_CHAR_MS;
-    this.browserMcpUrl = options.browserMcpUrl?.trim() || undefined;
+    const browserApiBaseUrl = options.browserApiBaseUrl?.trim() || undefined;
+    const internalApiToken = options.internalApiToken?.trim() || undefined;
+    this.browserAutomation = browserApiBaseUrl && internalApiToken
+      ? {
+          apiBaseUrl: browserApiBaseUrl,
+          internalApiToken,
+        }
+      : undefined;
+    this.gatewayRootDir = options.gatewayRootDir?.trim() || undefined;
     this.sandbox = options.sandbox ?? 'full-auto';
     this.workdirIsolation = options.workdirIsolation ?? 'off';
     this.codexHomeDir = options.codexHomeDir?.trim() || undefined;
@@ -133,7 +148,8 @@ export class CodexRunner {
       timeoutMinMs: this.timeoutMinMs,
       timeoutMaxMs: this.timeoutMaxMs,
       timeoutPerCharMs: this.timeoutPerCharMs,
-      browserMcpUrl: this.browserMcpUrl ?? '(disabled)',
+      browserApiBaseUrl: this.browserAutomation?.apiBaseUrl ?? '(disabled)',
+      gatewayRootDir: this.gatewayRootDir ?? '(unset)',
       sandbox: this.sandbox,
       workdirIsolation: this.workdirIsolation,
       codexHomeDir: this.codexHomeDir ?? '(system HOME)',
@@ -141,10 +157,15 @@ export class CodexRunner {
   }
 
   run(input: CodexRunInput): Promise<CodexRunResult> {
-    const args = buildCodexArgs(input, this.sandbox, this.browserMcpUrl);
+    const args = buildCodexArgs(input, this.sandbox);
     return this.runJsonl({
       args,
       prompt: input.prompt,
+      env: buildCodexChildEnv(process.env, {
+        reminderToolContext: input.reminderToolContext,
+        browserAutomation: this.browserAutomation,
+        gatewayRootDir: this.gatewayRootDir,
+      }),
       workdir: input.workdir,
       onMessage: input.onMessage,
       onThreadStarted: input.onThreadStarted,
@@ -167,11 +188,15 @@ export class CodexRunner {
   }
 
   review(input: CodexReviewInput): Promise<{ rawOutput: string }> {
-    const args = buildCodexReviewArgs(input, this.sandbox, this.browserMcpUrl);
+    const args = buildCodexReviewArgs(input, this.sandbox);
     const timeoutHint = input.prompt ?? input.target ?? input.mode;
     return this.runJsonl({
       args,
       prompt: timeoutHint,
+      env: buildCodexChildEnv(process.env, {
+        browserAutomation: this.browserAutomation,
+        gatewayRootDir: this.gatewayRootDir,
+      }),
       workdir: input.workdir,
       onMessage: input.onMessage,
       requireThreadId: false,
@@ -242,6 +267,7 @@ export class CodexRunner {
   private runJsonl(options: {
     args: string[];
     prompt: string;
+    env?: NodeJS.ProcessEnv;
     workdir?: string;
     onMessage?: (text: string) => void;
     onThreadStarted?: (threadId: string) => void;
@@ -268,7 +294,7 @@ export class CodexRunner {
         codexBin: this.codexBin,
         args: options.args,
         cwd: options.workdir ?? this.workdir,
-        env: process.env,
+        env: options.env ?? process.env,
         isolationMode: this.workdirIsolation,
         codexHomeDir: this.codexHomeDir,
       });
@@ -423,7 +449,6 @@ export class CodexRunner {
 export function buildCodexArgs(
   input: Pick<CodexRunInput, 'prompt' | 'threadId' | 'model' | 'search' | 'workdir' | 'reminderToolContext'>,
   sandbox: 'full-auto' | 'none',
-  browserMcpUrl?: string,
 ): string[] {
   const sandboxFlag = sandbox === 'none'
     ? '--dangerously-bypass-approvals-and-sandbox'
@@ -443,12 +468,6 @@ export function buildCodexArgs(
   if (input.search) {
     args.unshift('--search');
   }
-  if (input.reminderToolContext) {
-    args.unshift(...buildReminderMcpConfigArgs(input.reminderToolContext));
-  }
-  if (browserMcpUrl?.trim()) {
-    args.unshift(...buildBrowserMcpConfigArgs(browserMcpUrl.trim()));
-  }
   args.push(input.prompt);
   return args;
 }
@@ -456,7 +475,6 @@ export function buildCodexArgs(
 export function buildCodexReviewArgs(
   input: Pick<CodexReviewInput, 'mode' | 'target' | 'prompt' | 'model' | 'search' | 'workdir'>,
   sandbox: 'full-auto' | 'none',
-  browserMcpUrl?: string,
 ): string[] {
   const sandboxFlag = sandbox === 'none'
     ? '--dangerously-bypass-approvals-and-sandbox'
@@ -480,50 +498,42 @@ export function buildCodexReviewArgs(
   if (input.search) {
     args.unshift('--search');
   }
-  if (browserMcpUrl?.trim()) {
-    args.unshift(...buildBrowserMcpConfigArgs(browserMcpUrl.trim()));
-  }
   if (input.prompt) {
     args.push(input.prompt);
   }
   return args;
 }
 
-function buildBrowserMcpConfigArgs(url: string): string[] {
-  return [
-    '-c',
-    `mcp_servers.${BROWSER_MCP_SERVER_NAME}.url=${tomlString(url)}`,
-  ];
-}
+export function buildCodexChildEnv(
+  baseEnv: NodeJS.ProcessEnv,
+  input: {
+    reminderToolContext?: CodexRunInput['reminderToolContext'];
+    browserAutomation?: BrowserAutomationRuntimeConfig;
+    gatewayRootDir?: string;
+  },
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...baseEnv,
+  };
 
-function buildReminderMcpConfigArgs(context: NonNullable<CodexRunInput['reminderToolContext']>): string[] {
-  const serverPath = resolveReminderMcpServerPath();
-  return [
-    '-c',
-    'mcp_servers.gateway_reminder.command="node"',
-    '-c',
-    `mcp_servers.gateway_reminder.args=${tomlStringArray([serverPath])}`,
-    '-c',
-    `mcp_servers.gateway_reminder.env.REMINDER_DB_PATH=${tomlString(context.dbPath)}`,
-    '-c',
-    `mcp_servers.gateway_reminder.env.REMINDER_CHANNEL=${tomlString(context.channel)}`,
-    '-c',
-    `mcp_servers.gateway_reminder.env.REMINDER_USER_ID=${tomlString(context.userId)}`,
-    '-c',
-    `mcp_servers.gateway_reminder.env.REMINDER_AGENT_ID=${tomlString(context.agentId)}`,
-  ];
-}
+  if (input.reminderToolContext) {
+    env.GATEWAY_REMINDER_DB_PATH = input.reminderToolContext.dbPath;
+    env.GATEWAY_REMINDER_CHANNEL = input.reminderToolContext.channel;
+    env.GATEWAY_REMINDER_USER_ID = input.reminderToolContext.userId;
+    env.GATEWAY_REMINDER_AGENT_ID = input.reminderToolContext.agentId;
+  }
 
-function resolveReminderMcpServerPath(): string {
-  return fileURLToPath(new URL('../../bin/reminder-mcp-server.mjs', import.meta.url));
-}
+  if (input.browserAutomation?.apiBaseUrl) {
+    env.GATEWAY_BROWSER_API_BASE = input.browserAutomation.apiBaseUrl;
+  }
+  if (input.browserAutomation?.internalApiToken) {
+    env.GATEWAY_INTERNAL_API_TOKEN = input.browserAutomation.internalApiToken;
+  }
+  if (input.gatewayRootDir?.trim()) {
+    env.GATEWAY_ROOT_DIR = input.gatewayRootDir.trim();
+  }
 
-function tomlString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function tomlStringArray(values: string[]): string {
-  return `[${values.map((value) => tomlString(value)).join(',')}]`;
+  return env;
 }
 
 function redactArgsForLog(args: string[]): string[] {

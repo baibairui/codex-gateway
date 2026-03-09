@@ -1542,6 +1542,9 @@ describe('createChatHandler', () => {
     expect(prompt).toContain('最终结果、产出物和后续建议');
     expect(prompt).toContain('浏览器人工接管触发条件包括但不限于');
     expect(prompt).toContain('登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义');
+    expect(prompt).toContain('若要更新已发送的飞书消息，可输出 op=update');
+    expect(prompt).toContain('若要撤回已发送的飞书消息，可输出 op=recall');
+    expect(prompt).toContain('"message_id":"<飞书消息ID>"');
     expect(prompt).toContain('如果不确定该用哪种类型，优先退回 text');
   });
 

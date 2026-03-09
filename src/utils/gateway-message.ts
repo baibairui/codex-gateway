@@ -1,10 +1,24 @@
 type Channel = 'wecom' | 'feishu';
 
-export interface GatewayStructuredMessage {
-  __gateway_message__: true;
-  msg_type: string;
-  content: Record<string, unknown> | string;
-}
+export type GatewayStructuredMessage =
+  | {
+      __gateway_message__: true;
+      op: 'send';
+      msg_type: string;
+      content: Record<string, unknown> | string;
+    }
+  | {
+      __gateway_message__: true;
+      op: 'update';
+      message_id: string;
+      msg_type: string;
+      content: Record<string, unknown> | string;
+    }
+  | {
+      __gateway_message__: true;
+      op: 'recall';
+      message_id: string;
+    };
 
 const FEISHU_SUPPORTED_TYPES = new Set([
   'text',
@@ -57,6 +71,21 @@ export function parseGatewayStructuredMessage(content: string): GatewayStructure
     if (parsed.__gateway_message__ !== true) {
       return undefined;
     }
+    const op = typeof parsed.op === 'string' ? parsed.op.trim().toLowerCase() : 'send';
+    if (op !== 'send' && op !== 'update' && op !== 'recall') {
+      return undefined;
+    }
+    const messageId = typeof parsed.message_id === 'string' ? parsed.message_id.trim() : '';
+    if (op === 'recall') {
+      if (!messageId) {
+        return undefined;
+      }
+      return {
+        __gateway_message__: true,
+        op: 'recall',
+        message_id: messageId,
+      };
+    }
     if (typeof parsed.msg_type !== 'string') {
       return undefined;
     }
@@ -68,8 +97,21 @@ export function parseGatewayStructuredMessage(content: string): GatewayStructure
     if (!(typeof payload === 'string' || (payload && typeof payload === 'object' && !Array.isArray(payload)))) {
       return undefined;
     }
+    if (op === 'update') {
+      if (!messageId) {
+        return undefined;
+      }
+      return {
+        __gateway_message__: true,
+        op: 'update',
+        message_id: messageId,
+        msg_type: normalizedType,
+        content: payload as Record<string, unknown> | string,
+      };
+    }
     return {
       __gateway_message__: true,
+      op: 'send',
       msg_type: normalizedType,
       content: payload as Record<string, unknown> | string,
     };

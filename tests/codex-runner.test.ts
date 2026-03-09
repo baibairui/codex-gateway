@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { buildCodexArgs, buildCodexReviewArgs, parseCodexJsonl, summarizeCodexItem } from '../src/services/codex-runner.js';
+import { buildCodexArgs, buildCodexChildEnv, buildCodexReviewArgs, parseCodexJsonl, summarizeCodexItem } from '../src/services/codex-runner.js';
 import { buildCodexSpawnSpec } from '../src/services/codex-bwrap.js';
 
 describe('parseCodexJsonl', () => {
@@ -31,13 +32,13 @@ describe('summarizeCodexItem', () => {
   it('keeps key mcp tool call fields for logging', () => {
     expect(summarizeCodexItem({
       type: 'mcp_tool_call',
-      server: 'gateway_browser',
-      tool_name: 'browser_navigate',
+      server: 'tool_bridge',
+      tool_name: 'navigate',
       arguments: { url: 'https://example.com' },
     })).toEqual({
       type: 'mcp_tool_call',
-      server: 'gateway_browser',
-      toolName: 'browser_navigate',
+      server: 'tool_bridge',
+      toolName: 'navigate',
       argumentsPreview: '{"url":"https://example.com"}',
     });
   });
@@ -103,7 +104,7 @@ describe('buildCodexArgs', () => {
     ]);
   });
 
-  it('injects reminder MCP server config when reminder tool context is provided', () => {
+  it('does not modify args when reminder skill context is provided', () => {
     const args = buildCodexArgs(
       {
         prompt: 'remind me later',
@@ -118,26 +119,15 @@ describe('buildCodexArgs', () => {
       'full-auto',
     );
 
-    expect(args).toContain('-c');
-    expect(args).toContain('mcp_servers.gateway_reminder.command="node"');
-    expect(args).toContain('mcp_servers.gateway_reminder.env.REMINDER_DB_PATH="/tmp/reminders.db"');
-    expect(args).toContain('mcp_servers.gateway_reminder.env.REMINDER_CHANNEL="wecom"');
-    expect(args).toContain('mcp_servers.gateway_reminder.env.REMINDER_USER_ID="u1"');
-    expect(args).toContain('mcp_servers.gateway_reminder.env.REMINDER_AGENT_ID="assistant"');
-  });
-
-  it('injects persistent browser MCP url config under gateway_browser only', () => {
-    const args = buildCodexArgs(
-      {
-        prompt: 'open browser',
-        workdir: '/tmp/agent-e',
-      },
-      'full-auto',
-      'http://127.0.0.1:8931/mcp',
-    );
-
-    expect(args).toContain('-c');
-    expect(args).toContain('mcp_servers.gateway_browser.url="http://127.0.0.1:8931/mcp"');
+    expect(args).toEqual([
+      '--cd',
+      '/tmp/agent-d',
+      'exec',
+      '--json',
+      '--full-auto',
+      '--skip-git-repo-check',
+      'remind me later',
+    ]);
   });
 });
 
@@ -181,15 +171,34 @@ describe('buildCodexReviewArgs', () => {
     ]);
   });
 
-  it('injects persistent browser MCP url config for review runs under gateway_browser only', () => {
-    const args = buildCodexReviewArgs(
-      { mode: 'uncommitted', workdir: '/tmp/agent-f' },
-      'full-auto',
-      'http://127.0.0.1:8931/mcp',
+});
+
+describe('buildCodexChildEnv', () => {
+  it('injects reminder and browser skill runtime env vars', () => {
+    const env = buildCodexChildEnv(
+      { PATH: '/usr/bin', HOME: '/root' },
+      {
+        reminderToolContext: {
+          dbPath: '/tmp/reminders.db',
+          channel: 'wecom',
+          userId: 'u1',
+          agentId: 'assistant',
+        },
+        browserAutomation: {
+          apiBaseUrl: 'http://127.0.0.1:3000/internal/browser',
+          internalApiToken: 'token-123',
+        },
+        gatewayRootDir: '/opt/gateway',
+      },
     );
 
-    expect(args).toContain('-c');
-    expect(args).toContain('mcp_servers.gateway_browser.url="http://127.0.0.1:8931/mcp"');
+    expect(env.GATEWAY_REMINDER_DB_PATH).toBe('/tmp/reminders.db');
+    expect(env.GATEWAY_REMINDER_CHANNEL).toBe('wecom');
+    expect(env.GATEWAY_REMINDER_USER_ID).toBe('u1');
+    expect(env.GATEWAY_REMINDER_AGENT_ID).toBe('assistant');
+    expect(env.GATEWAY_BROWSER_API_BASE).toBe('http://127.0.0.1:3000/internal/browser');
+    expect(env.GATEWAY_INTERNAL_API_TOKEN).toBe('token-123');
+    expect(env.GATEWAY_ROOT_DIR).toBe('/opt/gateway');
   });
 });
 
@@ -207,8 +216,10 @@ describe('buildCodexSpawnSpec', () => {
     expect(spec.command).toBe('/usr/bin/codex');
     expect(spec.args).toEqual(['exec', '--json', 'hello']);
     expect(spec.cwd).toBe('/tmp/agent-direct');
-    expect(spec.env.HOME).toBe('/tmp/instance-home');
+    expect(spec.env.HOME).toBe('/root');
     expect(spec.env.CODEX_HOME).toBe('/tmp/instance-home');
+    expect(spec.env.XDG_CONFIG_HOME).toBeUndefined();
+    expect(spec.env.XDG_CACHE_HOME).toBeUndefined();
   });
 
   it('wraps codex in bubblewrap and rewrites --cd to /workspace', () => {
@@ -281,6 +292,133 @@ describe('buildCodexSpawnSpec', () => {
 
     expect(fs.readFileSync(runtimeAuthFile, 'utf8')).toBe('{"token":"abc"}');
     expect(fs.readFileSync(runtimeConfigFile, 'utf8')).toBe('model = "gpt-5"');
+  });
+
+  it('propagates FEISHU env vars into isolated runs', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-feishu-env-'));
+    const hostHome = path.join(tempRoot, 'host-home');
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+
+    fs.mkdirSync(hostHome, { recursive: true });
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+
+    const spec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: hostHome,
+        PATH: '/usr/bin:/bin',
+        FEISHU_ENABLED: 'true',
+        FEISHU_APP_ID: 'cli_test',
+        FEISHU_APP_SECRET: 'sec_test',
+        FEISHU_DOC_BASE_URL: 'https://example.feishu.cn/docx',
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(spec.env.FEISHU_ENABLED).toBe('true');
+    expect(spec.env.FEISHU_APP_ID).toBe('cli_test');
+    expect(spec.env.FEISHU_APP_SECRET).toBe('sec_test');
+    expect(spec.env.FEISHU_DOC_BASE_URL).toBe('https://example.feishu.cn/docx');
+  });
+
+  it('propagates GATEWAY env vars into isolated runs', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-gateway-env-'));
+    const hostHome = path.join(tempRoot, 'host-home');
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+
+    fs.mkdirSync(hostHome, { recursive: true });
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+
+    const spec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: hostHome,
+        PATH: '/usr/bin:/bin',
+        GATEWAY_BROWSER_API_BASE: 'http://127.0.0.1:3000/internal/browser',
+        GATEWAY_INTERNAL_API_TOKEN: 'token-123',
+        GATEWAY_REMINDER_DB_PATH: '/tmp/reminders.db',
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(spec.env.GATEWAY_BROWSER_API_BASE).toBe('http://127.0.0.1:3000/internal/browser');
+    expect(spec.env.GATEWAY_INTERNAL_API_TOKEN).toBe('token-123');
+    expect(spec.env.GATEWAY_REMINDER_DB_PATH).toBe('/tmp/reminders.db');
+  });
+
+  it('bridges host git and ssh config into isolated runtime home', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-host-home-'));
+    const hostHome = path.join(tempRoot, 'host-home');
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+
+    fs.mkdirSync(path.join(hostHome, '.ssh'), { recursive: true });
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(path.join(hostHome, '.gitconfig'), '[safe]\n\tdirectory = /repo\n', 'utf8');
+    fs.writeFileSync(path.join(hostHome, '.ssh', 'codex-gateway-deploy'), 'PRIVATE KEY\n', 'utf8');
+    fs.writeFileSync(path.join(hostHome, '.ssh', 'config'), 'Host github\n  HostName github.com\n  IdentityFile ~/.ssh/codex-gateway-deploy\n', 'utf8');
+    fs.writeFileSync(path.join(hostHome, '.ssh', 'known_hosts'), 'github.com ssh-ed25519 AAAA\n', 'utf8');
+
+    const spec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: hostHome,
+        PATH: '/usr/bin:/bin',
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(spec.args).toContain(path.join(hostHome, '.gitconfig'));
+    expect(spec.args).toContain('/workspace/.codex-runtime/home/.gitconfig');
+    expect(spec.args).toContain(path.join(hostHome, '.ssh', 'config'));
+    expect(spec.args).toContain('/workspace/.codex-runtime/home/.ssh/config');
+    expect(spec.args).toContain(path.join(hostHome, '.ssh', 'known_hosts'));
+    expect(spec.args).toContain('/workspace/.codex-runtime/home/.ssh/known_hosts');
+    expect(spec.args).toContain(path.join(hostHome, '.ssh', 'codex-gateway-deploy'));
+    expect(spec.args).toContain('/workspace/.codex-runtime/home/.ssh/codex-gateway-deploy');
+  });
+
+  it('bridges extra home-relative config paths into isolated runtime home', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-extra-read-'));
+    const hostHome = path.join(tempRoot, 'host-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const vpnDir = path.join(hostHome, '.config', 'mihomo');
+
+    fs.mkdirSync(vpnDir, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.writeFileSync(path.join(vpnDir, 'config.yaml'), 'mixed-port: 7890\n', 'utf8');
+
+    const spec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: hostHome,
+        PATH: '/usr/bin:/bin',
+        CODEX_WORKDIR_ISOLATION_EXTRA_READS: '~/.config/mihomo',
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(spec.args).toContain(vpnDir);
+    expect(spec.args).toContain('/workspace/.codex-runtime/home/.config/mihomo');
   });
 
   it('removes stale runtime auth files when instance codex home no longer has them', () => {

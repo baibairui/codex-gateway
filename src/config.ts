@@ -52,6 +52,21 @@ function optionalStringUndefinedRaw(name: string): string | undefined {
   return value.length > 0 ? value : undefined;
 }
 
+function optionalBoolean(name: string): boolean | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) {
+    return undefined;
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  throw new Error(`invalid boolean env: ${name}`);
+}
+
 function codexSandboxMode(): 'full-auto' | 'none' {
   const value = process.env.CODEX_SANDBOX ?? 'full-auto';
   if (value === 'full-auto' || value === 'none') {
@@ -86,6 +101,7 @@ export const config = {
   feishuEnabled: process.env.FEISHU_ENABLED === 'true',
   feishuAppId: optionalStringUndefined('FEISHU_APP_ID'),
   feishuAppSecret: optionalStringUndefined('FEISHU_APP_SECRET'),
+  feishuDocBaseUrl: optionalStringUndefined('FEISHU_DOC_BASE_URL'),
   feishuVerificationToken: optionalStringUndefined('FEISHU_VERIFICATION_TOKEN'),
   feishuLongConnection: process.env.FEISHU_LONG_CONNECTION === 'true',
   feishuGroupRequireMention: process.env.FEISHU_GROUP_REQUIRE_MENTION !== 'false',
@@ -105,9 +121,10 @@ export const config = {
   /** 'full-auto' (默认，有沙箱) 或 'none' (跳过沙箱，适合服务器) */
   codexSandbox: codexSandboxMode(),
   codexWorkdirIsolation: codexWorkdirIsolationMode(),
-  browserMcpEnabled: process.env.BROWSER_MCP_ENABLED !== 'false',
-  browserMcpProfileDir: optionalStringUndefined('BROWSER_MCP_PROFILE_DIR'),
-  browserMcpPort: optionalNumber('BROWSER_MCP_PORT', 8931),
+  browserAutomationEnabled: optionalBoolean('BROWSER_AUTOMATION_ENABLED')
+    ?? (process.env.BROWSER_MCP_ENABLED !== 'false'),
+  browserProfileDir: optionalStringUndefined('BROWSER_PROFILE_DIR')
+    ?? optionalStringUndefined('BROWSER_MCP_PROFILE_DIR'),
   runnerEnabled: process.env.RUNNER_ENABLED !== 'false',
   memoryStewardEnabled: process.env.MEMORY_STEWARD_ENABLED !== 'false',
   memoryStewardIntervalHours: optionalNumber('MEMORY_STEWARD_INTERVAL_HOURS', 1),

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createBrowserMcpBackend } from '../src/services/browser-mcp-server.js';
+import { createBrowserAutomationBackend } from '../src/services/browser-service.js';
 
-describe('createBrowserMcpBackend', () => {
+describe('createBrowserAutomationBackend', () => {
   it('reuses the current tab for snapshot and navigate', async () => {
     const manager = {
       snapshot: vi.fn(async () => ({
@@ -31,15 +31,15 @@ describe('createBrowserMcpBackend', () => {
       newTab: vi.fn(async () => undefined),
       closeCurrentTab: vi.fn(async () => undefined),
     };
-    const backend = createBrowserMcpBackend(manager);
+    const backend = createBrowserAutomationBackend(manager);
 
-    const snapshotResult = await backend.callTool('browser_snapshot', {});
-    const navigateResult = await backend.callTool('browser_navigate', { url: 'https://example.com' });
+    const snapshotResult = await backend.execute('snapshot', {});
+    const navigateResult = await backend.execute('navigate', { url: 'https://example.com' });
 
     expect(manager.snapshot).toHaveBeenCalledTimes(2);
     expect(manager.navigate).toHaveBeenCalledWith('https://example.com');
-    expect(snapshotResult.content[0]?.type).toBe('text');
-    expect(navigateResult.content[0]?.type).toBe('text');
+    expect(snapshotResult.text).toContain('Page URL');
+    expect(navigateResult.text).toContain('Page URL');
   });
 
   it('returns a fresh snapshot after click-style interactions', async () => {
@@ -70,19 +70,19 @@ describe('createBrowserMcpBackend', () => {
       newTab: vi.fn(async () => undefined),
       closeCurrentTab: vi.fn(async () => undefined),
     };
-    const backend = createBrowserMcpBackend(manager);
+    const backend = createBrowserAutomationBackend(manager);
 
-    const clickResult = await backend.callTool('browser_click', { ref: 'e1' });
-    const typeResult = await backend.callTool('browser_type', { ref: 'e1', text: 'hello' });
+    const clickResult = await backend.execute('click', { ref: 'e1' });
+    const typeResult = await backend.execute('type', { ref: 'e1', text: 'hello' });
 
     expect(manager.click).toHaveBeenCalledWith('e1');
     expect(manager.type).toHaveBeenCalledWith('e1', 'hello', { slowly: false, submit: false });
     expect(manager.snapshot).toHaveBeenCalledTimes(2);
-    expect(clickResult.content[0]?.text).toContain('Page URL');
-    expect(typeResult.content[0]?.text).toContain('button "Save"');
+    expect(clickResult.text).toContain('Page URL');
+    expect(typeResult.text).toContain('button "Save"');
   });
 
-  it('supports browser_tabs list/new/select actions', async () => {
+  it('supports tabs list/new/select actions', async () => {
     const manager = {
       snapshot: vi.fn(async () => ({ page: '', snapshot: '' })),
       navigate: vi.fn(async () => undefined),
@@ -107,11 +107,11 @@ describe('createBrowserMcpBackend', () => {
       newTab: vi.fn(async () => undefined),
       closeCurrentTab: vi.fn(async () => undefined),
     };
-    const backend = createBrowserMcpBackend(manager);
+    const backend = createBrowserAutomationBackend(manager);
 
-    await backend.callTool('browser_tabs', { action: 'list' });
-    await backend.callTool('browser_tabs', { action: 'new' });
-    await backend.callTool('browser_tabs', { action: 'select', index: 0 });
+    await backend.execute('tabs', { action: 'list' });
+    await backend.execute('tabs', { action: 'new' });
+    await backend.execute('tabs', { action: 'select', index: 0 });
 
     expect(manager.listTabs).toHaveBeenCalledTimes(3);
     expect(manager.newTab).toHaveBeenCalledTimes(1);
@@ -143,9 +143,9 @@ describe('createBrowserMcpBackend', () => {
       newTab: vi.fn(async () => undefined),
       closeCurrentTab: vi.fn(async () => undefined),
     };
-    const backend = createBrowserMcpBackend(manager);
+    const backend = createBrowserAutomationBackend(manager);
 
-    const result = await backend.callTool('browser_take_screenshot', { ref: 'e2', type: 'png' });
+    const result = await backend.execute('screenshot', { ref: 'e2', type: 'png' });
 
     expect(manager.takeScreenshot).toHaveBeenCalledWith({
       filename: undefined,
@@ -153,7 +153,7 @@ describe('createBrowserMcpBackend', () => {
       type: 'png',
       ref: 'e2',
     });
-    expect(result.content[0]?.text).toBe('/tmp/field.png');
+    expect(result.text).toBe('/tmp/field.png');
   });
 
   it('supports recording start/stop actions', async () => {
@@ -181,17 +181,17 @@ describe('createBrowserMcpBackend', () => {
       newTab: vi.fn(async () => undefined),
       closeCurrentTab: vi.fn(async () => undefined),
     };
-    const backend = createBrowserMcpBackend(manager);
+    const backend = createBrowserAutomationBackend(manager);
 
-    const start = await backend.callTool('browser_start_recording', { filename: 'demo.mp4', intervalMs: 400 });
-    const stop = await backend.callTool('browser_stop_recording', {});
+    const start = await backend.execute('start-recording', { filename: 'demo.mp4', intervalMs: 400 });
+    const stop = await backend.execute('stop-recording', {});
 
     expect(manager.startRecording).toHaveBeenCalledWith({
       filename: 'demo.mp4',
       intervalMs: 400,
     });
     expect(manager.stopRecording).toHaveBeenCalledTimes(1);
-    expect(start.content[0]?.text).toContain('recording started');
-    expect(stop.content[0]?.text).toContain('/tmp/rec.mp4');
+    expect(start.text).toContain('recording started');
+    expect(stop.text).toContain('/tmp/rec.mp4');
   });
 });

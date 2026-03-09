@@ -20,6 +20,13 @@ interface AppDeps {
   feishuDocBaseUrlConfigured?: boolean;
   feishuStartupHelpEnabled?: boolean;
   feishuStartupHelpAdminConfigured?: boolean;
+  internalApiToken?: string;
+  browserAutomation?: {
+    execute: (command: string, args: Record<string, unknown>) => Promise<{
+      text: string;
+      data?: Record<string, unknown>;
+    }>;
+  };
   isDuplicateMessage: (msgId?: string) => boolean;
   /**
    * 处理文本消息，业务回复统一走主动发消息 API，无需返回值。
@@ -61,6 +68,15 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
 
 function clipText(input: string, max = 200): string {
   return input.length <= max ? input : `${input.slice(0, max)}...`;
+}
+
+function isLoopbackAddress(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  return value === '127.0.0.1'
+    || value === '::1'
+    || value === '::ffff:127.0.0.1';
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -258,6 +274,9 @@ export function createApp(deps: AppDeps) {
   if (feishuWebhookEnabled) {
     app.use('/feishu/callback', express.json({ type: '*/*' }));
   }
+  if (deps.browserAutomation) {
+    app.use('/internal', express.json({ type: 'application/json', limit: '2mb' }));
+  }
 
   // ============ 请求日志中间件 ============
   app.use((req, _res, next) => {
@@ -292,6 +311,46 @@ export function createApp(deps: AppDeps) {
       },
     });
   });
+
+  if (deps.browserAutomation) {
+    const browserAutomation = deps.browserAutomation;
+    app.post('/internal/browser/execute', async (req, res) => {
+      const remoteAddress = req.socket.remoteAddress;
+      const token = req.header('x-gateway-internal-token');
+      if (!deps.internalApiToken || token !== deps.internalApiToken || !isLoopbackAddress(remoteAddress)) {
+        log.warn('internal browser execute rejected', {
+          remoteAddress: remoteAddress || '(empty)',
+          hasToken: Boolean(token),
+        });
+        res.status(403).json({ ok: false, error: 'forbidden' });
+        return;
+      }
+
+      const body = asObject(req.body);
+      const command = firstNonEmptyString(body?.command);
+      const args = asObject(body?.args) ?? {};
+      if (!command) {
+        res.status(400).json({ ok: false, error: 'missing command' });
+        return;
+      }
+
+      try {
+        const result = await browserAutomation.execute(command, args);
+        res.json({
+          ok: true,
+          text: result.text,
+          data: result.data ?? null,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        log.warn('internal browser execute failed', {
+          command,
+          error: errorMessage,
+        });
+        res.status(400).json({ ok: false, error: errorMessage });
+      }
+    });
+  }
 
   // ===================== GET 验证 URL =====================
   // 企业微信在配置回调 URL 时发 GET 请求验证：

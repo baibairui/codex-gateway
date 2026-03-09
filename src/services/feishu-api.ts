@@ -33,6 +33,12 @@ export interface FeishuOutgoingMessage {
   replyInThread?: boolean;
 }
 
+export interface FeishuMessageUpdateInput {
+  messageId: string;
+  msgType: 'text' | 'post' | 'interactive';
+  content: Record<string, unknown> | string;
+}
+
 interface FeishuSdkClient {
   im: {
     message: {
@@ -231,7 +237,18 @@ export class FeishuApi {
     });
   }
 
-  async updateMessage(messageId: string, msgType: 'text' | 'post', content: Record<string, unknown> | string): Promise<void> {
+  async updateMessage(input: FeishuMessageUpdateInput): Promise<void>;
+  async updateMessage(
+    messageId: string,
+    msgType: FeishuMessageUpdateInput['msgType'],
+    content: Record<string, unknown> | string,
+  ): Promise<void>;
+  async updateMessage(
+    inputOrMessageId: string | FeishuMessageUpdateInput,
+    maybeMsgType?: FeishuMessageUpdateInput['msgType'],
+    maybeContent?: Record<string, unknown> | string,
+  ): Promise<void> {
+    const { messageId, msgType, content } = normalizeMessageUpdateInput(inputOrMessageId, maybeMsgType, maybeContent);
     const normalizedMessageId = messageId.trim();
     if (!normalizedMessageId) {
       throw new Error('feishu update failed: messageId is required');
@@ -246,6 +263,33 @@ export class FeishuApi {
     });
     if (response.code !== 0) {
       throw new Error(`feishu update failed: ${response.code ?? 'unknown'} ${response.msg ?? 'unknown'}`);
+    }
+  }
+
+  async recallMessage(messageId: string): Promise<void> {
+    const normalizedMessageId = messageId.trim();
+    if (!normalizedMessageId) {
+      throw new Error('feishu recall failed: messageId is required');
+    }
+    const token = await this.getTenantAccessToken();
+    const response = await this.fetchWithTimeout(
+      `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(normalizedMessageId)}`,
+      {
+        method: 'DELETE',
+        headers: new Headers({
+          Authorization: `Bearer ${token}`,
+        }),
+      },
+    );
+    const body = await response.json().catch(() => ({})) as {
+      code?: number;
+      msg?: string;
+    };
+    if (!response.ok || (Object.keys(body).length > 0 && body.code !== 0)) {
+      if (response.status === 401 || response.status === 403) {
+        this.tokenCache = undefined;
+      }
+      throw new Error(`feishu recall failed: ${response.status} ${body.code ?? 'unknown'} ${body.msg ?? 'unknown'}`);
     }
   }
 
@@ -659,6 +703,27 @@ function requireNonEmptyText(text: string, errorMessage: string): string {
     throw new Error(errorMessage);
   }
   return text;
+}
+
+function normalizeMessageUpdateInput(
+  inputOrMessageId: string | FeishuMessageUpdateInput,
+  maybeMsgType?: FeishuMessageUpdateInput['msgType'],
+  maybeContent?: Record<string, unknown> | string,
+): FeishuMessageUpdateInput {
+  if (typeof inputOrMessageId === 'string') {
+    if (!maybeMsgType) {
+      throw new Error('feishu update failed: msgType is required');
+    }
+    if (!(typeof maybeContent === 'string' || (maybeContent && typeof maybeContent === 'object' && !Array.isArray(maybeContent)))) {
+      throw new Error('feishu update failed: content is required');
+    }
+    return {
+      messageId: inputOrMessageId,
+      msgType: maybeMsgType,
+      content: maybeContent,
+    };
+  }
+  return inputOrMessageId;
 }
 
 function resolveSimpleContent(msgType: string, value: string): Record<string, string> {

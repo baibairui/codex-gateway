@@ -36,6 +36,8 @@ const CONFIG_ENV_KEYS = [
   'CODEX_AGENTS_DIR',
   'CODEX_SANDBOX',
   'CODEX_WORKDIR_ISOLATION',
+  'BROWSER_AUTOMATION_ENABLED',
+  'BROWSER_PROFILE_DIR',
   'BROWSER_MCP_ENABLED',
   'BROWSER_MCP_URL',
   'BROWSER_MCP_PROFILE_DIR',
@@ -83,38 +85,63 @@ async function loadConfigWithEnv(env: Record<string, string | undefined>) {
   }
 }
 
-describe('config browser mcp defaults', () => {
-  it('enables browser mcp by default when not explicitly disabled', async () => {
+describe('config browser automation defaults', () => {
+  it('enables browser automation by default when not explicitly disabled', async () => {
     const config = await loadConfigWithEnv({
       WECOM_ENABLED: 'false',
       FEISHU_ENABLED: 'false',
       CODEX_SANDBOX: 'full-auto',
+      BROWSER_AUTOMATION_ENABLED: undefined,
       BROWSER_MCP_ENABLED: undefined,
     });
 
-    expect(config.browserMcpEnabled).toBe(true);
+    expect(config.browserAutomationEnabled).toBe(true);
   });
 
-  it('ignores external browser mcp url overrides', async () => {
+  it('reads the new browser profile dir env', async () => {
     const config = await loadConfigWithEnv({
       WECOM_ENABLED: 'false',
       FEISHU_ENABLED: 'false',
       CODEX_SANDBOX: 'full-auto',
-      BROWSER_MCP_URL: 'http://127.0.0.1:9999/mcp',
+      BROWSER_PROFILE_DIR: '/tmp/browser-profile',
     });
 
-    expect('browserMcpUrl' in config).toBe(false);
+    expect(config.browserProfileDir).toBe('/tmp/browser-profile');
   });
 
-  it('allows explicitly disabling browser mcp', async () => {
+  it('falls back to legacy browser profile dir env for compatibility', async () => {
     const config = await loadConfigWithEnv({
       WECOM_ENABLED: 'false',
       FEISHU_ENABLED: 'false',
       CODEX_SANDBOX: 'full-auto',
+      BROWSER_PROFILE_DIR: undefined,
+      BROWSER_MCP_PROFILE_DIR: '/tmp/legacy-browser-profile',
+    });
+
+    expect(config.browserProfileDir).toBe('/tmp/legacy-browser-profile');
+  });
+
+  it('allows explicitly disabling browser automation', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'false',
+      CODEX_SANDBOX: 'full-auto',
+      BROWSER_AUTOMATION_ENABLED: 'false',
+    });
+
+    expect(config.browserAutomationEnabled).toBe(false);
+  });
+
+  it('falls back to legacy browser mcp flag for compatibility', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'false',
+      CODEX_SANDBOX: 'full-auto',
+      BROWSER_AUTOMATION_ENABLED: undefined,
       BROWSER_MCP_ENABLED: 'false',
     });
 
-    expect(config.browserMcpEnabled).toBe(false);
+    expect(config.browserAutomationEnabled).toBe(false);
   });
 });
 

@@ -250,6 +250,72 @@ describe('FeishuApi', () => {
     });
   });
 
+  it('updates interactive messages using template shorthand', async () => {
+    const updateCalls: Array<{
+      message_id: string;
+      msg_type: string;
+      content: string;
+    }> = [];
+    const sdkClient = {
+      im: {
+        message: {
+          create: vi.fn(),
+          reply: vi.fn(),
+          update: vi.fn(async (payload: {
+            path: { message_id: string };
+            data: { msg_type: string; content: string };
+          }) => {
+            updateCalls.push({
+              message_id: payload.path.message_id,
+              msg_type: payload.data.msg_type,
+              content: payload.data.content,
+            });
+            return { code: 0, msg: 'ok' };
+          }),
+        },
+        image: { create: vi.fn() },
+        file: { create: vi.fn() },
+        messageResource: { get: vi.fn() },
+      },
+    };
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient,
+    });
+
+    await (api as unknown as {
+      updateMessage: (input: {
+        messageId: string;
+        msgType: string;
+        content: Record<string, unknown> | string;
+      }) => Promise<void>;
+    }).updateMessage({
+      messageId: 'om_update_1',
+      msgType: 'interactive',
+      content: {
+        template_id: 'AAqC5c9997YMX',
+        template_variable: { name: '白瑞' },
+      },
+    });
+
+    expect(updateCalls).toEqual([
+      {
+        message_id: 'om_update_1',
+        msg_type: 'interactive',
+        content: JSON.stringify({
+          type: 'template',
+          data: {
+            template_id: 'AAqC5c9997YMX',
+            template_variable: { name: '白瑞' },
+          },
+        }),
+      },
+    ]);
+  });
+
   it('normalizes post text shorthand before sending', async () => {
     const createCalls: Array<{ msg_type: string; content: string }> = [];
     const sdkClient = {
@@ -346,6 +412,62 @@ describe('FeishuApi', () => {
       content: '   ',
     })).rejects.toThrow('feishu send failed: text content is required');
     expect(sdkClient.im.message.create).not.toHaveBeenCalled();
+  });
+
+  it('recalls a sent message through the feishu openapi endpoint', async () => {
+    const fetchCalls: Array<{ url: string; method: string; authorization?: string }> = [];
+    global.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/auth/v3/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'ok',
+            tenant_access_token: 'tenant-token',
+            expire: 7200,
+          }),
+          { status: 200 },
+        );
+      }
+      fetchCalls.push({
+        url,
+        method: init?.method ?? 'GET',
+        authorization: init?.headers instanceof Headers
+          ? init.headers.get('authorization') ?? undefined
+          : (init?.headers as Record<string, string> | undefined)?.authorization,
+      });
+      return new Response(JSON.stringify({ code: 0, msg: 'ok' }), { status: 200 });
+    });
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient: {
+        im: {
+          message: {
+            create: vi.fn(),
+            reply: vi.fn(),
+            update: vi.fn(),
+          },
+          image: { create: vi.fn() },
+          file: { create: vi.fn() },
+          messageResource: { get: vi.fn() },
+        },
+      },
+    });
+
+    await (api as unknown as {
+      recallMessage: (messageId: string) => Promise<void>;
+    }).recallMessage('om_recall_1');
+
+    expect(fetchCalls).toEqual([
+      {
+        url: 'https://open.feishu.cn/open-apis/im/v1/messages/om_recall_1',
+        method: 'DELETE',
+        authorization: 'Bearer tenant-token',
+      },
+    ]);
   });
 
   it('uploads local image path before sending image message', async () => {

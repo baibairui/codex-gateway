@@ -22,6 +22,7 @@ describe('AgentWorkspaceManager', () => {
     expect(fs.existsSync(path.join(result.workspaceDir, 'agent.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'SOUL.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'TOOLS.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, 'feishu-ops-playbook.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'identity.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'profile.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'preferences.md'))).toBe(true);
@@ -31,6 +32,9 @@ describe('AgentWorkspaceManager', () => {
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'open-loops.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'daily', 'README.md'))).toBe(true);
     const identity = fs.readFileSync(path.join(result.workspaceDir, 'memory', 'identity.md'), 'utf8');
+    const tools = fs.readFileSync(path.join(result.workspaceDir, 'TOOLS.md'), 'utf8');
+    const feishuPlaybook = fs.readFileSync(path.join(result.workspaceDir, 'feishu-ops-playbook.md'), 'utf8');
+    const feishuSkill = fs.readFileSync(path.join(result.workspaceDir, '.codex', 'skills', 'feishu-official-ops', 'SKILL.md'), 'utf8');
     expect(identity).toContain('## Global User Identity');
     expect(identity).toContain('## Current Agent Identity');
     expect(identity).toContain('- Agent name: Frontend Pair');
@@ -42,11 +46,26 @@ describe('AgentWorkspaceManager', () => {
     expect(identity).toContain('- Language style:');
     expect(fs.existsSync(path.join(result.workspaceDir, 'browser-playbook.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'gateway-browser', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'gateway-browser', 'scripts', 'gateway-browser.mjs'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'scripts', 'reminder-cli.mjs'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'feishu-official-ops', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'agents', 'openai.yaml'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'shared-context.md'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'house-rules.md'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'users', fs.readdirSync(path.join(dir, 'users'))[0]!, 'shared-memory', 'USER.md'))).toBe(true);
+    expect(tools).toContain('`gateway-browser` skill');
+    expect(tools).toContain('`reminder-tool` skill');
+    expect(tools).toContain('`feishu-official-ops` skill');
+    expect(tools).toContain('自带脚本执行真实 OpenAPI');
+    expect(tools).not.toContain('MCP');
+    expect(tools).not.toContain('gateway_feishu');
+    expect(feishuPlaybook).toContain('`wiki list-spaces`');
+    expect(feishuPlaybook).toContain('`docx create`');
+    expect(feishuPlaybook).toContain('skill 自带执行脚本');
+    expect(feishuPlaybook).not.toContain('gateway_feishu');
+    expect(feishuSkill).toContain('Use the bundled script');
+    expect(feishuSkill).not.toContain('gateway_feishu');
   });
 
   it('creates hidden system memory steward workspace', () => {
@@ -104,7 +123,7 @@ describe('AgentWorkspaceManager', () => {
     expect(agentsMd).toContain('定时提醒职责');
     expect(agentsMd).toContain('./.codex/skills/reminder-tool/SKILL.md');
     expect(checklist).toContain('Skill Install Checklist');
-    expect(reminderSkill).toContain('create_reminder');
+    expect(reminderSkill).toContain('reminder-cli.mjs create');
   });
 
   it('includes browser operation guidance in default agent scaffold', () => {
@@ -127,6 +146,7 @@ describe('AgentWorkspaceManager', () => {
     expect(agentsMd).toContain('多个相似目标并存');
     expect(agentsMd).toContain('文件上传时，若用户未明确授权，先暂停并确认');
     expect(agentsMd).toContain('人工接管触发条件可直接按这组理解');
+    expect(agentsMd).toContain('gateway-browser/SKILL.md');
     expect(playbook).toContain('Browser Playbook');
     expect(playbook).toContain('回报格式固定：已执行动作 -> 页面证据 -> 当前结论 -> 下一步。');
     expect(playbook).toContain('## Status Templates');
@@ -138,6 +158,7 @@ describe('AgentWorkspaceManager', () => {
     expect(playbook).toContain('人工接管触发条件总览');
     expect(playbook).toContain('多个相似目标并存');
     expect(playbook).toContain('需要用户做出的精确决策');
+    expect(playbook).toContain('gateway-browser.mjs');
   });
 
   it('repairs existing workspace scaffold with bootstrap files', () => {
@@ -157,6 +178,44 @@ describe('AgentWorkspaceManager', () => {
 
     expect(fs.existsSync(path.join(created.workspaceDir, 'SOUL.md'))).toBe(true);
     expect(fs.existsSync(path.join(created.workspaceDir, 'TOOLS.md'))).toBe(true);
+  });
+
+  it('repairs legacy browser instructions and reinstalls the browser skill', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-'));
+    const manager = new AgentWorkspaceManager(dir);
+    const created = manager.createWorkspace({
+      userId: 'wecom:u1',
+      agentName: 'Legacy Browser Agent',
+      existingAgentIds: [],
+    });
+
+    fs.writeFileSync(
+      path.join(created.workspaceDir, 'AGENTS.md'),
+      [
+        '# AGENTS.md',
+        '',
+        '浏览器操作职责：',
+        '- 当任务需要网页交互时，只允许使用 gateway 提供的 browser_* MCP 工具完成操作，而不是让用户手工点击。',
+        '- 禁止使用 playwright-cli、npx @playwright/mcp、任何自定义 wrapper script、/open 或其他 shell/browser 启动通道。',
+        '',
+        '开始任何任务前，先阅读这些记忆文件：',
+        '- `./agent.md`',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    fs.rmSync(path.join(created.workspaceDir, '.codex', 'skills', 'gateway-browser'), { recursive: true, force: true });
+    fs.rmSync(path.join(created.workspaceDir, 'TOOLS.md'));
+
+    manager.repairWorkspaceScaffold(created.workspaceDir);
+
+    const agentsMd = fs.readFileSync(path.join(created.workspaceDir, 'AGENTS.md'), 'utf8');
+    expect(fs.existsSync(path.join(created.workspaceDir, '.codex', 'skills', 'gateway-browser', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(created.workspaceDir, 'TOOLS.md'))).toBe(true);
+    expect(agentsMd).toContain('<!-- gateway:browser-rule:start -->');
+    expect(agentsMd).toContain('./.codex/skills/gateway-browser/SKILL.md');
+    expect(agentsMd).not.toContain('browser_* MCP 工具');
+    expect(agentsMd).not.toContain('@playwright/mcp');
   });
 
   it('detects shared memory emptiness by meaningful content', () => {
