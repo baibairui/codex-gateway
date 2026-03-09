@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export interface CodexApiLoginWriteInput {
-  rootDir: string;
+  codexHomeDir: string;
   baseUrl: string;
   apiKey: string;
   model?: string;
@@ -74,7 +74,7 @@ export async function writeCodexApiLoginConfig(input: CodexApiLoginWriteInput): 
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const apiKey = normalizeApiKey(input.apiKey);
   const model = normalizeModel(input.model);
-  const codexDir = path.join(path.resolve(input.rootDir), '.codex');
+  const codexDir = path.resolve(input.codexHomeDir);
   const configPath = path.join(codexDir, 'config.toml');
   const authPath = path.join(codexDir, 'auth.json');
 

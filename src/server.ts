@@ -139,12 +139,12 @@ log.debug('WorkspacePublisher 已初始化', { cwd: gatewayRootDir });
 
 const weComApi = config.wecomEnabled && config.corpId && config.corpSecret && config.agentId !== undefined
   ? new WeComApi({
-      corpId: config.corpId,
-      secret: config.corpSecret,
-      agentId: config.agentId,
-      timeoutMs: config.apiTimeoutMs,
-      retryOnTimeout: config.apiRetryOnTimeout,
-    })
+    corpId: config.corpId,
+    secret: config.corpSecret,
+    agentId: config.agentId,
+    timeoutMs: config.apiTimeoutMs,
+    retryOnTimeout: config.apiRetryOnTimeout,
+  })
   : undefined;
 if (weComApi) {
   log.debug('WeComApi 已初始化');
@@ -152,12 +152,12 @@ if (weComApi) {
 
 const feishuApi = config.feishuEnabled && config.feishuAppId && config.feishuAppSecret
   ? new FeishuApi({
-      appId: config.feishuAppId,
-      appSecret: config.feishuAppSecret,
-      timeoutMs: config.feishuApiTimeoutMs,
-      retryOnTimeout: config.apiRetryOnTimeout,
-      imageCacheDir: feishuImageCacheDir,
-    })
+    appId: config.feishuAppId,
+    appSecret: config.feishuAppSecret,
+    timeoutMs: config.feishuApiTimeoutMs,
+    retryOnTimeout: config.apiRetryOnTimeout,
+    imageCacheDir: feishuImageCacheDir,
+  })
   : undefined;
 if (feishuApi) {
   log.debug('FeishuApi 已初始化');
@@ -165,10 +165,10 @@ if (feishuApi) {
 
 const wecomCrypto = config.wecomEnabled && config.token && config.encodingAesKey && config.corpId
   ? new WeComCrypto({
-      token: config.token,
-      encodingAesKey: config.encodingAesKey,
-      corpId: config.corpId,
-    })
+    token: config.token,
+    encodingAesKey: config.encodingAesKey,
+    corpId: config.corpId,
+  })
   : undefined;
 if (wecomCrypto) {
   log.debug('WeComCrypto 已初始化');
@@ -737,7 +737,7 @@ async function appDepsHandleFeishuCardAction(input: {
   if (input.action === 'codex_login.submit_api_credentials') {
     try {
       const result = await writeCodexApiLoginConfig({
-        rootDir: gatewayRootDir,
+        codexHomeDir,
         baseUrl: extractCardField(input.value, 'base_url') ?? '',
         apiKey: extractCardField(input.value, 'api_key') ?? '',
         model: extractCardField(input.value, 'model') ?? 'gpt-5.3-codex',
