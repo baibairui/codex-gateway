@@ -22,6 +22,18 @@ export interface SharedMemorySnapshot {
   hasIdentity: boolean;
 }
 
+export interface MemorySummaryEntry {
+  fileName: string;
+  summary: string;
+}
+
+export interface MemorySummarySnapshot {
+  sharedMemoryDir: string;
+  workspaceMemoryDir: string;
+  shared: MemorySummaryEntry[];
+  agent: MemorySummaryEntry[];
+}
+
 interface CreateAgentWorkspaceInput {
   userId: string;
   agentName: string;
@@ -223,6 +235,18 @@ export class AgentWorkspaceManager {
       identityContent: combinedContent,
       identityVersion: createHash('sha1').update(versionSeed).digest('hex').slice(0, 16),
       hasIdentity: true,
+    };
+  }
+
+  getMemorySummary(userId: string, workspaceDir: string): MemorySummarySnapshot {
+    const userDir = this.resolveUserDir(userId);
+    const sharedMemoryDir = this.ensureUserSharedMemory(userDir);
+    const workspaceMemoryDir = path.join(workspaceDir, 'memory');
+    return {
+      sharedMemoryDir,
+      workspaceMemoryDir,
+      shared: summarizeMemoryDirectory(sharedMemoryDir),
+      agent: summarizeMemoryDirectory(workspaceMemoryDir),
     };
   }
 
@@ -977,6 +1001,47 @@ function normalizeIdentityText(content: string): string {
     filtered.push(line);
   }
   return filtered.join('\n');
+}
+
+const MEMORY_SUMMARY_FILES = [
+  'identity.md',
+  'profile.md',
+  'preferences.md',
+  'projects.md',
+  'relationships.md',
+  'decisions.md',
+  'open-loops.md',
+];
+
+function summarizeMemoryDirectory(memoryDir: string): MemorySummaryEntry[] {
+  return MEMORY_SUMMARY_FILES.flatMap((fileName) => {
+    const filePath = path.join(memoryDir, fileName);
+    if (!fs.existsSync(filePath)) {
+      return [];
+    }
+    const content = fs.readFileSync(filePath, 'utf8');
+    if (!hasMeaningfulMemoryContent(content)) {
+      return [];
+    }
+    return [{
+      fileName,
+      summary: summarizeMemoryContent(content),
+    }];
+  });
+}
+
+function summarizeMemoryContent(content: string): string {
+  const lines = content
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('#'));
+  if (lines.length === 0) {
+    return '(已初始化，但当前没有可展示内容)';
+  }
+  const preview = lines.slice(0, 4).join(' / ');
+  return preview.length <= 240 ? preview : `${preview.slice(0, 237)}...`;
 }
 
 function stripIdentityTitle(content: string): string[] {

@@ -1,6 +1,7 @@
 import { commandNeedsAgentList, commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from '../features/user-command.js';
 import path from 'node:path';
 import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/session-store.js';
+import type { MemorySummarySnapshot } from './agent-workspace-manager.js';
 import { formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
 import { formatCommandOutboundMessage } from './feishu-command-cards.js';
@@ -93,6 +94,7 @@ interface AgentWorkspaceManagerLike {
     identityVersion: string;
     hasIdentity: boolean;
   };
+  getMemorySummary?: (userId: string, workspaceDir: string) => MemorySummarySnapshot;
 }
 
 interface ChatHandlerDeps {
@@ -246,6 +248,25 @@ function formatAgentVisibleReply(agent: { name: string }, text: string): string 
     return text;
   }
   return `${prefix}${text}`;
+}
+
+function formatMemorySummary(agent: AgentRecord, snapshot: MemorySummarySnapshot): string {
+  const sharedLines = snapshot.shared.length > 0
+    ? snapshot.shared.map((entry, index) => `${index + 1}. ${entry.fileName}: ${entry.summary}`)
+    : ['(shared-memory 当前没有已初始化内容)'];
+  const agentLines = snapshot.agent.length > 0
+    ? snapshot.agent.map((entry, index) => `${index + 1}. ${entry.fileName}: ${entry.summary}`)
+    : ['(当前 agent memory 当前没有已初始化内容)'];
+  return [
+    `当前 agent：${agent.name} (${agent.agentId})`,
+    `工作区：${agent.workspaceDir}`,
+    '',
+    '【Shared Memory】',
+    ...sharedLines,
+    '',
+    '【Agent Memory】',
+    ...agentLines,
+  ].join('\n');
 }
 
 function buildIdentityBootstrapPrompt(identityContent: string): string {
@@ -910,6 +931,15 @@ ${clipMessage(text, 500)}
         if (commandResult.message) {
           await sendCommandText(commandResult.message);
         }
+        return;
+      }
+      if (commandResult.queryMemory) {
+        if (!deps.agentWorkspaceManager.getMemorySummary) {
+          await sendCommandText('⚠️ 当前版本未启用记忆摘要读取能力。');
+          return;
+        }
+        const snapshot = deps.agentWorkspaceManager.getMemorySummary(sessionUserKey, currentAgent.workspaceDir);
+        await sendCommandText(formatMemorySummary(currentAgent, snapshot));
         return;
       }
       if (commandResult.queryModel) {

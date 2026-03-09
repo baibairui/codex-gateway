@@ -33,6 +33,7 @@ export interface UserCommandResult {
   repairUsers?: boolean;
   queryAgent?: boolean;
   queryAgents?: boolean;
+  queryMemory?: boolean;
   createAgentName?: string;
   createAgentTemplate?: 'default' | 'memory-onboarding' | 'skill-onboarding';
   initMemoryAgent?: boolean;
@@ -100,6 +101,7 @@ const HELP_PAGES: Array<{ title: string; lines: string[] }> = [
       '/switch [编号|threadId] - 切换会话',
       '/agents - 查看 agent 列表',
       '/agent - 查看当前 agent',
+      '/memory - 查看当前 agent 与 shared-memory 摘要',
       '/agent create [名称] - 创建独立 agent 工作区',
       '/agent use [编号|agentId] - 切换 agent',
       '/skill-agent - 启动技能扩展助手 agent',
@@ -184,6 +186,11 @@ export function handleUserCommand(content: string, context: UserCommandContext =
         handled: true,
         queryAgents: true,
         message: formatAgents(context.currentAgent, context.agents ?? []),
+      };
+    case '/memory':
+      return {
+        handled: true,
+        queryMemory: true,
       };
     case '/agent': {
       const sub = (parts[1] ?? '').toLowerCase();

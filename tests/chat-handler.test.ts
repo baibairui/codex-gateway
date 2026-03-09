@@ -324,6 +324,57 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', structured);
   });
 
+  it('renders current agent and shared memory summary via /memory', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'unused', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+        getMemorySummary: () => ({
+          sharedMemoryDir: '/tmp/shared-memory',
+          workspaceMemoryDir: '/repo/default/memory',
+          shared: [
+            { fileName: 'identity.md', summary: '叫我白瑞 / 中文交流 / 不弄虚作假' },
+          ],
+          agent: [
+            { fileName: 'projects.md', summary: 'wecom-codex-gateway 优化中' },
+          ],
+        }),
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/memory' });
+
+    expect(sendText).toHaveBeenCalledWith(
+      'wecom',
+      'u1',
+      expect.stringContaining('【Shared Memory】'),
+    );
+    expect(sendText).toHaveBeenCalledWith(
+      'wecom',
+      'u1',
+      expect.stringContaining('identity.md: 叫我白瑞 / 中文交流 / 不弄虚作假'),
+    );
+    expect(sendText).toHaveBeenCalledWith(
+      'wecom',
+      'u1',
+      expect.stringContaining('【Agent Memory】'),
+    );
+  });
+
   it('pushes help card automatically when a new feishu session starts', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async (input: { onMessage?: (text: string) => void }) => {
