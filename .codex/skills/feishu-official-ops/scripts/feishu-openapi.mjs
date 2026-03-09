@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
 
@@ -224,30 +225,10 @@ function resolveMarkdownInput(args) {
 }
 
 async function appendMarkdownToDocx(token, documentId, markdown) {
-  const lines = String(markdown)
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => line.trimEnd());
-  const normalizedLines = lines
-    .map(normalizeMarkdownLine)
-    .filter((line, index, arr) => line !== '' || (index > 0 && arr[index - 1] !== ''));
-
-  if (normalizedLines.length === 0) {
+  const children = markdownToDocxChildren(markdown);
+  if (children.length === 0) {
     return { ok: true, blocks_appended: 0 };
   }
-
-  const children = normalizedLines.map((line) => ({
-    block_type: 2,
-    text: {
-      elements: [
-        {
-          text_run: {
-            content: line || ' ',
-          },
-        },
-      ],
-    },
-  }));
 
   let appended = 0;
   for (const chunk of chunkArray(children, 20)) {
@@ -268,28 +249,150 @@ async function appendMarkdownToDocx(token, documentId, markdown) {
   };
 }
 
-function normalizeMarkdownLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return '';
+export function markdownToDocxChildren(markdown) {
+  const lines = String(markdown ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trimEnd());
+
+  const blocks = [];
+  let inCodeBlock = false;
+  let codeBuffer = [];
+
+  const flushCodeBlock = () => {
+    if (!codeBuffer.length) {
+      return;
+    }
+    blocks.push(createTextBlock(14, 'code', codeBuffer.join('\n')));
+    codeBuffer = [];
+  };
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+
+    if (trimmed.startsWith('```')) {
+      if (inCodeBlock) {
+        flushCodeBlock();
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBuffer.push(rawLine);
+      continue;
+    }
+
+    if (!trimmed) {
+      const last = blocks[blocks.length - 1];
+      if (last?.block_type !== 22) {
+        blocks.push({ block_type: 22, divider: {} });
+      }
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      const level = Math.min(heading[1].length, 6);
+      blocks.push(createTextBlock(level + 2, `heading${level}`, heading[2]));
+      continue;
+    }
+
+    const quote = trimmed.match(/^>\s?(.*)$/);
+    if (quote) {
+      blocks.push(createTextBlock(15, 'quote', quote[1]));
+      continue;
+    }
+
+    const ordered = trimmed.match(/^(\d+)\.\s+(.*)$/);
+    if (ordered) {
+      blocks.push(createTextBlock(13, 'ordered', ordered[2]));
+      continue;
+    }
+
+    const bullet = trimmed.match(/^[-*+]\s+(.*)$/);
+    if (bullet) {
+      blocks.push(createTextBlock(12, 'bullet', bullet[1]));
+      continue;
+    }
+
+    blocks.push(createTextBlock(2, 'text', trimmed));
   }
-  const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
-  if (heading) {
-    return heading[2]?.trim() || '';
+
+  if (inCodeBlock) {
+    flushCodeBlock();
   }
-  const bullet = trimmed.match(/^[-*+]\s+(.*)$/);
-  if (bullet) {
-    return `• ${bullet[1]?.trim() || ''}`;
+
+  return blocks.filter((block, index, arr) => {
+    if (block.block_type !== 22) {
+      return true;
+    }
+    const prev = arr[index - 1];
+    const next = arr[index + 1];
+    return !!prev && !!next && prev.block_type !== 22 && next.block_type !== 22;
+  });
+}
+
+function createTextBlock(blockType, field, content) {
+  return {
+    block_type: blockType,
+    [field]: {
+      elements: buildTextElements(content),
+    },
+  };
+}
+
+function buildTextElements(content) {
+  const text = String(content ?? '').trim();
+  if (!text) {
+    return [{ text_run: { content: ' ' } }];
   }
-  const ordered = trimmed.match(/^\d+\.\s+(.*)$/);
-  if (ordered) {
-    return ordered[1]?.trim() || '';
+
+  const elements = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g;
+  let cursor = 0;
+
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      elements.push({ text_run: { content: text.slice(cursor, index) } });
+    }
+    const token = match[0];
+    if (token.startsWith('`') && token.endsWith('`')) {
+      elements.push({
+        text_run: {
+          content: token.slice(1, -1),
+          text_element_style: { inline_code: true },
+        },
+      });
+    } else if (token.startsWith('**') && token.endsWith('**')) {
+      elements.push({
+        text_run: {
+          content: token.slice(2, -2),
+          text_element_style: { bold: true },
+        },
+      });
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (link) {
+        elements.push({
+          text_run: {
+            content: link[1],
+            link: { url: link[2] },
+          },
+        });
+      }
+    }
+    cursor = index + token.length;
   }
-  const quote = trimmed.match(/^>\s*(.*)$/);
-  if (quote) {
-    return quote[1]?.trim() || '';
+
+  if (cursor < text.length) {
+    elements.push({ text_run: { content: text.slice(cursor) } });
   }
-  return trimmed;
+
+  return elements.length ? elements : [{ text_run: { content: text } }];
 }
 
 function chunkArray(items, size) {
@@ -300,7 +403,9 @@ function chunkArray(items, size) {
   return chunks;
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+  main().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
