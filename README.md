@@ -53,6 +53,11 @@
 
 当前内置的飞书官方操作 skill 还可以让 agent 执行真实的飞书 OpenAPI 动作，例如：
 
+- 读取历史消息、搜索消息
+- 读取 DocX / 云文档内容
+- 查询多维表格数据表和记录
+- 查询日历、日程和忙闲时间
+- 创建和查询任务、子任务
 - 创建新版飞书文档（DocX）
 - 列出知识库空间
 - 在知识库里创建节点（例如 DocX 节点）
@@ -140,6 +145,7 @@ WEWORK_ENCODING_AES_KEY=你配置的43位EncodingAESKey
 CODEX_BIN=codex
 CODEX_WORKDIR=/你的项目绝对路径
 CODEX_SANDBOX=full-auto
+CODEX_WORKDIR_ISOLATION=off
 RUNNER_ENABLED=true
 CODEX_SEARCH=false
 ```
@@ -157,6 +163,7 @@ CODEX_SEARCH=false
 - `GATEWAY_ROOT_DIR`：可选。workspace 发布命令运行目录（默认当前进程工作目录）
 - `CODEX_AGENTS_DIR`：可选。默认使用当前项目 `.data/agents`
 - `CODEX_SANDBOX`：Codex 执行沙箱模式，通常用 `full-auto`
+- `CODEX_WORKDIR_ISOLATION`：可选。`off` 或 `bwrap`。设为 `bwrap` 时，gateway 会用 bubblewrap 把 Codex 进程限制在当前 agent 工作目录的可见文件系统视图内，并把 Codex 的运行时 HOME 放到该工作区内的 `.codex-runtime/home`
 - `RUNNER_ENABLED`：是否允许网关实际调用 Codex
 - `CODEX_SEARCH`：默认是否开启联网搜索
 - `BROWSER_MCP_ENABLED`：默认开启；只有你明确不需要浏览器自动化时，才设为 `false`
@@ -171,6 +178,17 @@ CODEX_SEARCH=false
 - 所有 agent 默认共用同一套浏览器 profile，所以登录态可以复用
 - 浏览器窗口只有在手动关闭它或 gateway 退出时才会结束
 - 录屏工具已支持：`browser_start_recording` 开始录制、`browser_stop_recording` 停止并产出本地 mp4；宿主机需安装 `ffmpeg`
+
+工作目录隔离说明：
+
+- 仅设置 `CODEX_WORKDIR` 只能决定“默认从哪个目录启动”，不能保证 agent 只能看到该目录。
+- 如果你要的是更硬的目录隔离，而又不想退回 `CODEX_SANDBOX=full-auto`，建议开启 `CODEX_WORKDIR_ISOLATION=bwrap`。
+- `bwrap` 模式要求宿主机安装 `bubblewrap`（命令通常是 `bwrap`）。
+- 在该模式下，Codex 进程只会看到：
+  - 当前 agent 工作目录（挂载为 `/workspace`，可写）
+  - 必要的系统运行时目录（只读）
+  - 工作区内的 `.codex-runtime/home` 作为 Codex 自己的 HOME
+- 这样 agent 不会再直接看到宿主机上的其他项目目录、其他 agent 工作区或 gateway 源码目录。
 
 Agent 浏览器操作指南（推荐）：
 
@@ -203,10 +221,11 @@ WECOM_ENABLED=false
 FEISHU_ENABLED=true
 FEISHU_APP_ID=你的飞书AppID
 FEISHU_APP_SECRET=你的飞书AppSecret
-FEISHU_DOC_BASE_URL=https://你的飞书域名/docx
 FEISHU_LONG_CONNECTION=true
 FEISHU_VERIFICATION_TOKEN=你的校验Token
 FEISHU_GROUP_REQUIRE_MENTION=true
+# 可选：固定的项目迭代 DocX 文档引用（支持 id / token / url）
+# FEISHU_ITERATION_DOCX_REF=https://feishu.cn/docx/EChBdybp4oCAf2x6VqqcXQhmnvh
 ```
 
 说明：
@@ -215,13 +234,15 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 - 开启 `FEISHU_LONG_CONNECTION=true` 后，会关闭 `/feishu/callback` webhook 接口（不再做兜底双通道）
 - `FEISHU_VERIFICATION_TOKEN`：仅 webhook 模式需要；长连接模式可留空
 - `FEISHU_GROUP_REQUIRE_MENTION=true`：群聊默认要求 `@机器人` 才触发；私聊不受影响。显式设为 `false` 可恢复“群里任何消息都触发”
-- `FEISHU_DOC_BASE_URL`：可选。用于飞书官方操作 CLI 在创建 DocX 后直接返回可访问文档链接，例如 `https://你的飞书域名/docx`
+- DocX 链接默认由系统基于 `document_id` 自动生成，不要求用户额外配置 URL
+- `FEISHU_ITERATION_DOCX_REF`：可选。用于把每轮迭代记录追加到固定的项目 DocX 文档；支持 `document_id`、token 或飞书文档 URL
+- `FEISHU_ITERATION_DOCX_ID`：兼容旧配置，仍可继续使用，但推荐升级为 `FEISHU_ITERATION_DOCX_REF`
 
 安装建议：
 
 - 优先使用 `codexclaw setup` 完成飞书配置
 - 配完后立刻执行 `codexclaw doctor`
-- `doctor` 会直接告诉你：当前是长连接还是 webhook、飞书凭据是否缺失、群触发策略是否开启、DocX 链接域名是否配置
+- `doctor` 会直接告诉你：当前是长连接还是 webhook、飞书凭据是否缺失、群触发策略是否开启、DocX 链路是否可直接使用
 
 ### 飞书能力说明（当前实现）
 
@@ -253,6 +274,11 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 
 它当前封装了飞书官方 OpenAPI 的这些能力：
 
+- `im get-message` / `im list-messages` / `im search-messages`：读取历史消息、搜索消息
+- `doc get-content` / `doc get-raw-content`：读取 DocX markdown / 纯文本内容
+- `bitable list-tables` / `bitable list-records` / `bitable search-records`：查询多维表格结构与记录
+- `calendar list-calendars` / `calendar list-events` / `calendar freebusy`：查询日历、日程和忙闲时间
+- `task create` / `task list` / `task get` / `task update` / `task create-subtask`：任务与子任务操作
 - `docx create`：创建新版文档
 - `wiki list-spaces`：列出知识空间
 - `wiki get-node`：查询知识空间节点
@@ -261,7 +287,7 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 前提：
 
 - 已配置 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`
-- 飞书应用已开通对应的 DocX / Wiki OpenAPI 权限
+- 飞书应用已开通对应的 IM / Docs / Bitable / Calendar / Task / Wiki OpenAPI 权限
 
 完整配置模板见 [.env.example](./.env.example)。
 

@@ -123,6 +123,14 @@ export class AgentWorkspaceManager {
       path.join(workspaceDir, 'README.md'),
       renderWorkspaceReadme(input.agentName, agentId, template),
     );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'SOUL.md'),
+      renderSoulBootstrap(input.agentName, agentId, template),
+    );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'TOOLS.md'),
+      renderToolsBootstrap(),
+    );
     if (template === 'memory-onboarding') {
       this.writeIfMissing(
         path.join(workspaceDir, 'memory-init-checklist.md'),
@@ -273,6 +281,14 @@ export class AgentWorkspaceManager {
       path.join(workspaceDir, 'README.md'),
       renderSystemMemoryStewardReadme(),
     );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'SOUL.md'),
+      renderSystemMemoryStewardSoul(),
+    );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'TOOLS.md'),
+      renderToolsBootstrap(),
+    );
 
     return {
       workspaceDir,
@@ -322,6 +338,7 @@ export class AgentWorkspaceManager {
     const sharedMemoryDir = path.join(userDir, 'shared-memory');
     fs.mkdirSync(path.join(sharedMemoryDir, 'daily'), { recursive: true });
 
+    this.writeIfMissing(path.join(sharedMemoryDir, 'USER.md'), renderUserBootstrap());
     this.writeIfMissing(path.join(sharedMemoryDir, 'profile.md'), renderProfileMemory());
     this.writeIfMissing(path.join(sharedMemoryDir, 'identity.md'), renderIdentityMemory());
     this.upgradeIdentityTemplateFile(path.join(sharedMemoryDir, 'identity.md'));
@@ -351,6 +368,22 @@ export class AgentWorkspaceManager {
     );
 
     return sharedMemoryDir;
+  }
+
+  repairWorkspaceScaffold(workspaceDir: string): void {
+    const meta = readWorkspaceMeta(workspaceDir);
+    installGatewayBrowserSkill(workspaceDir);
+    installReminderToolSkill(workspaceDir);
+    installFeishuOfficialOpsSkill(workspaceDir);
+    this.writeIfMissing(path.join(workspaceDir, 'browser-playbook.md'), renderBrowserPlaybook());
+    this.writeIfMissing(path.join(workspaceDir, 'feishu-ops-playbook.md'), renderFeishuOpsPlaybook());
+    this.writeIfMissing(path.join(workspaceDir, 'SOUL.md'), renderSoulBootstrap(meta.agentName, meta.agentId, meta.template));
+    this.writeIfMissing(path.join(workspaceDir, 'TOOLS.md'), renderToolsBootstrap());
+    this.upgradeWorkspaceAgentsBootstrapReferences(workspaceDir);
+  }
+
+  repairUserSharedMemoryTree(userDir: string): string {
+    return this.ensureUserSharedMemory(userDir);
   }
 
   private writeIfMissing(filePath: string, content: string): void {
@@ -394,6 +427,24 @@ export class AgentWorkspaceManager {
       const identityPath = path.join(userDir, entry.name, 'memory', 'identity.md');
       this.upgradeIdentityTemplateFile(identityPath);
     }
+  }
+
+  private upgradeWorkspaceAgentsBootstrapReferences(workspaceDir: string): void {
+    const agentsPath = path.join(workspaceDir, 'AGENTS.md');
+    if (!fs.existsSync(agentsPath)) {
+      return;
+    }
+    const content = fs.readFileSync(agentsPath, 'utf8');
+    if (content.includes('`./SOUL.md`') && content.includes('`./TOOLS.md`')) {
+      return;
+    }
+    const marker = '开始任何任务前，先阅读这些记忆文件：';
+    if (content.includes(marker)) {
+      const next = content.replace(marker, `${marker}\n- \`./SOUL.md\`\n- \`./TOOLS.md\``);
+      fs.writeFileSync(agentsPath, next, 'utf8');
+      return;
+    }
+    fs.writeFileSync(agentsPath, `${content.trimEnd()}\n\n- \`./SOUL.md\`\n- \`./TOOLS.md\`\n`, 'utf8');
   }
 
   private resolveInitialAgentIdentityContent(
@@ -451,8 +502,8 @@ function renderWorkspaceAgentsMd(
     '',
     ...onboardingRules,
     '浏览器操作职责：',
-    '- 当任务需要网页交互时，只允许使用 gateway 提供的 browser_* MCP 工具完成操作，不要让用户手工点击。',
-    '- 禁止使用 playwright-cli、npx @playwright/mcp、任何自定义 wrapper script、/open 或其他 shell/browser 启动通道。',
+    '- 当任务需要网页交互时，只允许使用 `./.codex/skills/gateway-browser/SKILL.md` 及其自带脚本完成操作，不要让用户手工点击。',
+    '- 禁止直接使用 playwright-cli、任何自定义 wrapper script、/open 或其他 shell/browser 启动通道。',
     '- 每次操作前先说明计划步骤，操作后按“Action / Evidence / Result / Next step”回报。',
     '- 页面意图模糊、多个相似目标并存、或预期状态未出现时，先暂停并请求用户决策。',
     '- 涉及提交、发布、支付、外部数据发送、文件上传时，若用户未明确授权，先暂停并确认。',
@@ -462,10 +513,12 @@ function renderWorkspaceAgentsMd(
     '',
     '定时提醒职责：',
     '- 当用户提出“稍后提醒我”这类需求时，不要要求用户输入 `/remind` 命令。',
-    '- 优先使用 `./.codex/skills/reminder-tool/SKILL.md`，并调用 `create_reminder` 工具创建提醒。',
+    '- 优先使用 `./.codex/skills/reminder-tool/SKILL.md`，并执行 skill 自带脚本创建提醒。',
     '- 不要输出 reminder-action 文本块，也不要要求用户输入 `/remind`。',
     '',
     '开始任何任务前，先阅读这些记忆文件：',
+    '- `./SOUL.md`',
+    '- `./TOOLS.md`',
     '- `./agent.md`',
     '- `./memory/identity.md`',
     '- `./memory/profile.md`',
@@ -477,6 +530,7 @@ function renderWorkspaceAgentsMd(
     '- `./browser-playbook.md`',
     '- `./feishu-ops-playbook.md`',
     `- \`${sharedDir}/identity.md\``,
+    `- \`${sharedDir}/USER.md\``,
     `- \`${sharedDir}/profile.md\``,
     `- \`${sharedDir}/preferences.md\``,
     `- \`${sharedDir}/projects.md\``,
@@ -627,13 +681,13 @@ function renderBrowserPlaybook(): string {
     '- 使用单一持久化浏览器 profile（不做多用户隔离）。',
     '- 优先非无头模式，尽量复用已有登录态。',
     '- 目标：稳定完成任务，不追求反检测伪装。',
-    '- 唯一允许的浏览器通道是 gateway 暴露的 browser_* MCP 工具。',
+    '- 唯一允许的浏览器通道是 `./.codex/skills/gateway-browser/scripts/gateway-browser.mjs`。',
     '',
     '## Standard Workflow',
     '1. 先确认目标、成功标准、约束（是否允许跳转外站、是否允许提交表单、是否需要保留当前页面状态）。',
-    '2. 默认复用当前标签页：先 browser_snapshot，再决定是否 browser_navigate；避免无意义新建标签页。',
-    '3. 执行时只做小步操作：browser_click / browser_type / browser_select_option / browser_press_key / browser_wait_for。',
-    '4. 每完成一个关键动作都要二次确认：再次 browser_snapshot 或 browser_take_screenshot，确保页面状态符合预期。',
+    '2. 默认复用当前标签页：先 `snapshot`，再决定是否 `navigate`；避免无意义新建标签页。',
+    '3. 执行时只做小步操作：`click` / `type` / `select-option` / `press-key` / `wait-for`。',
+    '4. 每完成一个关键动作都要二次确认：再次 `snapshot` 或 `screenshot`，确保页面状态符合预期。',
     '5. 回报格式固定：已执行动作 -> 页面证据 -> 当前结论 -> 下一步。',
     '6. 出现歧义、高风险提交或作用域意外变化时，不继续自动推进，先停下并请求用户决策。',
     '',
@@ -646,14 +700,14 @@ function renderBrowserPlaybook(): string {
     '## Login & QR Flow',
     `- 人工接管触发条件总览：${BROWSER_HANDOFF_TRIGGER_SUMMARY}。`,
     '- 需要账号登录、OTP、验证码、扫码、支付确认时，立即切换为“人工接管”。',
-    '- 扫码登录场景：先等待二维码渲染完成，再 browser_take_screenshot 输出截图给用户。',
+    '- 扫码登录场景：先等待二维码渲染完成，再 `screenshot` 输出截图给用户。',
     '- 人工接管阶段不继续自动点击，明确等待用户回复“继续”。',
-    '- 用户回复“继续”后先做一次 browser_snapshot 校验登录态，再恢复后续步骤。',
+    '- 用户回复“继续”后先做一次 `snapshot` 校验登录态，再恢复后续步骤。',
     '',
     '## Tab & Recording Rules',
     '- 默认不主动关闭当前标签页；只有用户明确要求时才 close 或切 tab。',
     '- 只有用户明确要求多标签并行时才创建新标签。',
-    '- 需要录屏时，先 browser_start_recording，流程结束后立即 browser_stop_recording 返回 mp4 路径。',
+    '- 需要录屏时，先 `start-recording`，流程结束后立即 `stop-recording` 返回 mp4 路径。',
     '',
     '## Retry Policy',
     '- 页面未按预期变化时，先 wait_for 或 snapshot 复核，再决定是否重试。',
@@ -669,7 +723,7 @@ function renderBrowserPlaybook(): string {
     '## Guardrails',
     '- 未看到页面证据前，不得声称“已完成”。',
     '- 不得伪造执行结果、页面状态、截图内容。',
-    '- 不得绕开 gateway browser_* 通道改走 playwright-cli、npx @playwright/mcp、shell 脚本或其他浏览器入口。',
+    '- 不得绕开 gateway-browser skill 自带脚本改走其他浏览器入口。',
     '- 面向用户的回复中不要泄露内部路径、文件名、实现细节。',
     '',
     '## Output Style',
@@ -684,7 +738,7 @@ function renderFeishuOpsPlaybook(): string {
     '',
     '## Scope',
     '- 目标是执行真实飞书 OpenAPI 操作（DocX / Wiki），不是口头承诺。',
-    '- 优先使用 `./.codex/skills/feishu-official-ops/SKILL.md` 及其 CLI。',
+    '- 优先使用 `./.codex/skills/feishu-official-ops/SKILL.md` 和 skill 自带执行脚本。',
     '',
     '## Standard Workflow',
     '1. 明确目标：创建文档、创建 wiki 节点、查询节点、列出空间。',
@@ -719,7 +773,10 @@ function renderSystemMemoryStewardAgentsMd(relativeGlobalDir: string, relativeSh
     '- 把只适合短期保留的信息留在 daily 目录，不要污染长期记忆。',
     '',
     '开始任务前，先阅读这些文件：',
+    '- `./SOUL.md`',
+    '- `./TOOLS.md`',
     '- `./agent.md`',
+    `- \`${sharedDir}/USER.md\``,
     `- \`${sharedDir}/README.md\``,
     `- \`${sharedDir}/identity.md\``,
     `- \`${sharedDir}/profile.md\``,
@@ -763,6 +820,90 @@ function renderSystemMemoryStewardReadme(): string {
   ].join('\n');
 }
 
+function renderUserBootstrap(): string {
+  return [
+    '# USER',
+    '',
+    '这个文件用于给工作区提供一个稳定入口，快速理解“用户是谁”。',
+    '真实内容仍以同目录下的长期记忆文件为准，尤其是：',
+    '- `identity.md`: 用户身份内核',
+    '- `profile.md`: 用户稳定画像',
+    '- `preferences.md`: 用户偏好',
+    '- `projects.md`: 长期项目',
+    '- `relationships.md`: 重要关系',
+    '- `decisions.md`: 已确认决定',
+    '- `open-loops.md`: 待继续跟进事项',
+    '',
+    '使用规则：',
+    '- 先读 `identity.md`，再读其余文件。',
+    '- 这里是入口索引，不在此重复维护事实，避免双写漂移。',
+    '',
+  ].join('\n');
+}
+
+function renderSoulBootstrap(
+  agentName: string,
+  agentId: string,
+  template: 'default' | 'memory-onboarding' | 'skill-onboarding',
+): string {
+  const role = template === 'memory-onboarding'
+    ? '记忆初始化引导'
+    : template === 'skill-onboarding'
+    ? '技能扩展助手'
+    : agentName;
+  return [
+    '# SOUL',
+    '',
+    `- Agent name: ${agentName}`,
+    `- Agent ID: ${agentId}`,
+    `- Role: ${role}`,
+    '',
+    '执行原则：',
+    '- 先基于事实回答，不编造执行结果。',
+    '- 优先做完整方案，不做“兼容一下”的半途修改。',
+    '- 当前工作区的 `memory/identity.md` 定义当前 agent 身份；共享用户身份由上层 `shared-memory/identity.md` 定义。',
+    '- 两者同时生效，不可互相替代。',
+    '',
+    '工作方式：',
+    '- 先理解目标和约束，再动手执行。',
+    '- 输出要短、直接、可验证。',
+    '- 需要真实外部动作时，只能通过已接入的工具链完成，不能口头假装完成。',
+    '',
+  ].join('\n');
+}
+
+function renderToolsBootstrap(): string {
+  return [
+    '# TOOLS',
+    '',
+    '优先工具通道：',
+    '- 浏览器任务：只用 `gateway-browser` skill，自带脚本执行真实浏览器动作。',
+    '- 定时提醒：只用 `reminder-tool` skill，自带脚本创建提醒。',
+    '- 飞书官方写文档 / wiki：只用 `feishu-official-ops` skill，自带脚本执行真实 OpenAPI。',
+    '',
+    '通用规则：',
+    '- 没有真实执行证据前，不得声称完成。',
+    '- 需要登录、验证码、扫码、支付、权限确认时，必须切人工接管。',
+    '- 动作前先明确目标，动作后给出证据、结果、下一步。',
+    '',
+  ].join('\n');
+}
+
+function renderSystemMemoryStewardSoul(): string {
+  return [
+    '# SOUL',
+    '',
+    '- Role: System Memory Steward',
+    '- Scope: 只维护 shared-memory，不作为通用对话助手。',
+    '',
+    '执行原则：',
+    '- 只保留跨会话稳定、未来仍值得读取的信息。',
+    '- 高敏感信息不直接写长期记忆，先记录待确认项。',
+    '- 避免重复、近义改写和噪声堆积。',
+    '',
+  ].join('\n');
+}
+
 function renderProfileMemory(): string {
   return [
     '# Profile',
@@ -779,6 +920,46 @@ function renderProfileMemory(): string {
     '-',
     '',
   ].join('\n');
+}
+
+function readWorkspaceMeta(workspaceDir: string): {
+  agentName: string;
+  agentId: string;
+  template: 'default' | 'memory-onboarding' | 'skill-onboarding';
+} {
+  const agentMdPath = path.join(workspaceDir, 'agent.md');
+  const fallbackAgentId = path.basename(workspaceDir);
+  if (!fs.existsSync(agentMdPath)) {
+    return {
+      agentName: fallbackAgentId,
+      agentId: fallbackAgentId,
+      template: resolveTemplateFromAgentId(fallbackAgentId),
+    };
+  }
+  const content = fs.readFileSync(agentMdPath, 'utf8');
+  const agentName = matchField(content, 'Agent Name') ?? fallbackAgentId;
+  const agentId = matchField(content, 'Agent ID') ?? fallbackAgentId;
+  return {
+    agentName,
+    agentId,
+    template: resolveTemplateFromAgentId(agentId),
+  };
+}
+
+function matchField(content: string, label: string): string | undefined {
+  const pattern = new RegExp(`^-\\s+${label}:\\s*(.+)$`, 'im');
+  const value = content.match(pattern)?.[1]?.trim();
+  return value || undefined;
+}
+
+function resolveTemplateFromAgentId(agentId: string): 'default' | 'memory-onboarding' | 'skill-onboarding' {
+  if (agentId === MEMORY_ONBOARDING_AGENT_ID) {
+    return 'memory-onboarding';
+  }
+  if (agentId === SKILL_ONBOARDING_AGENT_ID) {
+    return 'skill-onboarding';
+  }
+  return 'default';
 }
 
 function renderIdentityMemory(): string {

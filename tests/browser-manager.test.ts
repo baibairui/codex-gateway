@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { BrowserManager, type BrowserContextLike, type BrowserLauncher, type BrowserPageLike } from '../src/services/browser-manager.js';
+import {
+  BrowserManager,
+  resolveBrowserLaunchMode,
+  type BrowserContextLike,
+  type BrowserLauncher,
+  type BrowserPageLike,
+} from '../src/services/browser-manager.js';
 
 class FakeLocator {
   async click(): Promise<void> {}
@@ -86,6 +92,27 @@ class FakeContext implements BrowserContextLike {
 }
 
 describe('BrowserManager', () => {
+  it('prefers xvfb when no DISPLAY is available and xvfb-run exists', () => {
+    expect(resolveBrowserLaunchMode(
+      { DISPLAY: '', GATEWAY_FORCE_XVFB: 'false' },
+      { hasXvfbRun: true },
+    )).toBe('xvfb');
+  });
+
+  it('falls back to headless when no DISPLAY and xvfb-run is unavailable', () => {
+    expect(resolveBrowserLaunchMode(
+      { DISPLAY: '' },
+      { hasXvfbRun: false },
+    )).toBe('headless');
+  });
+
+  it('keeps normal display launch when DISPLAY is already set', () => {
+    expect(resolveBrowserLaunchMode(
+      { DISPLAY: ':0' },
+      { hasXvfbRun: true },
+    )).toBe('display');
+  });
+
   it('lazily starts browser context on first tab request', async () => {
     let launches = 0;
     const launcher: BrowserLauncher = async () => {

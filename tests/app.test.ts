@@ -118,7 +118,7 @@ describe('createApp wecom toggle', () => {
     expect(payload.channels?.feishu?.mode).toBe('long-connection');
     expect(payload.channels?.feishu?.webhookEnabled).toBe(false);
     expect(payload.channels?.feishu?.groupRequireMention).toBe(true);
-    expect(payload.channels?.feishu?.docBaseUrlConfigured).toBe(false);
+    expect(payload.channels?.feishu?.docBaseUrlConfigured).toBe(true);
     expect(payload.channels?.feishu?.startupHelpEnabled).toBe(false);
     expect(payload.channels?.feishu?.startupHelpAdminConfigured).toBe(false);
   });

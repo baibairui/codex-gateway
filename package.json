@@ -9,6 +9,7 @@
     "start": "node ./bin/start-gateway.mjs start",
     "up": "node ./bin/start-gateway.mjs dev",
     "build": "tsc -p tsconfig.json",
+    "docx:append-iteration": "npm run build && node dist/scripts/append-iteration-doc.js",
     "repair:users": "npm run build && node dist/scripts/repair-users.js",
     "config:check": "node ./bin/config-check.mjs",
     "publish:workspace": "node ./bin/publish-workspace.mjs"
@@ -38,8 +39,6 @@
   "type": "module",
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.59.0",
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "@playwright/mcp": "0.0.68",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "playwright": "^1.58.2",
