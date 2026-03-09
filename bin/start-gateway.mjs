@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { buildStartupFailureHints } from './lib/install-hints.mjs';
 
 const mode = process.argv[2] === 'start' ? 'start' : 'dev';
 const cwd = process.cwd();
@@ -72,7 +73,10 @@ function runCommand(command, args) {
 
 const ok = await runConfigCheck();
 if (!ok) {
-  console.error('\n请先补齐 .env 中缺失项，再重新执行启动命令。');
+  console.error('');
+  for (const line of buildStartupFailureHints(process.env)) {
+    console.error(line);
+  }
   process.exit(1);
 }
 
