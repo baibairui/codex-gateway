@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
-import process from 'node:process';
 import path from 'node:path';
-import { buildDocxChildrenFromConvertPayload, buildDocxCreateNodes } from './docx-markdown.mjs';
+import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+import { buildDocxChildrenFromConvertPayload, buildDocxCreateNodes } from './docx-markdown.mjs';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
 const DEFAULT_FEISHU_DOC_BASE_URL = 'https://feishu.cn/docx';
@@ -343,10 +343,15 @@ async function appendDocxNodesRecursively(token, documentId, parentBlockId, node
 
 async function appendDocxChildrenWithRetry(token, documentId, blockId, chunk, attempt = 1) {
   try {
-    const payload = await apiRequest(token, 'POST', `/docx/v1/documents/${encodeURIComponent(documentId)}/blocks/${encodeURIComponent(blockId)}/children`, {
-      index: -1,
-      children: chunk,
-    });
+    const payload = await apiRequest(
+      token,
+      'POST',
+      `/docx/v1/documents/${encodeURIComponent(documentId)}/blocks/${encodeURIComponent(blockId)}/children`,
+      {
+        index: -1,
+        children: chunk,
+      },
+    );
     return Array.isArray(payload?.data?.children) ? payload.data.children : [];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -362,9 +367,7 @@ function buildPlainTextDocxChildren(markdown) {
   const lines = String(markdown)
     .split('\n')
     .map((line) => line.trimEnd());
-  const normalizedLines = lines
-    .map(normalizeMarkdownLine)
-    .filter((line, index, arr) => line !== '' || (index > 0 && arr[index - 1] !== ''));
+  const normalizedLines = lines.filter((line, index, arr) => line !== '' || (index > 0 && arr[index - 1] !== ''));
   return normalizedLines.map((line) => ({
     block_type: 2,
     text: {
@@ -518,28 +521,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function normalizeMarkdownLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return '';
-  }
-  const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
-  if (heading) {
-    return heading[2]?.trim() || '';
-  }
-  const bullet = trimmed.match(/^[-*+]\s+(.*)$/);
-  if (bullet) {
-    return `• ${bullet[1]?.trim() || ''}`;
-  }
-  const ordered = trimmed.match(/^\d+\.\s+(.*)$/);
-  if (ordered) {
-    return ordered[1]?.trim() || '';
-  }
-  const quote = trimmed.match(/^>\s*(.*)$/);
-  if (quote) {
-    return quote[1]?.trim() || '';
-  }
-  return trimmed;
+export function markdownToDocxChildren(markdown) {
+  const source = String(markdown ?? '').replace(/\r\n/g, '\n').trim();
+  return buildPlainTextDocxChildren(source);
 }
 
 export function markdownToDocxChildren(markdown) {
