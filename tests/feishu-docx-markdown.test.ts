@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildDocxChildrenFromConvertPayload } from '../.codex/skills/feishu-official-ops/scripts/docx-markdown.mjs';
+import {
+  buildDocxChildrenFromConvertPayload,
+  buildDocxCreateNodes,
+} from '../.codex/skills/feishu-official-ops/scripts/docx-markdown.mjs';
 
 describe('buildDocxChildrenFromConvertPayload', () => {
   it('rebuilds first-level blocks with nested children and strips transport ids', () => {
@@ -72,5 +75,50 @@ describe('buildDocxChildrenFromConvertPayload', () => {
         blocks: [],
       }),
     ).toThrow('docx convert returned missing block: missing');
+  });
+
+  it('splits nested children into recursive create nodes', () => {
+    const createNodes = buildDocxCreateNodes([
+      {
+        block_type: 12,
+        bullet: {
+          elements: [{ text_run: { content: '进展' } }],
+          style: {},
+        },
+        children: [
+          {
+            block_type: 2,
+            text: {
+              elements: [{ text_run: { content: '第一项' } }],
+              style: {},
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(createNodes).toEqual([
+      {
+        block: {
+          block_type: 12,
+          bullet: {
+            elements: [{ text_run: { content: '进展' } }],
+            style: {},
+          },
+        },
+        children: [
+          {
+            block: {
+              block_type: 2,
+              text: {
+                elements: [{ text_run: { content: '第一项' } }],
+                style: {},
+              },
+            },
+            children: [],
+          },
+        ],
+      },
+    ]);
   });
 });

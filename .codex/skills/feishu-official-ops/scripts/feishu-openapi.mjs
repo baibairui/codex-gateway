@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import process from 'node:process';
-import { buildDocxChildrenFromConvertPayload } from './docx-markdown.mjs';
+import { buildDocxChildrenFromConvertPayload, buildDocxCreateNodes } from './docx-markdown.mjs';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
 
@@ -228,45 +228,115 @@ function resolveMarkdownInput(args) {
 }
 
 async function appendMarkdownToDocx(token, documentId, markdown) {
-  const payload = await apiRequest(token, 'POST', '/docx/v1/documents/blocks/convert', {
-    content_type: 'markdown',
-    content: String(markdown),
-  });
-  const children = buildDocxChildrenFromConvertPayload(payload?.data);
-  if (children.length === 0) {
-    return { ok: true, blocks_appended: 0 };
+  const source = String(markdown ?? '').replace(/\r\n/g, '\n').trim();
+  if (!source) {
+    return { ok: true, blocks_appended: 0, mode: 'converted' };
   }
 
-  let appended = 0;
-  for (const chunk of chunkArray(children, 20)) {
-    await appendDocxChildrenWithRetry(token, documentId, chunk);
-    appended += chunk.length;
+  let payload;
+  try {
+    payload = await convertMarkdownToDocxBlocksWithRetry(token, source);
+  } catch (error) {
+    const fallbackChildren = buildPlainTextDocxChildren(source);
+    let appended = 0;
+    for (const chunk of chunkArray(fallbackChildren, 20)) {
+      await appendDocxChildrenWithRetry(token, documentId, documentId, chunk);
+      appended += chunk.length;
+    }
+    return {
+      ok: true,
+      blocks_appended: appended,
+      mode: 'plain_text_fallback',
+      convert_error: error instanceof Error ? error.message : String(error),
+    };
   }
+
+  const nodes = buildDocxCreateNodes(buildDocxChildrenFromConvertPayload(payload?.data));
+  if (nodes.length === 0) {
+    return { ok: true, blocks_appended: 0, mode: 'converted' };
+  }
+
+  const appended = await appendDocxNodesRecursively(token, documentId, documentId, nodes);
   return {
     ok: true,
     blocks_appended: appended,
+    mode: 'converted',
   };
 }
 
-async function appendDocxChildrenWithRetry(token, documentId, chunk, attempt = 1) {
+async function convertMarkdownToDocxBlocksWithRetry(token, markdown, attempt = 1) {
   try {
-    await apiRequest(
-      token,
-      'POST',
-      `/docx/v1/documents/${encodeURIComponent(documentId)}/blocks/${encodeURIComponent(documentId)}/children`,
-      {
-        index: -1,
-        children: chunk,
-      },
-    );
+    return await apiRequest(token, 'POST', '/docx/v1/documents/blocks/convert', {
+      content_type: 'markdown',
+      content: markdown,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes('feishu api failed: 429') || attempt >= 6) {
       throw error;
     }
     await sleep(attempt * 1500);
-    await appendDocxChildrenWithRetry(token, documentId, chunk, attempt + 1);
+    return convertMarkdownToDocxBlocksWithRetry(token, markdown, attempt + 1);
   }
+}
+
+async function appendDocxNodesRecursively(token, documentId, parentBlockId, nodes) {
+  let appended = 0;
+  for (const chunk of chunkArray(nodes, 10)) {
+    const createdChildren = await appendDocxChildrenWithRetry(
+      token,
+      documentId,
+      parentBlockId,
+      chunk.map((node) => node.block),
+    );
+    appended += chunk.length;
+    for (let i = 0; i < chunk.length; i += 1) {
+      const createdBlockId = createdChildren?.[i]?.block_id;
+      if (!createdBlockId || chunk[i].children.length === 0) {
+        continue;
+      }
+      appended += await appendDocxNodesRecursively(token, documentId, createdBlockId, chunk[i].children);
+    }
+  }
+  return appended;
+}
+
+async function appendDocxChildrenWithRetry(token, documentId, blockId, chunk, attempt = 1) {
+  try {
+    const payload = await apiRequest(token, 'POST', `/docx/v1/documents/${encodeURIComponent(documentId)}/blocks/${encodeURIComponent(blockId)}/children`, {
+      index: -1,
+      children: chunk,
+    });
+    return Array.isArray(payload?.data?.children) ? payload.data.children : [];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('feishu api failed: 429') || attempt >= 6) {
+      throw error;
+    }
+    await sleep(attempt * 1500);
+    return appendDocxChildrenWithRetry(token, documentId, blockId, chunk, attempt + 1);
+  }
+}
+
+function buildPlainTextDocxChildren(markdown) {
+  const lines = String(markdown)
+    .split('\n')
+    .map((line) => line.trimEnd());
+  const normalizedLines = lines
+    .map(normalizeMarkdownLine)
+    .filter((line, index, arr) => line !== '' || (index > 0 && arr[index - 1] !== ''));
+  return normalizedLines.map((line) => ({
+    block_type: 2,
+    text: {
+      elements: [
+        {
+          text_run: {
+            content: line || ' ',
+          },
+        },
+      ],
+    },
+  }));
 }
 
 function resolveDocxUrl(documentId, docBaseUrl) {
@@ -289,6 +359,30 @@ function firstNonEmptyString(...values) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeMarkdownLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+  if (heading) {
+    return heading[2]?.trim() || '';
+  }
+  const bullet = trimmed.match(/^[-*+]\s+(.*)$/);
+  if (bullet) {
+    return `• ${bullet[1]?.trim() || ''}`;
+  }
+  const ordered = trimmed.match(/^\d+\.\s+(.*)$/);
+  if (ordered) {
+    return ordered[1]?.trim() || '';
+  }
+  const quote = trimmed.match(/^>\s*(.*)$/);
+  if (quote) {
+    return quote[1]?.trim() || '';
+  }
+  return trimmed;
 }
 
 function chunkArray(items, size) {

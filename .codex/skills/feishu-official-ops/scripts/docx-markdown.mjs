@@ -16,6 +16,18 @@ export function buildDocxChildrenFromConvertPayload(payload) {
   return firstLevelBlockIds.map((blockId) => materializeBlock(blockId, blockMap, new Set()));
 }
 
+export function buildDocxCreateNodes(children) {
+  return (Array.isArray(children) ? children : []).map((child) => {
+    const nestedChildren = Array.isArray(child?.children) ? child.children : [];
+    const { children: ignored, ...block } = child;
+    void ignored;
+    return {
+      block,
+      children: buildDocxCreateNodes(nestedChildren),
+    };
+  });
+}
+
 function materializeBlock(blockId, blockMap, chain) {
   if (chain.has(blockId)) {
     throw new Error(`docx convert returned cyclic block tree at ${blockId}`);
