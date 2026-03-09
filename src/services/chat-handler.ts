@@ -5,6 +5,7 @@ import { formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapsh
 import { AgentSkillManager } from './agent-skill-manager.js';
 import { formatCommandOutboundMessage } from './feishu-command-cards.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
+import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('ChatHandler');
@@ -231,6 +232,20 @@ function resolveUserKey(userId: string): string {
   // 本项目按单人本地使用设计，所有渠道消息共享同一用户上下文。
   void userId;
   return 'local-owner';
+}
+
+function formatAgentVisibleReply(agent: { name: string }, text: string): string {
+  if (!text.trim()) {
+    return text;
+  }
+  if (parseGatewayStructuredMessage(text)) {
+    return text;
+  }
+  const prefix = `[${agent.name}] `;
+  if (text.startsWith(prefix)) {
+    return text;
+  }
+  return `${prefix}${text}`;
 }
 
 function buildIdentityBootstrapPrompt(identityContent: string): string {
@@ -513,7 +528,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
           );
         },
         onMessage: (text) => {
-          const output = text.trim();
+          const output = formatAgentVisibleReply(runtimeAgent, text).trim();
           if (!output) {
             return;
           }
@@ -593,7 +608,7 @@ ${clipMessage(prompt, 500)}
     });
 
     async function startMemoryOnboarding(
-      onboardingAgent: { agentId: string; workspaceDir: string },
+      onboardingAgent: { agentId: string; name: string; workspaceDir: string },
       model: string | undefined,
       options: {
         reason: 'shared' | 'agent' | 'both' | 'manual';
@@ -631,7 +646,7 @@ ${clipMessage(prompt, 500)}
             deps.sessionStore.setSession(sessionUserKey, onboardingAgent.agentId, startedThreadId, 'memory onboarding kickoff');
           },
           onMessage: (text) => {
-            const sanitized = sanitizeOnboardingText(text);
+            const sanitized = formatAgentVisibleReply(onboardingAgent, sanitizeOnboardingText(text));
             lastStreamSend = deps.sendText(channel, userId, sanitized).catch((err) => {
               log.error('startMemoryOnboarding onMessage 推送失败', err);
             });
@@ -813,7 +828,7 @@ ${clipMessage(prompt, 500)}
               deps.sessionStore.setSession(sessionUserKey, agent.agentId, startedThreadId, 'skill onboarding kickoff');
             },
             onMessage: (text) => {
-              const sanitized = sanitizeOnboardingText(text);
+              const sanitized = formatAgentVisibleReply(agent, sanitizeOnboardingText(text));
               lastStreamSend = sendCommandText(sanitized).catch((err) => {
                 log.error('initSkillAgent onMessage 推送失败', err);
               });
@@ -1210,7 +1225,8 @@ ${clipMessage(text, 500)}
           );
         },
         onMessage: (text) => {
-          const userVisibleOutput = isSystemAgentId(currentAgent.agentId) ? sanitizeOnboardingText(text) : text;
+          const rawVisibleOutput = isSystemAgentId(currentAgent.agentId) ? sanitizeOnboardingText(text) : text;
+          const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, rawVisibleOutput);
           log.info(`
 ════════════════════════════════════════════════════════════
 🤖 Codex 回复  [${channel}:${userId}]

@@ -168,7 +168,7 @@ describe('createChatHandler', () => {
         agentId: 'test',
       }),
     }));
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '提醒时间到了，我来继续跟进。');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[测试Agent] 提醒时间到了，我来继续跟进。');
     expect(sessionStore.getSession('local-owner', 'test')).toBe('thread_reminder');
   });
 
@@ -261,6 +261,69 @@ describe('createChatHandler', () => {
     expect(run).toHaveBeenCalled();
   });
 
+  it('prefixes plain agent replies with the current agent name', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.setSession('local-owner', 'default', 'thread_existing');
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async (input) => {
+          input.onMessage?.('你好，我来处理。');
+          return { threadId: 'thread_existing', rawOutput: '' };
+        },
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[默认Agent] 你好，我来处理。');
+  });
+
+  it('keeps gateway structured replies unchanged when labeling agent output', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.setSession('local-owner', 'default', 'thread_existing');
+    const structured = '{"__gateway_message__":true,"msg_type":"post","content":"多段说明"}';
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async (input) => {
+          input.onMessage?.(structured);
+          return { threadId: 'thread_existing', rawOutput: '' };
+        },
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', structured);
+  });
+
   it('pushes help card automatically when a new feishu session starts', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async (input: { onMessage?: (text: string) => void }) => {
@@ -297,7 +360,7 @@ describe('createChatHandler', () => {
     expect(parsed.__gateway_message__).toBe(true);
     expect(parsed.msg_type).toBe('interactive');
     expect(parsed.content?.header?.title?.content).toBe('命令帮助');
-    expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '你好，我已开始处理。');
+    expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '[默认Agent] 你好，我已开始处理。');
   });
 
   it('pushes help text automatically when a new wecom session starts', async () => {
@@ -328,7 +391,7 @@ describe('createChatHandler', () => {
     await handler({ channel: 'wecom', userId: 'u1', content: '你好' });
 
     expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', expect.stringContaining('可用命令（按功能分组，帮助页 1/2）：'));
-    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '开始处理。');
+    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '[默认Agent] 开始处理。');
   });
 
   it('sends fallback error text when stream push fails', async () => {
@@ -366,7 +429,7 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '第一条回复');
+    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '[默认Agent] 第一条回复');
     expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
   });
 
