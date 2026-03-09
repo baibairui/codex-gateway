@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import process from 'node:process';
+import { buildDocxChildrenFromConvertPayload } from './docx-markdown.mjs';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
 
@@ -227,30 +228,14 @@ function resolveMarkdownInput(args) {
 }
 
 async function appendMarkdownToDocx(token, documentId, markdown) {
-  const lines = String(markdown)
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => line.trimEnd());
-  const normalizedLines = lines
-    .map(normalizeMarkdownLine)
-    .filter((line, index, arr) => line !== '' || (index > 0 && arr[index - 1] !== ''));
-
-  if (normalizedLines.length === 0) {
+  const payload = await apiRequest(token, 'POST', '/docx/v1/documents/blocks/convert', {
+    content_type: 'markdown',
+    content: String(markdown),
+  });
+  const children = buildDocxChildrenFromConvertPayload(payload?.data);
+  if (children.length === 0) {
     return { ok: true, blocks_appended: 0 };
   }
-
-  const children = normalizedLines.map((line) => ({
-    block_type: 2,
-    text: {
-      elements: [
-        {
-          text_run: {
-            content: line || ' ',
-          },
-        },
-      ],
-    },
-  }));
 
   let appended = 0;
   for (const chunk of chunkArray(children, 20)) {
@@ -304,30 +289,6 @@ function firstNonEmptyString(...values) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function normalizeMarkdownLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return '';
-  }
-  const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
-  if (heading) {
-    return heading[2]?.trim() || '';
-  }
-  const bullet = trimmed.match(/^[-*+]\s+(.*)$/);
-  if (bullet) {
-    return `• ${bullet[1]?.trim() || ''}`;
-  }
-  const ordered = trimmed.match(/^\d+\.\s+(.*)$/);
-  if (ordered) {
-    return ordered[1]?.trim() || '';
-  }
-  const quote = trimmed.match(/^>\s*(.*)$/);
-  if (quote) {
-    return quote[1]?.trim() || '';
-  }
-  return trimmed;
 }
 
 function chunkArray(items, size) {
