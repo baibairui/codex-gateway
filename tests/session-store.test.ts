@@ -13,6 +13,17 @@ function makeStore(): SessionStore {
   });
 }
 
+function makeStorePair(): { filePath: string; createStore: () => SessionStore } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-store-'));
+  const filePath = path.join(dir, 'sessions.db');
+  return {
+    filePath,
+    createStore: () => new SessionStore(filePath, {
+      defaultWorkspaceDir: '/repo/default-workdir',
+    }),
+  };
+}
+
 describe('SessionStore', () => {
   it('defaults to the built-in default agent', () => {
     const store = makeStore();
@@ -111,5 +122,28 @@ describe('SessionStore', () => {
     expect(all.some((item) => item.agentId === 'agent-legacy')).toBe(true);
     expect(store.resolveAgentTarget('u1', 'memory-onboarding')).toBeUndefined();
     expect(store.resolveAgentTarget('u1', 'agent-legacy')).toBeUndefined();
+  });
+
+  it('persists model overrides per agent across restarts', () => {
+    const pair = makeStorePair();
+    const store = pair.createStore();
+    store.createAgent('u1', {
+      agentId: 'frontend',
+      name: '前端Agent',
+      workspaceDir: '/tmp/frontend',
+    });
+
+    store.setModelOverride('u1', 'default', 'gpt-5');
+    store.setModelOverride('u1', 'frontend', 'gpt-5-codex');
+
+    const reopened = pair.createStore();
+    expect(reopened.getModelOverride('u1', 'default')).toBe('gpt-5');
+    expect(reopened.getModelOverride('u1', 'frontend')).toBe('gpt-5-codex');
+
+    reopened.clearModelOverride('u1', 'frontend');
+
+    const reopenedAgain = pair.createStore();
+    expect(reopenedAgain.getModelOverride('u1', 'default')).toBe('gpt-5');
+    expect(reopenedAgain.getModelOverride('u1', 'frontend')).toBeUndefined();
   });
 });

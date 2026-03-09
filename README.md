@@ -203,6 +203,7 @@ WECOM_ENABLED=false
 FEISHU_ENABLED=true
 FEISHU_APP_ID=你的飞书AppID
 FEISHU_APP_SECRET=你的飞书AppSecret
+FEISHU_DOC_BASE_URL=https://你的飞书域名/docx
 FEISHU_LONG_CONNECTION=true
 FEISHU_VERIFICATION_TOKEN=你的校验Token
 FEISHU_GROUP_REQUIRE_MENTION=true
@@ -214,6 +215,13 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 - 开启 `FEISHU_LONG_CONNECTION=true` 后，会关闭 `/feishu/callback` webhook 接口（不再做兜底双通道）
 - `FEISHU_VERIFICATION_TOKEN`：仅 webhook 模式需要；长连接模式可留空
 - `FEISHU_GROUP_REQUIRE_MENTION=true`：群聊默认要求 `@机器人` 才触发；私聊不受影响。显式设为 `false` 可恢复“群里任何消息都触发”
+- `FEISHU_DOC_BASE_URL`：可选。用于飞书官方操作 CLI 在创建 DocX 后直接返回可访问文档链接，例如 `https://你的飞书域名/docx`
+
+安装建议：
+
+- 优先使用 `codexclaw setup` 完成飞书配置
+- 配完后立刻执行 `codexclaw doctor`
+- `doctor` 会直接告诉你：当前是长连接还是 webhook、飞书凭据是否缺失、群触发策略是否开启、DocX 链接域名是否配置
 
 ### 飞书能力说明（当前实现）
 
@@ -276,6 +284,7 @@ codexclaw setup
 ```
 
 该命令会按步骤提问并写入 `.env`，结束后自动执行一次 `codexclaw check`。
+如果启用了飞书，向导结束前还会额外打印一段“飞书下一步清单”，直接提示你当前模式、群触发策略以及后续该执行的命令。
 向导支持先选择平台（仅企业微信 / 仅飞书 / 同时启用），并以彩色步骤提示引导输入。
 
 ### 4. 启动服务
@@ -316,6 +325,7 @@ codexclaw check
 - `codexclaw start`：生产模式启动（启动前自动配置检查）
 - `codexclaw setup`：逐行交互配置向导，自动写入 `.env`
 - `codexclaw check`：仅检查配置，不启动服务
+- `codexclaw doctor`：同 `check`，更适合作为安装自检入口
 - `codexclaw update`：一键拉取远端最新代码并完成依赖更新与构建
 - `codexclaw build`：构建 TypeScript
 - `codexclaw test`：执行测试
@@ -343,6 +353,8 @@ npm run publish:workspace
 ```bash
 curl http://127.0.0.1:3000/healthz
 ```
+
+现在 `/healthz` 会额外返回渠道状态摘要，例如飞书是否启用、当前是长连接还是 webhook、webhook 是否开放、群聊是否要求 `@`、DocX 链接域名是否已配置、启动 help 是否开启。服务启动日志里也会打印同一份飞书状态摘要，方便不查接口时直接验收。
 
 如果返回 `ok`，说明服务已经启动成功。
 

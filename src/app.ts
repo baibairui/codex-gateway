@@ -4,17 +4,22 @@ import { WeComCrypto } from './utils/wecom-crypto.js';
 import { parseWeComXml } from './utils/wecom-xml.js';
 import { createLogger } from './utils/logger.js';
 import { allowList } from './utils/allow-list.js';
+import { buildFeishuStatusSummary } from './utils/feishu-status.js';
 import { normalizeFeishuIncomingMessage, normalizeWeComIncomingMessage } from './utils/message-normalizer.js';
 
 const log = createLogger('App');
 
 interface AppDeps {
   wecomEnabled: boolean;
+  feishuEnabled?: boolean;
   wecomCrypto?: WeComCrypto;
   allowFrom: string;
   feishuVerificationToken?: string;
   feishuLongConnection?: boolean;
   feishuGroupRequireMention?: boolean;
+  feishuDocBaseUrlConfigured?: boolean;
+  feishuStartupHelpEnabled?: boolean;
+  feishuStartupHelpAdminConfigured?: boolean;
   isDuplicateMessage: (msgId?: string) => boolean;
   /**
    * 处理文本消息，业务回复统一走主动发消息 API，无需返回值。
@@ -269,7 +274,23 @@ export function createApp(deps: AppDeps) {
 
   // ========================= 健康检查 =========================
   app.get('/healthz', (_req, res) => {
-    res.json({ ok: true });
+    const feishuStatus = buildFeishuStatusSummary({
+      enabled: deps.feishuEnabled,
+      longConnection: deps.feishuLongConnection,
+      groupRequireMention: deps.feishuGroupRequireMention,
+      docBaseUrlConfigured: deps.feishuDocBaseUrlConfigured,
+      startupHelpEnabled: deps.feishuStartupHelpEnabled,
+      startupHelpAdminConfigured: deps.feishuStartupHelpAdminConfigured,
+    });
+    res.json({
+      ok: true,
+      channels: {
+        wecom: {
+          enabled: deps.wecomEnabled,
+        },
+        feishu: feishuStatus,
+      },
+    });
   });
 
   // ===================== GET 验证 URL =====================

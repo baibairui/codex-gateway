@@ -124,6 +124,8 @@ export class SessionStore {
           UNION
           SELECT user_id FROM user_agent
           UNION
+          SELECT user_id FROM user_agent_settings
+          UNION
           SELECT user_id FROM user_agent_session
           UNION
           SELECT user_id FROM user_agent_history
@@ -220,6 +222,36 @@ export class SessionStore {
       return this.getLegacySessionState(userId);
     }
     return {};
+  }
+
+  getModelOverride(userId: string, agentId: string): string | undefined {
+    const row = this.db
+      .prepare(`
+        SELECT model_override AS modelOverride
+        FROM user_agent_settings
+        WHERE user_id = ? AND agent_id = ?
+      `)
+      .get(userId, agentId) as { modelOverride?: string | null } | undefined;
+    return typeof row?.modelOverride === 'string' && row.modelOverride ? row.modelOverride : undefined;
+  }
+
+  setModelOverride(userId: string, agentId: string, model: string): void {
+    this.db
+      .prepare(`
+        INSERT INTO user_agent_settings(user_id, agent_id, model_override, updated_at)
+        VALUES(?, ?, ?, ?)
+        ON CONFLICT(user_id, agent_id) DO UPDATE SET
+          model_override = excluded.model_override,
+          updated_at = excluded.updated_at
+      `)
+      .run(userId, agentId, model.trim(), this.nextTimestamp());
+  }
+
+  clearModelOverride(userId: string, agentId: string): boolean {
+    const result = this.db
+      .prepare('DELETE FROM user_agent_settings WHERE user_id = ? AND agent_id = ?')
+      .run(userId, agentId) as { changes?: number };
+    return (result.changes ?? 0) > 0;
   }
 
   setSession(
@@ -407,6 +439,14 @@ export class SessionStore {
 
       CREATE INDEX IF NOT EXISTS idx_user_agent_history_lookup
         ON user_agent_history(user_id, agent_id, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS user_agent_settings (
+        user_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        model_override TEXT,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, agent_id)
+      );
     `);
 
     this.ensureColumn('user_session', 'bound_identity_version', 'TEXT');

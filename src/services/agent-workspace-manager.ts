@@ -22,6 +22,18 @@ export interface SharedMemorySnapshot {
   hasIdentity: boolean;
 }
 
+export interface MemorySummaryEntry {
+  fileName: string;
+  summary: string;
+}
+
+export interface MemorySummarySnapshot {
+  sharedMemoryDir: string;
+  workspaceMemoryDir: string;
+  shared: MemorySummaryEntry[];
+  agent: MemorySummaryEntry[];
+}
+
 interface CreateAgentWorkspaceInput {
   userId: string;
   agentName: string;
@@ -31,6 +43,7 @@ interface CreateAgentWorkspaceInput {
 
 const MEMORY_ONBOARDING_AGENT_ID = 'memory-onboarding';
 const SKILL_ONBOARDING_AGENT_ID = 'skill-onboarding';
+const BROWSER_HANDOFF_TRIGGER_SUMMARY = '登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义';
 
 export class AgentWorkspaceManager {
   private readonly rootDir: string;
@@ -222,6 +235,18 @@ export class AgentWorkspaceManager {
       identityContent: combinedContent,
       identityVersion: createHash('sha1').update(versionSeed).digest('hex').slice(0, 16),
       hasIdentity: true,
+    };
+  }
+
+  getMemorySummary(userId: string, workspaceDir: string): MemorySummarySnapshot {
+    const userDir = this.resolveUserDir(userId);
+    const sharedMemoryDir = this.ensureUserSharedMemory(userDir);
+    const workspaceMemoryDir = path.join(workspaceDir, 'memory');
+    return {
+      sharedMemoryDir,
+      workspaceMemoryDir,
+      shared: summarizeMemoryDirectory(sharedMemoryDir),
+      agent: summarizeMemoryDirectory(workspaceMemoryDir),
     };
   }
 
@@ -428,8 +453,11 @@ function renderWorkspaceAgentsMd(
     '浏览器操作职责：',
     '- 当任务需要网页交互时，只允许使用 gateway 提供的 browser_* MCP 工具完成操作，不要让用户手工点击。',
     '- 禁止使用 playwright-cli、npx @playwright/mcp、任何自定义 wrapper script、/open 或其他 shell/browser 启动通道。',
-    '- 每次操作前先说明计划步骤，操作后回报关键结果与下一步。',
+    '- 每次操作前先说明计划步骤，操作后按“Action / Evidence / Result / Next step”回报。',
+    '- 页面意图模糊、多个相似目标并存、或预期状态未出现时，先暂停并请求用户决策。',
+    '- 涉及提交、发布、支付、外部数据发送、文件上传时，若用户未明确授权，先暂停并确认。',
     '- 如果网页需要登录、验证码或支付确认，先提示用户接管，不要编造已完成。',
+    `- 人工接管触发条件可直接按这组理解：${BROWSER_HANDOFF_TRIGGER_SUMMARY}。`,
     '- 扫码登录时先截图二维码再等待；用户明确回复“继续”后再恢复自动操作。',
     '',
     '定时提醒职责：',
@@ -607,8 +635,16 @@ function renderBrowserPlaybook(): string {
     '3. 执行时只做小步操作：browser_click / browser_type / browser_select_option / browser_press_key / browser_wait_for。',
     '4. 每完成一个关键动作都要二次确认：再次 browser_snapshot 或 browser_take_screenshot，确保页面状态符合预期。',
     '5. 回报格式固定：已执行动作 -> 页面证据 -> 当前结论 -> 下一步。',
+    '6. 出现歧义、高风险提交或作用域意外变化时，不继续自动推进，先停下并请求用户决策。',
+    '',
+    '## Status Templates',
+    '- 进行中：汇报最新动作、当前证据、接下来立刻要做的最小动作。',
+    '- 阻塞：汇报阻塞点、风险、需要用户做出的精确决策。',
+    '- 接管：汇报为什么必须人工接管、当前保留了什么状态、用户完成后如何继续。',
+    '- 完成：汇报已完成事项、最终结果或产出物、以及后续建议。',
     '',
     '## Login & QR Flow',
+    `- 人工接管触发条件总览：${BROWSER_HANDOFF_TRIGGER_SUMMARY}。`,
     '- 需要账号登录、OTP、验证码、扫码、支付确认时，立即切换为“人工接管”。',
     '- 扫码登录场景：先等待二维码渲染完成，再 browser_take_screenshot 输出截图给用户。',
     '- 人工接管阶段不继续自动点击，明确等待用户回复“继续”。',
@@ -623,6 +659,12 @@ function renderBrowserPlaybook(): string {
     '- 页面未按预期变化时，先 wait_for 或 snapshot 复核，再决定是否重试。',
     '- 同一动作最多重试 2 次；仍失败就回报阻塞点并请求用户决策。',
     '- 禁止在未知页面状态下连续盲点、盲输。',
+    '',
+    '## Stop Conditions',
+    '- 页面意图不清、多个相似目标并存、或预期状态没有出现时，必须暂停。',
+    '- modal / redirect / permission prompt 意外改变任务作用域时，必须暂停。',
+    '- 涉及外部数据发送、文件上传、表单提交、发布或支付，但用户未明确授权时，必须暂停。',
+    '- 暂停时输出：最后确认的页面状态、当前风险点、需要用户做出的精确决策。',
     '',
     '## Guardrails',
     '- 未看到页面证据前，不得声称“已完成”。',
@@ -959,6 +1001,47 @@ function normalizeIdentityText(content: string): string {
     filtered.push(line);
   }
   return filtered.join('\n');
+}
+
+const MEMORY_SUMMARY_FILES = [
+  'identity.md',
+  'profile.md',
+  'preferences.md',
+  'projects.md',
+  'relationships.md',
+  'decisions.md',
+  'open-loops.md',
+];
+
+function summarizeMemoryDirectory(memoryDir: string): MemorySummaryEntry[] {
+  return MEMORY_SUMMARY_FILES.flatMap((fileName) => {
+    const filePath = path.join(memoryDir, fileName);
+    if (!fs.existsSync(filePath)) {
+      return [];
+    }
+    const content = fs.readFileSync(filePath, 'utf8');
+    if (!hasMeaningfulMemoryContent(content)) {
+      return [];
+    }
+    return [{
+      fileName,
+      summary: summarizeMemoryContent(content),
+    }];
+  });
+}
+
+function summarizeMemoryContent(content: string): string {
+  const lines = content
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('#'));
+  if (lines.length === 0) {
+    return '(已初始化，但当前没有可展示内容)';
+  }
+  const preview = lines.slice(0, 4).join(' / ');
+  return preview.length <= 240 ? preview : `${preview.slice(0, 237)}...`;
 }
 
 function stripIdentityTitle(content: string): string[] {

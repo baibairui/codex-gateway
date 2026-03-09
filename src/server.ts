@@ -21,6 +21,7 @@ import { WeComApi } from './services/wecom-api.js';
 import { FeishuApi } from './services/feishu-api.js';
 import { WeComCrypto } from './utils/wecom-crypto.js';
 import { appendFeishuAttachmentMetadata, extractFeishuBinaryRef } from './utils/feishu-inbound.js';
+import { buildFeishuStatusSummary } from './utils/feishu-status.js';
 import { isGatewayMessageTypeSupported, parseGatewayStructuredMessage } from './utils/gateway-message.js';
 import { SessionStore } from './stores/session-store.js';
 import { MessageDedupStore } from './stores/message-dedup-store.js';
@@ -30,6 +31,14 @@ import { createLogger } from './utils/logger.js';
 const log = createLogger('Server');
 const codexWorkdir = resolveCodexWorkdir(config.codexWorkdir);
 const gatewayRootDir = resolveGatewayRootDir(config.gatewayRootDir);
+const feishuStatusSummary = buildFeishuStatusSummary({
+  enabled: config.feishuEnabled,
+  longConnection: config.feishuLongConnection,
+  groupRequireMention: config.feishuGroupRequireMention,
+  docBaseUrlConfigured: Boolean(process.env.FEISHU_DOC_BASE_URL?.trim()),
+  startupHelpEnabled: config.feishuStartupHelpEnabled,
+  startupHelpAdminConfigured: Boolean(config.feishuStartupHelpAdminOpenId),
+});
 
 log.info('服务启动初始化...', {
   port: config.port,
@@ -58,10 +67,9 @@ log.info('服务启动初始化...', {
   apiRetryOnTimeout: config.apiRetryOnTimeout,
   wecomEnabled: config.wecomEnabled,
   feishuEnabled: config.feishuEnabled,
-  feishuLongConnection: config.feishuLongConnection,
+  feishuLongConnection: feishuStatusSummary.mode === 'long-connection',
   feishuApiTimeoutMs: config.feishuApiTimeoutMs,
-  feishuStartupHelpEnabled: config.feishuStartupHelpEnabled,
-  feishuStartupHelpAdminOpenId: config.feishuStartupHelpAdminOpenId ? '(configured)' : '(not configured)',
+  feishuStatus: feishuStatusSummary,
 });
 
 const dataDir = path.resolve(process.cwd(), '.data');
@@ -408,11 +416,15 @@ const memorySteward = new MemorySteward({
 
 const app = createApp({
   wecomEnabled: config.wecomEnabled,
+  feishuEnabled: config.feishuEnabled,
   wecomCrypto,
   allowFrom: config.allowFrom,
   feishuVerificationToken: config.feishuVerificationToken,
-  feishuLongConnection: config.feishuLongConnection,
-  feishuGroupRequireMention: config.feishuGroupRequireMention,
+  feishuLongConnection: feishuStatusSummary.mode === 'long-connection',
+  feishuGroupRequireMention: feishuStatusSummary.groupRequireMention,
+  feishuDocBaseUrlConfigured: feishuStatusSummary.docBaseUrlConfigured,
+  feishuStartupHelpEnabled: feishuStatusSummary.startupHelpEnabled,
+  feishuStartupHelpAdminConfigured: feishuStatusSummary.startupHelpAdminConfigured,
   isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
   handleText: appDepsHandleText,
 });
@@ -557,6 +569,7 @@ function mapFeishuResourceTypes(kind: 'image' | 'file' | 'audio' | 'media' | 'st
 
 app.listen(config.port, () => {
   log.info(`✅ codex gateway 已启动，监听 http://127.0.0.1:${config.port}`);
+  log.info('飞书运行状态摘要', feishuStatusSummary);
   if (config.feishuEnabled && config.feishuLongConnection && config.feishuAppId && config.feishuAppSecret) {
     const wsClient = new LarkWSClient({
       appId: config.feishuAppId,

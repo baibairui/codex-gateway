@@ -46,6 +46,7 @@ Commands:
   start         生产启动（启动前自动配置检查）
   setup         逐行交互配置向导（写入 .env）
   check         仅执行配置检查
+  doctor        同 check，更适合做安装自检
   update        拉取远程最新代码并更新依赖/构建
   build         执行构建
   test          执行测试
@@ -65,6 +66,7 @@ switch (command) {
     run('node', ['./bin/setup-wizard.mjs']);
     break;
   case 'check':
+  case 'doctor':
     run('node', ['./bin/config-check.mjs']);
     break;
   case 'update':

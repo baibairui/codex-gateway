@@ -1,10 +1,12 @@
 import { commandNeedsAgentList, commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from '../features/user-command.js';
 import path from 'node:path';
 import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/session-store.js';
+import type { MemorySummarySnapshot } from './agent-workspace-manager.js';
 import { formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
 import { formatCommandOutboundMessage } from './feishu-command-cards.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
+import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('ChatHandler');
@@ -27,6 +29,9 @@ interface SessionStoreLike {
     options?: { boundIdentityVersion?: string },
   ): void;
   clearSession(userId: string, agentId: string): boolean;
+  getModelOverride?(userId: string, agentId: string): string | undefined;
+  setModelOverride?(userId: string, agentId: string, model: string): void;
+  clearModelOverride?(userId: string, agentId: string): boolean;
   listDetailed(userId: string, agentId: string): SessionListItem[];
   resolveSwitchTarget(userId: string, agentId: string, target: string): string | undefined;
   renameSession(targetThreadId: string, name: string): boolean;
@@ -50,6 +55,7 @@ interface CodexRunnerLike {
       agentId: string;
     };
     onMessage?: (text: string) => void;
+    onThreadStarted?: (threadId: string) => void;
   }): Promise<{ threadId: string; rawOutput: string }>;
   review(input: {
     mode: 'uncommitted' | 'base' | 'commit';
@@ -91,6 +97,7 @@ interface AgentWorkspaceManagerLike {
     identityVersion: string;
     hasIdentity: boolean;
   };
+  getMemorySummary?: (userId: string, workspaceDir: string) => MemorySummarySnapshot;
 }
 
 interface ChatHandlerDeps {
@@ -232,6 +239,72 @@ function resolveUserKey(userId: string): string {
   return 'local-owner';
 }
 
+function formatAgentVisibleReply(agent: { name: string }, text: string): string {
+  if (!text.trim()) {
+    return text;
+  }
+  if (parseGatewayStructuredMessage(text)) {
+    return text;
+  }
+  if (isSystemAgentRecord({ agentId: '', name: agent.name })) {
+    return text;
+  }
+  const prefix = `[${agent.name}] `;
+  if (text.startsWith(prefix)) {
+    return text;
+  }
+  return `${prefix}${text}`;
+}
+
+function formatMemorySummary(agent: AgentRecord, snapshot: MemorySummarySnapshot): string {
+  const sharedLines = snapshot.shared.length > 0
+    ? snapshot.shared.map((entry, index) => `${index + 1}. ${entry.fileName}: ${entry.summary}`)
+    : ['(shared-memory 当前没有已初始化内容)'];
+  const agentLines = snapshot.agent.length > 0
+    ? snapshot.agent.map((entry, index) => `${index + 1}. ${entry.fileName}: ${entry.summary}`)
+    : ['(当前 agent memory 当前没有已初始化内容)'];
+  return [
+    `当前 agent：${agent.name} (${agent.agentId})`,
+    `工作区：${agent.workspaceDir}`,
+    '',
+    '【Shared Memory】',
+    ...sharedLines,
+    '',
+    '【Agent Memory】',
+    ...agentLines,
+  ].join('\n');
+}
+
+function buildAgentProgressText(agent: { name: string }, phase: 'received' | 'reminder' | 'done'): string {
+  if (phase === 'received') {
+    return formatAgentVisibleReply(agent, '⏳ 已接收请求，正在处理...');
+  }
+  if (phase === 'reminder') {
+    return formatAgentVisibleReply(agent, '⏳ 已收到定时任务，正在处理...');
+  }
+  return formatAgentVisibleReply(agent, '✅ 已处理完成。');
+}
+
+async function sendAgentProgress(
+  deps: Pick<ChatHandlerDeps, 'sendText'>,
+  channel: Channel,
+  userId: string,
+  agent: { name: string },
+  phase: 'received' | 'reminder' | 'done',
+): Promise<void> {
+  try {
+    await deps.sendText(channel, userId, buildAgentProgressText(agent, phase));
+  } catch (error) {
+    log.warn('agent progress push failed', {
+      channel,
+      userId,
+      agentName: agent.name,
+      phase,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 function buildIdentityBootstrapPrompt(identityContent: string): string {
   const body = identityContent.trim() || '# Identity\n- 未初始化身份信息';
   return [
@@ -256,6 +329,8 @@ function buildIdentityPatchPrompt(identityContent: string): string {
   ].join('\n');
 }
 
+const BROWSER_HANDOFF_TRIGGER_PROMPT = '浏览器人工接管触发条件包括但不限于：登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义；出现这些情况时不要硬做完，而要明确请求用户接管或确认。';
+
 function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
   return [
     '你必须遵循以下飞书回发协议：',
@@ -271,6 +346,10 @@ function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
     '10. 回发飞书 post 时，若只是普通富文本段落，可直接把 content 写成字符串，网关会自动转换为基础 post 格式。',
     '11. 回发飞书 sticker 时，若已有本地贴纸文件，可直接提供 local_sticker_path，网关会自动上传后发送。',
     '12. 选择消息类型时遵循：简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。',
+    '12.1 若是在汇报浏览器执行中的阶段性进度，且内容天然包含 Action/Evidence/Result/Next step 这类多段结构，优先使用 post，不要把多段进度压成一条 text。',
+    '12.2 若是在请求用户接管浏览器步骤，或说明阻塞原因、风险点、待确认项，且内容天然是多段说明/清单，优先使用 post。',
+    '12.3 若是在汇报浏览器任务已完成，并需要总结已执行动作、最终结果、产出物和后续建议，且内容天然是多段摘要，优先使用 post。',
+    `12.4 ${BROWSER_HANDOFF_TRIGGER_PROMPT}`,
     '13. image/file/audio/media/sticker/share_chat/share_user 只在用户明确要求发送对应类型，或你已经拿到可发送资源（如 key、本地路径、分享对象ID）时使用。',
     '14. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 post 或 interactive。',
     '',
@@ -290,6 +369,8 @@ function buildWeComOutboundMessageProtocolPrompt(userPrompt: string): string {
     '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
     '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path，可先读取对应本地文件并给出分析结果；若明确需要回发企微非文本消息，且你已经拿到本地路径，可在 JSON content 中直接提供这些路径，网关会先上传再发送。',
     '8. 选择消息类型时遵循：简单一句话优先 text；多段说明或列表优先 markdown；只有在用户明确要发送图片/语音/视频/文件时才用 image/voice/video/file。',
+    '8.1 若是在汇报浏览器执行中的阶段性进度、阻塞原因、用户接管请求或完成态总结，且内容天然是多段说明/清单，优先使用 markdown。',
+    `8.2 ${BROWSER_HANDOFF_TRIGGER_PROMPT}`,
     '9. image/voice/video/file 仅在用户明确要求发送对应类型，或你已拿到可发送资源（如 media_id、本地路径）时使用。',
     '10. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 markdown 或媒体类型。',
     '',
@@ -351,7 +432,6 @@ function buildMemoryOnboardingKickoffPrompt(input: {
 }
 
 export function createChatHandler(deps: ChatHandlerDeps) {
-  const userModelOverrides = new Map<string, string>();
   const userSearchOverrides = new Map<string, boolean>();
   const onboardingKickoffInFlight = new Set<string>();
   const skillManager = deps.skillManager ?? new AgentSkillManager();
@@ -361,6 +441,10 @@ export function createChatHandler(deps: ChatHandlerDeps) {
       return deps.sessionStore.getSessionState(userKey, agentId);
     }
     return { threadId: deps.sessionStore.getSession(userKey, agentId) };
+  }
+
+  function getCurrentModel(userKey: string, agentId: string): string | undefined {
+    return deps.sessionStore.getModelOverride?.(userKey, agentId) ?? deps.defaultModel;
   }
 
   function persistSession(
@@ -411,6 +495,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
           agentId: agent.agentId,
           dbPath: deps.reminderDbPath,
         },
+        onThreadStarted: (startedThreadId) => {
+          persistSession(sessionUserKey, agent.agentId, startedThreadId, 'identity bootstrap', targetVersion);
+        },
       });
       threadId = bootstrapResult.threadId;
       persistSession(sessionUserKey, agent.agentId, threadId, 'identity bootstrap', targetVersion);
@@ -430,6 +517,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
           agentId: agent.agentId,
           dbPath: deps.reminderDbPath,
         },
+        onThreadStarted: (startedThreadId) => {
+          persistSession(sessionUserKey, agent.agentId, startedThreadId, 'identity refresh', targetVersion);
+        },
       });
       threadId = patchResult.threadId;
       persistSession(sessionUserKey, agent.agentId, threadId, 'identity refresh', targetVersion);
@@ -446,12 +536,12 @@ export function createChatHandler(deps: ChatHandlerDeps) {
   }): Promise<void> {
     const { channel, userId, reminder } = input;
     const sessionUserKey = resolveUserKey(userId);
-    const currentModel = userModelOverrides.get(sessionUserKey) ?? deps.defaultModel;
     const listedAgents = deps.sessionStore.listAgents(sessionUserKey, { includeHidden: true });
     const targetAgent = reminder.sourceAgentId
       ? listedAgents.find((item) => item.agentId === reminder.sourceAgentId)
       : undefined;
     const runtimeAgent = targetAgent ?? deps.sessionStore.getCurrentAgent(sessionUserKey);
+    const currentModel = getCurrentModel(sessionUserKey, runtimeAgent.agentId);
 
     if (!deps.runnerEnabled) {
       await deps.sendText(channel, userId, `⏰ 定时提醒：${reminder.message}`);
@@ -475,7 +565,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     ].join('\n');
 
     let lastStreamSend: Promise<void> = Promise.resolve();
+    let sawAgentOutput = false;
     try {
+      await sendAgentProgress(deps, channel, userId, runtimeAgent, 'reminder');
       const result = await deps.codexRunner.run({
         prompt: triggerPrompt,
         threadId: runtimeThreadId,
@@ -488,17 +580,30 @@ export function createChatHandler(deps: ChatHandlerDeps) {
           agentId: runtimeAgent.agentId,
           dbPath: deps.reminderDbPath,
         },
+        onThreadStarted: (startedThreadId) => {
+          persistSession(
+            sessionUserKey,
+            runtimeAgent.agentId,
+            startedThreadId,
+            `⏰ ${reminder.message}`,
+            identityBinding.boundIdentityVersion,
+          );
+        },
         onMessage: (text) => {
-          const output = text.trim();
+          const output = formatAgentVisibleReply(runtimeAgent, text).trim();
           if (!output) {
             return;
           }
+          sawAgentOutput = true;
           lastStreamSend = deps.sendText(channel, userId, output).catch((err) => {
             log.error('runReminderTrigger onMessage 推送失败', err);
           });
         },
       });
       await lastStreamSend;
+      if (!sawAgentOutput) {
+        await sendAgentProgress(deps, channel, userId, runtimeAgent, 'done');
+      }
       persistSession(
         sessionUserKey,
         runtimeAgent.agentId,
@@ -554,7 +659,7 @@ ${clipMessage(prompt, 500)}
     const currentAgent = normalizeVisibleCurrentAgent(sessionUserKey);
     const existingSessionState = getSessionState(sessionUserKey, currentAgent.agentId);
     const existingThreadId = existingSessionState.threadId;
-    const currentModel = userModelOverrides.get(sessionUserKey) ?? deps.defaultModel;
+    const currentModel = getCurrentModel(sessionUserKey, currentAgent.agentId);
     const currentSearch = userSearchOverrides.get(sessionUserKey) ?? deps.defaultSearch;
     // 对用户展示时，过滤掉系统内置 agent（如 memory-onboarding）
     const allAgents = commandNeedsAgentList(prompt) ? deps.sessionStore.listAgents(sessionUserKey, { includeHidden: true }) : [];
@@ -569,7 +674,7 @@ ${clipMessage(prompt, 500)}
     });
 
     async function startMemoryOnboarding(
-      onboardingAgent: { agentId: string; workspaceDir: string },
+      onboardingAgent: { agentId: string; name: string; workspaceDir: string },
       model: string | undefined,
       options: {
         reason: 'shared' | 'agent' | 'both' | 'manual';
@@ -603,8 +708,11 @@ ${clipMessage(prompt, 500)}
             agentId: onboardingAgent.agentId,
             dbPath: deps.reminderDbPath,
           },
+          onThreadStarted: (startedThreadId) => {
+            deps.sessionStore.setSession(sessionUserKey, onboardingAgent.agentId, startedThreadId, 'memory onboarding kickoff');
+          },
           onMessage: (text) => {
-            const sanitized = sanitizeOnboardingText(text);
+            const sanitized = formatAgentVisibleReply(onboardingAgent, sanitizeOnboardingText(text));
             lastStreamSend = deps.sendText(channel, userId, sanitized).catch((err) => {
               log.error('startMemoryOnboarding onMessage 推送失败', err);
             });
@@ -782,8 +890,11 @@ ${clipMessage(prompt, 500)}
               agentId: agent.agentId,
               dbPath: deps.reminderDbPath,
             },
+            onThreadStarted: (startedThreadId) => {
+              deps.sessionStore.setSession(sessionUserKey, agent.agentId, startedThreadId, 'skill onboarding kickoff');
+            },
             onMessage: (text) => {
-              const sanitized = sanitizeOnboardingText(text);
+              const sanitized = formatAgentVisibleReply(agent, sanitizeOnboardingText(text));
               lastStreamSend = sendCommandText(sanitized).catch((err) => {
                 log.error('initSkillAgent onMessage 推送失败', err);
               });
@@ -867,6 +978,15 @@ ${clipMessage(text, 500)}
         }
         return;
       }
+      if (commandResult.queryMemory) {
+        if (!deps.agentWorkspaceManager.getMemorySummary) {
+          await sendCommandText('⚠️ 当前版本未启用记忆摘要读取能力。');
+          return;
+        }
+        const snapshot = deps.agentWorkspaceManager.getMemorySummary(sessionUserKey, currentAgent.workspaceDir);
+        await sendCommandText(formatMemorySummary(currentAgent, snapshot));
+        return;
+      }
       if (commandResult.queryModel) {
         const snapshot = loadCodexModels();
         const lines = [`当前模型：${currentModel ?? '(codex cli 默认模型)'}`];
@@ -931,7 +1051,7 @@ ${clipMessage(text, 500)}
         return;
       }
       if (commandResult.clearModel) {
-        userModelOverrides.delete(sessionUserKey);
+        deps.sessionStore.clearModelOverride?.(sessionUserKey, currentAgent.agentId);
         const snapshot = loadCodexModels();
         await sendCommandText([
           `✅ 已重置模型：${deps.defaultModel ?? '(codex cli 默认模型)'}`,
@@ -946,7 +1066,7 @@ ${clipMessage(text, 500)}
           await sendCommandText(`❌ ${resolved.reason ?? '模型校验失败'}`);
           return;
         }
-        userModelOverrides.set(sessionUserKey, resolved.model);
+        deps.sessionStore.setModelOverride?.(sessionUserKey, currentAgent.agentId, resolved.model);
         const note = resolved.reason ? `\n⚠️ ${resolved.reason}` : '';
         await sendCommandText([
           `✅ 已切换模型为：${resolved.model}${note}`,
@@ -1133,12 +1253,11 @@ ${clipMessage(text, 500)}
       const streamId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       let streamedText = '';
       let lastFeishuStreamFlushAt = 0;
-      const runtimeAgent = shouldStartMemoryOnboarding && onboardingThreadId
-        ? ensureMemoryOnboardingAgent()
-        : currentAgent;
-      const initialRuntimeThreadId = shouldStartMemoryOnboarding && onboardingThreadId
-        ? onboardingThreadId
-        : existingThreadId;
+      let sawAgentOutput = false;
+      // 普通对话始终使用当前可见 agent，初始化引导仅通过显式引导流程触发，
+      // 避免 memory-onboarding 线程长期劫持后续会话。
+      const runtimeAgent = currentAgent;
+      const initialRuntimeThreadId = existingThreadId;
       const identityBinding = await ensureIdentityBound({
         channel,
         userId,
@@ -1158,6 +1277,7 @@ ${clipMessage(text, 500)}
 
       const startTime = Date.now();
       const runtimePrompt = buildOutboundMessageProtocolPrompt(channel, prompt);
+      await sendAgentProgress(deps, channel, userId, runtimeAgent, 'received');
       const result = await deps.codexRunner.run({
         prompt: runtimePrompt,
         threadId: runtimeThreadId,
@@ -1170,8 +1290,18 @@ ${clipMessage(text, 500)}
           agentId: runtimeAgent.agentId,
           dbPath: deps.reminderDbPath,
         },
+        onThreadStarted: (startedThreadId) => {
+          persistSession(
+            sessionUserKey,
+            runtimeAgent.agentId,
+            startedThreadId,
+            prompt,
+            identityBinding.boundIdentityVersion,
+          );
+        },
         onMessage: (text) => {
-          const userVisibleOutput = isSystemAgentId(currentAgent.agentId) ? sanitizeOnboardingText(text) : text;
+          const rawVisibleOutput = isSystemAgentId(runtimeAgent.agentId) ? sanitizeOnboardingText(text) : text;
+          const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, rawVisibleOutput);
           log.info(`
 ════════════════════════════════════════════════════════════
 🤖 Codex 回复  [${channel}:${userId}]
@@ -1181,6 +1311,7 @@ ${clipMessage(userVisibleOutput, 500)}
           if (!userVisibleOutput) {
             return;
           }
+          sawAgentOutput = true;
           if (channel === 'feishu' && deps.sendStreamingText) {
             streamedText += userVisibleOutput;
             const now = Date.now();
@@ -1214,6 +1345,9 @@ ${clipMessage(userVisibleOutput, 500)}
         await deps.sendStreamingText(channel, userId, streamId, streamedText, true);
       }
       await lastStreamSend;
+      if (!sawAgentOutput) {
+        await sendAgentProgress(deps, channel, userId, runtimeAgent, 'done');
+      }
 
       log.info('<<< handleText Codex 执行完成', {
         userId,

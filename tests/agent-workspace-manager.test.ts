@@ -118,7 +118,21 @@ describe('AgentWorkspaceManager', () => {
     const playbook = fs.readFileSync(path.join(result.workspaceDir, 'browser-playbook.md'), 'utf8');
 
     expect(agentsMd).toContain('浏览器操作职责');
+    expect(agentsMd).toContain('Action / Evidence / Result / Next step');
+    expect(agentsMd).toContain('多个相似目标并存');
+    expect(agentsMd).toContain('文件上传时，若用户未明确授权，先暂停并确认');
+    expect(agentsMd).toContain('人工接管触发条件可直接按这组理解');
     expect(playbook).toContain('Browser Playbook');
+    expect(playbook).toContain('回报格式固定：已执行动作 -> 页面证据 -> 当前结论 -> 下一步。');
+    expect(playbook).toContain('## Status Templates');
+    expect(playbook).toContain('进行中：汇报最新动作');
+    expect(playbook).toContain('阻塞：汇报阻塞点、风险');
+    expect(playbook).toContain('接管：汇报为什么必须人工接管');
+    expect(playbook).toContain('完成：汇报已完成事项');
+    expect(playbook).toContain('## Stop Conditions');
+    expect(playbook).toContain('人工接管触发条件总览');
+    expect(playbook).toContain('多个相似目标并存');
+    expect(playbook).toContain('需要用户做出的精确决策');
   });
 
   it('detects shared memory emptiness by meaningful content', () => {

@@ -14,6 +14,9 @@ async function startTestServer(options?: {
   feishuVerificationToken?: string;
   feishuLongConnection?: boolean;
   feishuGroupRequireMention?: boolean;
+  feishuDocBaseUrlConfigured?: boolean;
+  feishuStartupHelpEnabled?: boolean;
+  feishuStartupHelpAdminConfigured?: boolean;
   handleText?: (input: {
     channel: 'wecom' | 'feishu';
     userId: string;
@@ -26,6 +29,7 @@ async function startTestServer(options?: {
 }) {
   const app = createApp({
     wecomEnabled: true,
+    feishuEnabled: true,
     wecomCrypto: {
       verifySignature: () => true,
       decrypt: (input: string) => input,
@@ -34,6 +38,9 @@ async function startTestServer(options?: {
     feishuVerificationToken: options?.feishuVerificationToken,
     feishuLongConnection: options?.feishuLongConnection,
     feishuGroupRequireMention: options?.feishuGroupRequireMention,
+    feishuDocBaseUrlConfigured: options?.feishuDocBaseUrlConfigured,
+    feishuStartupHelpEnabled: options?.feishuStartupHelpEnabled,
+    feishuStartupHelpAdminConfigured: options?.feishuStartupHelpAdminConfigured,
     isDuplicateMessage: () => false,
     handleText: options?.handleText ?? (async () => undefined),
   });
@@ -53,6 +60,7 @@ async function startTestServer(options?: {
 async function startWecomDisabledServer() {
   const app = createApp({
     wecomEnabled: false,
+    feishuEnabled: false,
     allowFrom: '*',
     feishuGroupRequireMention: true,
     isDuplicateMessage: () => false,
@@ -78,6 +86,73 @@ describe('createApp wecom toggle', () => {
     const response = await fetch(`${baseUrl}/wecom/callback`);
 
     expect(response.status).toBe(404);
+  });
+
+  it('exposes channel status in healthz', async () => {
+    const baseUrl = await startTestServer({
+      feishuLongConnection: true,
+      feishuGroupRequireMention: true,
+    });
+
+    const response = await fetch(`${baseUrl}/healthz`);
+    const payload = await response.json() as {
+      ok?: boolean;
+      channels?: {
+        wecom?: { enabled?: boolean };
+        feishu?: {
+          enabled?: boolean;
+          mode?: string;
+          webhookEnabled?: boolean;
+          groupRequireMention?: boolean;
+          docBaseUrlConfigured?: boolean;
+          startupHelpEnabled?: boolean;
+          startupHelpAdminConfigured?: boolean;
+        };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(payload.channels?.wecom?.enabled).toBe(true);
+    expect(payload.channels?.feishu?.enabled).toBe(true);
+    expect(payload.channels?.feishu?.mode).toBe('long-connection');
+    expect(payload.channels?.feishu?.webhookEnabled).toBe(false);
+    expect(payload.channels?.feishu?.groupRequireMention).toBe(true);
+    expect(payload.channels?.feishu?.docBaseUrlConfigured).toBe(false);
+    expect(payload.channels?.feishu?.startupHelpEnabled).toBe(false);
+    expect(payload.channels?.feishu?.startupHelpAdminConfigured).toBe(false);
+  });
+
+  it('exposes feishu install-related status in healthz', async () => {
+    const baseUrl = await startTestServer({
+      feishuLongConnection: false,
+      feishuGroupRequireMention: false,
+      feishuDocBaseUrlConfigured: true,
+      feishuStartupHelpEnabled: true,
+      feishuStartupHelpAdminConfigured: true,
+    });
+
+    const response = await fetch(`${baseUrl}/healthz`);
+    const payload = await response.json() as {
+      channels?: {
+        feishu?: {
+          mode?: string;
+          webhookEnabled?: boolean;
+          groupRequireMention?: boolean;
+          docBaseUrlConfigured?: boolean;
+          startupHelpEnabled?: boolean;
+          startupHelpAdminConfigured?: boolean;
+        };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.channels?.feishu?.mode).toBe('webhook');
+    expect(payload.channels?.feishu?.webhookEnabled).toBe(true);
+    expect(payload.channels?.feishu?.groupRequireMention).toBe(false);
+    expect(payload.channels?.feishu?.docBaseUrlConfigured).toBe(true);
+    expect(payload.channels?.feishu?.startupHelpEnabled).toBe(true);
+    expect(payload.channels?.feishu?.startupHelpAdminConfigured).toBe(true);
   });
 });
 

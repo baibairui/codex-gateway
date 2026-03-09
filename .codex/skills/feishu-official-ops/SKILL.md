@@ -20,6 +20,7 @@ The CLI uses these environment variables:
 
 - `FEISHU_APP_ID`
 - `FEISHU_APP_SECRET`
+- `FEISHU_DOC_BASE_URL` (optional, used to return a direct DocX link, for example `https://your-domain.feishu.cn/docx`)
 
 If either is missing, stop and tell the user the app credentials are not configured.
 
@@ -60,6 +61,8 @@ Create a DocX document and write markdown content:
 ```bash
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx create --title "项目周报" --markdown-file ./weekly.md
 ```
+
+If `FEISHU_DOC_BASE_URL` is configured, the CLI will also return `document_url`.
 
 List Wiki spaces:
 
