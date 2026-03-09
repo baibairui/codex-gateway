@@ -36,6 +36,8 @@ describe('config-check bin', () => {
     expect(result.stdout).toContain('飞书安装检查');
     expect(result.stdout).toContain('接入模式：长连接（不需要公网回调地址）');
     expect(result.stdout).toContain('验收标准：');
+    expect(result.stdout).toContain('飞书安装验收清单：');
+    expect(result.stdout).toContain('确认启动日志打印了“飞书运行状态摘要”');
     expect(result.stdout).toContain('/healthz');
     expect(result.stdout).toContain('下一步：确认飞书事件订阅已开启长连接');
     expect(result.stdout).toContain('下一步：');

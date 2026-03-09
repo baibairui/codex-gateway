@@ -168,6 +168,17 @@ if (feishuEnabled) {
   if (!feishuGroupRequireMention) {
     console.log('- 群聊当前配置为“不要求 @ 机器人”，上线前请确认这符合你的预期。');
   }
+
+  console.log('\n飞书安装验收清单：');
+  console.log('- 1. 执行 `codexclaw doctor`，确认没有飞书阻塞项。');
+  console.log('- 2. 执行 `codexclaw up` 或 `codexclaw start`，确认启动日志打印了“飞书运行状态摘要”。');
+  console.log(`- 3. 访问 \`/healthz\`，确认飞书模式显示为 ${feishuLongConnection ? 'long-connection' : 'webhook'}。`);
+  console.log('- 4. 在飞书私聊机器人发送一条消息，确认能收到正常回复。');
+  if (feishuGroupRequireMention) {
+    console.log('- 5. 在飞书群聊中使用 @ 机器人 发送一条消息，确认群聊触发策略符合预期。');
+  } else {
+    console.log('- 5. 如需启用群聊，先确认当前配置为“不要求 @ 机器人”，再发送一条群消息验证是否符合预期。');
+  }
 }
 
 if (warnings.length > 0) {
