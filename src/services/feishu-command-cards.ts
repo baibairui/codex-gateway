@@ -912,57 +912,71 @@ export function buildFeishuApiLoginFormMessage(defaults?: { baseUrl?: string; mo
     },
     elements: [
       buildFeishuTitleBlock('写入 Codex API 配置', '提交后会覆盖当前项目 `.codex/` 下的登录配置。'),
+      buildFeishuTipsNote(`建议填写：base_url=${baseUrl}，model=${model}`),
       {
-        tag: 'input',
-        name: 'base_url',
-        label: {
-          tag: 'plain_text',
-          content: 'API URL',
+        tag: 'form',
+        name: 'codex_api_login',
+        value: {
+          gateway_action: 'codex_login.submit_api_credentials',
         },
-        placeholder: {
-          tag: 'plain_text',
-          content: 'https://codex.ai02.cn',
-        },
-        default_value: baseUrl,
-      },
-      {
-        tag: 'input',
-        name: 'api_key',
-        label: {
-          tag: 'plain_text',
-          content: 'API Key',
-        },
-        placeholder: {
-          tag: 'plain_text',
-          content: 'sk-...',
-        },
-      },
-      {
-        tag: 'input',
-        name: 'model',
-        label: {
-          tag: 'plain_text',
-          content: 'Model',
-        },
-        placeholder: {
-          tag: 'plain_text',
-          content: 'gpt-5.3-codex',
-        },
-        default_value: model,
-      },
-      {
-        tag: 'action',
-        actions: [
+        elements: [
           {
-            tag: 'button',
-            type: 'primary',
-            text: {
+            tag: 'input',
+            name: 'base_url',
+            label_position: 'top',
+            label: {
               tag: 'plain_text',
-              content: '保存并启用',
+              content: 'API URL',
             },
-            value: {
-              gateway_action: 'codex_login.submit_api_credentials',
+            placeholder: {
+              tag: 'plain_text',
+              content: baseUrl,
             },
+            max_length: 500,
+          },
+          {
+            tag: 'input',
+            name: 'api_key',
+            label_position: 'top',
+            label: {
+              tag: 'plain_text',
+              content: 'API Key',
+            },
+            placeholder: {
+              tag: 'plain_text',
+              content: 'sk-...',
+            },
+            max_length: 500,
+          },
+          {
+            tag: 'input',
+            name: 'model',
+            label_position: 'top',
+            label: {
+              tag: 'plain_text',
+              content: 'Model',
+            },
+            placeholder: {
+              tag: 'plain_text',
+              content: model,
+            },
+            max_length: 120,
+          },
+          {
+            tag: 'action',
+            actions: [
+              {
+                tag: 'button',
+                type: 'primary',
+                text: {
+                  tag: 'plain_text',
+                  content: '保存并启用',
+                },
+                value: {
+                  gateway_action: 'codex_login.submit_api_credentials',
+                },
+              },
+            ],
           },
         ],
       },
