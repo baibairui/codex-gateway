@@ -21,15 +21,19 @@ export function loadCodexModels(cachePath = defaultModelsCachePath()): CodexMode
   if (!fs.existsSync(cachePath)) {
     return { models: [] };
   }
-  const raw = fs.readFileSync(cachePath, 'utf8');
-  const parsed = JSON.parse(raw) as { fetched_at?: unknown; models?: unknown[] };
-  const models = (parsed.models ?? [])
-    .map((item) => normalizeModel(item))
-    .filter((item): item is CodexModelInfo => !!item);
-  return {
-    fetchedAt: typeof parsed.fetched_at === 'string' ? parsed.fetched_at : undefined,
-    models,
-  };
+  try {
+    const raw = fs.readFileSync(cachePath, 'utf8');
+    const parsed = JSON.parse(raw) as { fetched_at?: unknown; models?: unknown[] };
+    const models = (parsed.models ?? [])
+      .map((item) => normalizeModel(item))
+      .filter((item): item is CodexModelInfo => !!item);
+    return {
+      fetchedAt: typeof parsed.fetched_at === 'string' ? parsed.fetched_at : undefined,
+      models,
+    };
+  } catch {
+    return { models: [] };
+  }
 }
 
 function normalizeModel(input: unknown): CodexModelInfo | undefined {
