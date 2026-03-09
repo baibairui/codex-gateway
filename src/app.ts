@@ -278,7 +278,7 @@ export function createApp(deps: AppDeps) {
       enabled: deps.feishuEnabled,
       longConnection: deps.feishuLongConnection,
       groupRequireMention: deps.feishuGroupRequireMention,
-      docBaseUrlConfigured: deps.feishuDocBaseUrlConfigured,
+      docBaseUrlConfigured: deps.feishuDocBaseUrlConfigured ?? true,
       startupHelpEnabled: deps.feishuStartupHelpEnabled,
       startupHelpAdminConfigured: deps.feishuStartupHelpAdminConfigured,
     });

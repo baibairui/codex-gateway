@@ -20,7 +20,6 @@ The CLI uses these environment variables:
 
 - `FEISHU_APP_ID`
 - `FEISHU_APP_SECRET`
-- `FEISHU_DOC_BASE_URL` (optional, used to return a direct DocX link, for example `https://your-domain.feishu.cn/docx`)
 
 If either is missing, stop and tell the user the app credentials are not configured.
 
@@ -62,7 +61,13 @@ Create a DocX document and write markdown content:
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx create --title "项目周报" --markdown-file ./weekly.md
 ```
 
-If `FEISHU_DOC_BASE_URL` is configured, the CLI will also return `document_url`.
+Append markdown content into an existing DocX document:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx append --document "https://feishu.cn/docx/doccnxxxxxxxx" --markdown-file ./iteration.md
+```
+
+The CLI will return both `document_id` and a generated `document_url`.
 
 List Wiki spaces:
 
@@ -85,7 +90,7 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki create-
 ## Workflow
 
 1. Confirm the target object type and destination.
-2. If location is unclear, ask for the minimal missing identifier.
+2. 如果用户给了飞书文档链接、wiki 链接或 document_id，直接解析并继续；只有目标对象完全不明确时才追问。
 3. Run the CLI.
 4. Read the returned JSON and report the real result back to the user.
 5. If the API returns a permission error, say that the Feishu app lacks the required OpenAPI permission instead of inventing success.
@@ -95,3 +100,4 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki create-
 - To create a standalone document, prefer `docx create`.
 - To create content inside a knowledge space, prefer `wiki create-node`.
 - If the user only says "建一个飞书文档" and does not specify a knowledge space or folder, create a standalone DocX document first.
+- For appending content, accept either a full Feishu document URL, a wiki URL, or a raw `document_id`; do not insist on a user-provided URL format config.
