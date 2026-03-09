@@ -2,10 +2,13 @@
 
 import fs from 'node:fs';
 import process from 'node:process';
+import path from 'node:path';
 import { buildDocxChildrenFromConvertPayload, buildDocxCreateNodes } from './docx-markdown.mjs';
 import { pathToFileURL } from 'node:url';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
+const DEFAULT_FEISHU_DOC_BASE_URL = 'https://feishu.cn/docx';
+const LATEST_DOC_STATE_PATH = path.resolve(process.cwd(), '.data', 'feishu-docx-latest.json');
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -24,6 +27,8 @@ async function main() {
   let result;
   if (resource === 'docx' && action === 'create') {
     result = await createDocx(token, args);
+  } else if (resource === 'docx' && action === 'append') {
+    result = await appendDocx(token, args);
   } else if (resource === 'wiki' && action === 'list-spaces') {
     result = await listWikiSpaces(token, args);
   } else if (resource === 'wiki' && action === 'get-node') {
@@ -44,10 +49,11 @@ function printHelp() {
     'Environment:',
     '  FEISHU_APP_ID',
     '  FEISHU_APP_SECRET',
-    '  FEISHU_DOC_BASE_URL (optional, e.g. https://your-domain.feishu.cn/docx)',
+    '  FEISHU_DOC_BASE_URL (optional override; defaults to https://feishu.cn/docx)',
     '',
     'Commands:',
     '  docx create --title <title> [--folder-token <token>] [--markdown <text>] [--markdown-file <path>]',
+    '  docx append --document <url|token|document_id> [--markdown <text>] [--markdown-file <path>]',
     '  wiki list-spaces [--page-size <n>] [--page-token <token>]',
     '  wiki get-node --token <token> [--obj-type <wiki|docx|doc|sheet|bitable|mindnote|file|slides>]',
     '  wiki create-node --space-id <id> --obj-type <docx|doc|sheet|bitable|mindnote|file|slides> [--title <title>] [--parent-node-token <token>] [--node-type <origin|shortcut>] [--origin-node-token <token>]',
@@ -120,16 +126,49 @@ async function createDocx(token, args) {
       };
     }
   }
-  return {
+  const documentUrl = buildFeishuDocxUrl(documentId, docBaseUrl);
+  const result = {
     ok: true,
     operation: 'docx.create',
     title: document.title ?? title,
     document_id: documentId,
-    document_url: resolveDocxUrl(documentId, docBaseUrl),
+    document_url: documentUrl,
     revision_id: document.revision_id ?? null,
     content_write: writeResult ?? null,
     raw: payload.data ?? null,
   };
+  persistLatestDocxState({
+    documentId,
+    documentUrl,
+    title: document.title ?? title,
+  });
+  return result;
+}
+
+async function appendDocx(token, args) {
+  const locator = firstNonEmptyString(args.document, args['document-id'], args['doc-id'], args.document_id, args.url, args.target);
+  const target = await resolveDocxTarget(token, locator);
+  const markdownContent = resolveMarkdownInput(args);
+  if (!markdownContent?.trim()) {
+    throw new Error('missing --markdown or --markdown-file');
+  }
+  const docBaseUrl = firstNonEmptyString(args['doc-base-url'], process.env.FEISHU_DOC_BASE_URL);
+  const writeResult = await appendMarkdownToDocx(token, target.documentId, markdownContent);
+  const documentUrl = buildFeishuDocxUrl(target.documentId, docBaseUrl);
+  const result = {
+    ok: true,
+    operation: 'docx.append',
+    document_id: target.documentId,
+    document_url: documentUrl,
+    input_locator: locator ?? null,
+    resolved_from: target.kind,
+    content_write: writeResult,
+  };
+  persistLatestDocxState({
+    documentId: target.documentId,
+    documentUrl,
+  });
+  return result;
 }
 
 async function listWikiSpaces(token, args) {
@@ -151,7 +190,7 @@ async function listWikiSpaces(token, args) {
 }
 
 async function getWikiNode(token, args) {
-  const nodeToken = args.token?.trim() || args['node-token']?.trim();
+  const nodeToken = args.token?.trim() || args['node-token']?.trim() || extractFeishuNodeToken(args.url);
   if (!nodeToken) {
     throw new Error('missing --token');
   }
@@ -340,15 +379,6 @@ function buildPlainTextDocxChildren(markdown) {
   }));
 }
 
-function resolveDocxUrl(documentId, docBaseUrl) {
-  const id = typeof documentId === 'string' ? documentId.trim() : '';
-  const base = typeof docBaseUrl === 'string' ? docBaseUrl.trim().replace(/\/+$/, '') : '';
-  if (!id || !base) {
-    return null;
-  }
-  return `${base}/${encodeURIComponent(id)}`;
-}
-
 function firstNonEmptyString(...values) {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) {
@@ -356,6 +386,132 @@ function firstNonEmptyString(...values) {
     }
   }
   return undefined;
+}
+
+async function resolveDocxTarget(token, locator) {
+  const value = firstNonEmptyString(locator) ?? loadLatestDocxReference();
+  if (!value) {
+    throw new Error('missing --document and no recent DocX reference available');
+  }
+  const directDocId = extractDocxDocumentId(value);
+  if (directDocId) {
+    return {
+      documentId: directDocId,
+      kind: directDocId === value ? 'document_id' : 'document_url',
+    };
+  }
+  const wikiToken = extractWikiNodeToken(value);
+  if (!wikiToken) {
+    throw new Error(`unsupported document locator: ${value}`);
+  }
+  const node = await getWikiNodeByToken(token, wikiToken);
+  const documentId = firstNonEmptyString(node?.obj_token, node?.origin_node_token);
+  if (!documentId) {
+    throw new Error(`wiki node did not resolve to a DocX object: ${wikiToken}`);
+  }
+  return {
+    documentId,
+    kind: 'wiki_url',
+  };
+}
+
+export function extractDocxDocumentId(value) {
+  const raw = firstNonEmptyString(value);
+  if (!raw) {
+    return undefined;
+  }
+  const fromUrl = extractDocxPathToken(raw);
+  if (fromUrl) {
+    return fromUrl;
+  }
+  const normalized = raw.replace(/^\/+|\/+$/g, '');
+  if (/^(?:dox|doc|docx)[A-Za-z0-9]+$/.test(normalized) || /^[A-Za-z0-9_-]{10,}$/.test(normalized)) {
+    return normalized;
+  }
+  return undefined;
+}
+
+export function extractFeishuNodeToken(value) {
+  return extractDocxPathToken(value) ?? extractWikiNodeToken(value);
+}
+
+function extractDocxPathToken(value) {
+  const urlValue = parseUrlSafely(value);
+  const pathname = urlValue?.pathname ?? value;
+  return extractTokenFromPath(pathname, ['docx', 'docs', 'doc']);
+}
+
+export function extractWikiNodeToken(value) {
+  const urlValue = parseUrlSafely(value);
+  const pathname = urlValue?.pathname ?? value;
+  return extractTokenFromPath(pathname, ['wiki']);
+}
+
+function extractTokenFromPath(pathname, prefixes) {
+  const cleaned = String(pathname ?? '').replace(/^\/+|\/+$/g, '');
+  if (!cleaned) {
+    return undefined;
+  }
+  const segments = cleaned.split('/');
+  for (let i = 0; i < segments.length; i += 1) {
+    if (prefixes.includes(segments[i]) && segments[i + 1]) {
+      return decodeURIComponent(segments[i + 1]).replace(/[?#].*$/, '');
+    }
+  }
+  return undefined;
+}
+
+function parseUrlSafely(value) {
+  const raw = firstNonEmptyString(value);
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    return new URL(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+function loadLatestDocxReference() {
+  try {
+    if (!fs.existsSync(LATEST_DOC_STATE_PATH)) {
+      return undefined;
+    }
+    const parsed = JSON.parse(fs.readFileSync(LATEST_DOC_STATE_PATH, 'utf8'));
+    return firstNonEmptyString(parsed?.documentId, parsed?.documentUrl);
+  } catch {
+    return undefined;
+  }
+}
+
+function persistLatestDocxState(input) {
+  const documentId = firstNonEmptyString(input?.documentId);
+  if (!documentId) {
+    return;
+  }
+  fs.mkdirSync(path.dirname(LATEST_DOC_STATE_PATH), { recursive: true });
+  fs.writeFileSync(LATEST_DOC_STATE_PATH, JSON.stringify({
+    documentId,
+    documentUrl: firstNonEmptyString(input?.documentUrl) ?? buildFeishuDocxUrl(documentId),
+    title: firstNonEmptyString(input?.title) ?? null,
+    updatedAt: new Date().toISOString(),
+  }, null, 2));
+}
+
+async function getWikiNodeByToken(token, nodeToken) {
+  const query = new URLSearchParams({ token: nodeToken });
+  const payload = await apiRequest(token, 'GET', `/wiki/v2/spaces/get_node?${query.toString()}`);
+  return payload?.data?.node ?? null;
+}
+
+export function buildFeishuDocxUrl(documentId, docBaseUrl) {
+  const id = firstNonEmptyString(documentId);
+  const base = firstNonEmptyString(docBaseUrl, DEFAULT_FEISHU_DOC_BASE_URL)?.replace(/\/+$/, '');
+  if (!id || !base) {
+    return null;
+  }
+  return `${base}/${encodeURIComponent(id)}`;
 }
 
 function sleep(ms) {

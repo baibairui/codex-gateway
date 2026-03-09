@@ -29,13 +29,19 @@ import { RateLimitStore } from './stores/rate-limit-store.js';
 import { createLogger } from './utils/logger.js';
 
 const log = createLogger('Server');
-const codexWorkdir = resolveCodexWorkdir(config.codexWorkdir);
 const gatewayRootDir = resolveGatewayRootDir(config.gatewayRootDir);
+const dataDir = path.resolve(process.cwd(), '.data');
+fs.mkdirSync(dataDir, { recursive: true });
+const agentsDir = resolveAgentsDir({
+  configuredDir: config.codexAgentsDir,
+  dataDir,
+});
+const codexWorkdir = resolveCodexWorkdir(config.codexWorkdir, agentsDir);
 const feishuStatusSummary = buildFeishuStatusSummary({
   enabled: config.feishuEnabled,
   longConnection: config.feishuLongConnection,
   groupRequireMention: config.feishuGroupRequireMention,
-  docBaseUrlConfigured: Boolean(process.env.FEISHU_DOC_BASE_URL?.trim()),
+  docBaseUrlConfigured: true,
   startupHelpEnabled: config.feishuStartupHelpEnabled,
   startupHelpAdminConfigured: Boolean(config.feishuStartupHelpAdminOpenId),
 });
@@ -72,8 +78,6 @@ log.info('服务启动初始化...', {
   feishuStatus: feishuStatusSummary,
 });
 
-const dataDir = path.resolve(process.cwd(), '.data');
-fs.mkdirSync(dataDir, { recursive: true });
 log.debug('数据目录已就绪', { dataDir });
 const browserManager = new BrowserManager({
   profileDir: resolveRuntimeDir(config.browserMcpProfileDir, path.join(dataDir, 'browser', 'profile')),
@@ -86,10 +90,6 @@ const activeBrowserMcpUrl = await ensureBrowserMcpUrl(browserMcpRuntime, browser
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
 fs.mkdirSync(feishuImageCacheDir, { recursive: true });
 
-const agentsDir = resolveAgentsDir({
-  configuredDir: config.codexAgentsDir,
-  dataDir,
-});
 log.debug('Agent 工作区目录已就绪', { agentsDir });
 const reminderDbPath = path.join(dataDir, 'reminders.db');
 
@@ -275,21 +275,25 @@ function resolveAgentsDir(input: { configuredDir?: string; dataDir: string }): s
   return fallbackDir;
 }
 
-function resolveCodexWorkdir(configuredDir: string): string {
+function resolveCodexWorkdir(configuredDir: string, agentsDir: string): string {
   const resolved = path.resolve(configuredDir);
-  try {
-    if (fs.statSync(resolved).isDirectory()) {
-      return resolved;
-    }
-  } catch {
-    // noop
+  if (canUseDir(resolved)) {
+    return resolved;
   }
-  const fallback = path.resolve(process.cwd());
-  log.warn('配置的 CODEX_WORKDIR 不可用，回退到当前目录', {
+  const fallback = path.resolve(agentsDir);
+  if (canUseDir(fallback)) {
+    log.warn('配置的 CODEX_WORKDIR 不可用，回退到 agents 工作目录', {
+      configured: resolved,
+      fallback,
+    });
+    return fallback;
+  }
+  const finalFallback = path.resolve(process.cwd());
+  log.warn('配置的 CODEX_WORKDIR 与 agents 工作目录都不可用，回退到当前目录', {
     configured: resolved,
-    fallback,
+    fallback: finalFallback,
   });
-  return fallback;
+  return finalFallback;
 }
 
 function resolveRuntimeDir(configuredDir: string | undefined, fallbackDir: string): string {

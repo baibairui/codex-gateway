@@ -17,7 +17,6 @@ describe('config-check bin', () => {
       'FEISHU_APP_SECRET=sec_xxx',
       'FEISHU_LONG_CONNECTION=true',
       'FEISHU_GROUP_REQUIRE_MENTION=true',
-      'FEISHU_DOC_BASE_URL=https://tenant.feishu.cn/docx',
       'RUNNER_ENABLED=false',
       'CODEX_BIN=node',
     ].join('\n'));
@@ -40,6 +39,7 @@ describe('config-check bin', () => {
     expect(result.stdout).toContain('确认启动日志打印了“飞书运行状态摘要”');
     expect(result.stdout).toContain('/healthz');
     expect(result.stdout).toContain('下一步：确认飞书事件订阅已开启长连接');
+    expect(result.stdout).toContain('DocX 链接：系统将基于 document_id 自动生成');
     expect(result.stdout).toContain('下一步：');
   });
 
@@ -78,6 +78,7 @@ describe('config-check bin', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('doctor');
+    expect(result.stdout).toContain('doc-log');
     expect(result.stdout).toContain('安装自检');
   });
 });

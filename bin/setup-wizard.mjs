@@ -53,12 +53,11 @@ function printFeishuNextSteps(values) {
   }
   const longConnection = values.FEISHU_LONG_CONNECTION === 'true';
   const requireMention = values.FEISHU_GROUP_REQUIRE_MENTION !== 'false';
-  const docBaseUrl = String(values.FEISHU_DOC_BASE_URL ?? '').trim();
 
   console.log(`\n${paint(c.bold, '飞书下一步清单')}`);
   console.log(`- 接入模式：${longConnection ? '长连接（不需要公网回调地址）' : 'webhook（需要公网回调地址）'}`);
   console.log(`- 群聊触发：${requireMention ? '要求 @ 机器人' : '群内任意消息都触发'}`);
-  console.log(`- DocX 链接域名：${docBaseUrl || '(未配置，可后续补充 FEISHU_DOC_BASE_URL)'}`);
+  console.log('- DocX 链接：系统将基于 document_id 自动生成，无需手动配置 URL');
   if (longConnection) {
     console.log('- 去飞书开放平台确认事件订阅已启用长连接，并检查机器人权限范围。');
   } else {
@@ -286,12 +285,6 @@ async function main() {
           normalizeBoolean(getDefault('FEISHU_GROUP_REQUIRE_MENTION', 'true'), 'true') === 'true',
       }),
     );
-    values.FEISHU_DOC_BASE_URL = await askLine(rl, {
-      key: 'FEISHU_DOC_BASE_URL',
-      label: '飞书文档访问域名 FEISHU_DOC_BASE_URL（可选）',
-      defaultValue: getDefault('FEISHU_DOC_BASE_URL', ''),
-      required: false,
-    });
   }
 
   rl.close();

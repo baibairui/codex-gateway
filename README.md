@@ -203,10 +203,11 @@ WECOM_ENABLED=false
 FEISHU_ENABLED=true
 FEISHU_APP_ID=你的飞书AppID
 FEISHU_APP_SECRET=你的飞书AppSecret
-FEISHU_DOC_BASE_URL=https://你的飞书域名/docx
 FEISHU_LONG_CONNECTION=true
 FEISHU_VERIFICATION_TOKEN=你的校验Token
 FEISHU_GROUP_REQUIRE_MENTION=true
+# 可选：固定的项目迭代 DocX 文档引用（支持 id / token / url）
+# FEISHU_ITERATION_DOCX_REF=https://feishu.cn/docx/EChBdybp4oCAf2x6VqqcXQhmnvh
 ```
 
 说明：
@@ -215,13 +216,15 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 - 开启 `FEISHU_LONG_CONNECTION=true` 后，会关闭 `/feishu/callback` webhook 接口（不再做兜底双通道）
 - `FEISHU_VERIFICATION_TOKEN`：仅 webhook 模式需要；长连接模式可留空
 - `FEISHU_GROUP_REQUIRE_MENTION=true`：群聊默认要求 `@机器人` 才触发；私聊不受影响。显式设为 `false` 可恢复“群里任何消息都触发”
-- `FEISHU_DOC_BASE_URL`：可选。用于飞书官方操作 CLI 在创建 DocX 后直接返回可访问文档链接，例如 `https://你的飞书域名/docx`
+- DocX 链接默认由系统基于 `document_id` 自动生成，不要求用户额外配置 URL
+- `FEISHU_ITERATION_DOCX_REF`：可选。用于把每轮迭代记录追加到固定的项目 DocX 文档；支持 `document_id`、token 或飞书文档 URL
+- `FEISHU_ITERATION_DOCX_ID`：兼容旧配置，仍可继续使用，但推荐升级为 `FEISHU_ITERATION_DOCX_REF`
 
 安装建议：
 
 - 优先使用 `codexclaw setup` 完成飞书配置
 - 配完后立刻执行 `codexclaw doctor`
-- `doctor` 会直接告诉你：当前是长连接还是 webhook、飞书凭据是否缺失、群触发策略是否开启、DocX 链接域名是否配置
+- `doctor` 会直接告诉你：当前是长连接还是 webhook、飞书凭据是否缺失、群触发策略是否开启、DocX 链路是否可直接使用
 
 ### 飞书能力说明（当前实现）
 

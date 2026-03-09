@@ -43,7 +43,6 @@ const wecomEnabled = asBool(process.env.WECOM_ENABLED, true);
 const feishuEnabled = asBool(process.env.FEISHU_ENABLED, false);
 const feishuLongConnection = asBool(process.env.FEISHU_LONG_CONNECTION, false);
 const runnerEnabled = asBool(process.env.RUNNER_ENABLED, true);
-const feishuDocBaseUrl = process.env.FEISHU_DOC_BASE_URL?.trim() || '';
 const feishuGroupRequireMention = asBool(process.env.FEISHU_GROUP_REQUIRE_MENTION, true);
 const feishuStartupHelpEnabled = asBool(process.env.FEISHU_STARTUP_HELP_ENABLED, false);
 const feishuStartupHelpAdminOpenId = process.env.FEISHU_STARTUP_HELP_ADMIN_OPEN_ID?.trim() || '';
@@ -93,10 +92,6 @@ if (feishuEnabled) {
   if (!feishuLongConnection && missingIfEmpty('FEISHU_VERIFICATION_TOKEN')) {
     warnings.push('当前是飞书 webhook 模式，建议配置 FEISHU_VERIFICATION_TOKEN。');
     nextSteps.push('如果继续使用 webhook 模式，请补齐 FEISHU_VERIFICATION_TOKEN 并确认公网回调地址可访问。');
-  }
-  if (!feishuDocBaseUrl) {
-    warnings.push('未配置 FEISHU_DOC_BASE_URL，后续创建飞书 DocX 时将无法直接返回可访问文档链接。');
-    nextSteps.push('如需直接回传飞书文档链接，请补充 FEISHU_DOC_BASE_URL。');
   }
   if (feishuStartupHelpEnabled && !feishuStartupHelpAdminOpenId) {
     warnings.push('FEISHU_STARTUP_HELP_ENABLED=true 但缺少 FEISHU_STARTUP_HELP_ADMIN_OPEN_ID，启动后不会给管理员推送 help。');
@@ -148,7 +143,7 @@ if (!feishuEnabled) {
   console.log(`- 接入模式：${feishuLongConnection ? '长连接（不需要公网回调地址）' : 'webhook（需要公网回调地址）'}`);
   console.log(`- App 凭据：${missingIfEmpty('FEISHU_APP_ID') || missingIfEmpty('FEISHU_APP_SECRET') ? '缺失' : '已配置'}`);
   console.log(`- 群聊触发：${feishuGroupRequireMention ? '要求 @ 机器人' : '群内任意消息都触发'}`);
-  console.log(`- DocX 链接域名：${feishuDocBaseUrl || '(未配置 FEISHU_DOC_BASE_URL)'}`);
+  console.log('- DocX 链接：系统将基于 document_id 自动生成，无需额外域名配置');
   console.log(`- 启动 help 推送：${feishuStartupHelpEnabled ? '已开启' : '未开启'}`);
   if (feishuStartupHelpEnabled) {
     console.log(`- help 推送管理员：${feishuStartupHelpAdminOpenId || '(未配置 FEISHU_STARTUP_HELP_ADMIN_OPEN_ID)'}`);
