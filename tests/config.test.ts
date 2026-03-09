@@ -96,4 +96,14 @@ describe('config feishu mention trigger', () => {
     expect(config.feishuStartupHelpEnabled).toBe(true);
     expect(config.feishuStartupHelpAdminOpenId).toBe('ou_admin');
   });
+
+  it('shows actionable feishu env error when credentials are missing', async () => {
+    await expect(loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'true',
+      FEISHU_APP_ID: undefined,
+      FEISHU_APP_SECRET: undefined,
+      CODEX_SANDBOX: 'full-auto',
+    })).rejects.toThrow(/codexclaw setup|codexclaw doctor/);
+  });
 });

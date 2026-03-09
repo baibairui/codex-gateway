@@ -408,6 +408,7 @@ const memorySteward = new MemorySteward({
 
 const app = createApp({
   wecomEnabled: config.wecomEnabled,
+  feishuEnabled: config.feishuEnabled,
   wecomCrypto,
   allowFrom: config.allowFrom,
   feishuVerificationToken: config.feishuVerificationToken,

@@ -353,6 +353,8 @@ npm run publish:workspace
 curl http://127.0.0.1:3000/healthz
 ```
 
+现在 `/healthz` 会额外返回渠道状态摘要，例如飞书是否启用、当前是长连接还是 webhook、webhook 是否开放、群聊是否要求 `@`。
+
 如果返回 `ok`，说明服务已经启动成功。
 
 ### 无公网 IP 部署（重点）

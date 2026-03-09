@@ -10,6 +10,7 @@ const log = createLogger('App');
 
 interface AppDeps {
   wecomEnabled: boolean;
+  feishuEnabled?: boolean;
   wecomCrypto?: WeComCrypto;
   allowFrom: string;
   feishuVerificationToken?: string;
@@ -269,7 +270,20 @@ export function createApp(deps: AppDeps) {
 
   // ========================= 健康检查 =========================
   app.get('/healthz', (_req, res) => {
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      channels: {
+        wecom: {
+          enabled: deps.wecomEnabled,
+        },
+        feishu: {
+          enabled: deps.feishuEnabled === true,
+          mode: deps.feishuLongConnection ? 'long-connection' : 'webhook',
+          webhookEnabled: !deps.feishuLongConnection,
+          groupRequireMention: deps.feishuGroupRequireMention !== false,
+        },
+      },
+    });
   });
 
   // ===================== GET 验证 URL =====================

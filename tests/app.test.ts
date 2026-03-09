@@ -26,6 +26,7 @@ async function startTestServer(options?: {
 }) {
   const app = createApp({
     wecomEnabled: true,
+    feishuEnabled: true,
     wecomCrypto: {
       verifySignature: () => true,
       decrypt: (input: string) => input,
@@ -53,6 +54,7 @@ async function startTestServer(options?: {
 async function startWecomDisabledServer() {
   const app = createApp({
     wecomEnabled: false,
+    feishuEnabled: false,
     allowFrom: '*',
     feishuGroupRequireMention: true,
     isDuplicateMessage: () => false,
@@ -78,6 +80,35 @@ describe('createApp wecom toggle', () => {
     const response = await fetch(`${baseUrl}/wecom/callback`);
 
     expect(response.status).toBe(404);
+  });
+
+  it('exposes channel status in healthz', async () => {
+    const baseUrl = await startTestServer({
+      feishuLongConnection: true,
+      feishuGroupRequireMention: true,
+    });
+
+    const response = await fetch(`${baseUrl}/healthz`);
+    const payload = await response.json() as {
+      ok?: boolean;
+      channels?: {
+        wecom?: { enabled?: boolean };
+        feishu?: {
+          enabled?: boolean;
+          mode?: string;
+          webhookEnabled?: boolean;
+          groupRequireMention?: boolean;
+        };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(payload.channels?.wecom?.enabled).toBe(true);
+    expect(payload.channels?.feishu?.enabled).toBe(true);
+    expect(payload.channels?.feishu?.mode).toBe('long-connection');
+    expect(payload.channels?.feishu?.webhookEnabled).toBe(false);
+    expect(payload.channels?.feishu?.groupRequireMention).toBe(true);
   });
 });
 
