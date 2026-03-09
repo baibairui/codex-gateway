@@ -47,6 +47,27 @@ function getDefault(key, fallback = '') {
   return fallback;
 }
 
+function printFeishuNextSteps(values) {
+  if (values.FEISHU_ENABLED !== 'true') {
+    return;
+  }
+  const longConnection = values.FEISHU_LONG_CONNECTION === 'true';
+  const requireMention = values.FEISHU_GROUP_REQUIRE_MENTION !== 'false';
+  const docBaseUrl = String(values.FEISHU_DOC_BASE_URL ?? '').trim();
+
+  console.log(`\n${paint(c.bold, '飞书下一步清单')}`);
+  console.log(`- 接入模式：${longConnection ? '长连接（不需要公网回调地址）' : 'webhook（需要公网回调地址）'}`);
+  console.log(`- 群聊触发：${requireMention ? '要求 @ 机器人' : '群内任意消息都触发'}`);
+  console.log(`- DocX 链接域名：${docBaseUrl || '(未配置，可后续补充 FEISHU_DOC_BASE_URL)'}`);
+  if (longConnection) {
+    console.log('- 去飞书开放平台确认事件订阅已启用长连接，并检查机器人权限范围。');
+  } else {
+    console.log('- 去飞书开放平台配置可公网访问的 webhook 回调地址，并校验 Verification Token。');
+  }
+  console.log('- 执行 codexclaw doctor，确认当前模式、缺失配置和下一步提示。');
+  console.log('- 执行 codexclaw up，启动后用 /healthz 或启动日志确认飞书状态。');
+}
+
 function setEnvValue(key, value) {
   const line = `${key}=${value}`;
   const index = envLines.findIndex((item) => item.startsWith(`${key}=`));
@@ -281,6 +302,7 @@ async function main() {
 
   fs.writeFileSync(envPath, `${envLines.join('\n').replace(/\n*$/, '\n')}`, 'utf8');
   console.log(`\n${paint(c.green, '✅ .env 已更新完成。')}`);
+  printFeishuNextSteps(values);
   console.log(paint(c.bold, '正在执行配置检查...\n'));
 
   const checkResult = spawnSync('node', ['./bin/config-check.mjs'], {
