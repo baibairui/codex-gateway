@@ -269,6 +269,36 @@ function formatMemorySummary(agent: AgentRecord, snapshot: MemorySummarySnapshot
   ].join('\n');
 }
 
+function buildAgentProgressText(agent: { name: string }, phase: 'received' | 'reminder' | 'done'): string {
+  if (phase === 'received') {
+    return formatAgentVisibleReply(agent, '⏳ 已接收请求，正在处理...');
+  }
+  if (phase === 'reminder') {
+    return formatAgentVisibleReply(agent, '⏳ 已收到定时任务，正在处理...');
+  }
+  return formatAgentVisibleReply(agent, '✅ 已处理完成。');
+}
+
+async function sendAgentProgress(
+  deps: Pick<ChatHandlerDeps, 'sendText'>,
+  channel: Channel,
+  userId: string,
+  agent: { name: string },
+  phase: 'received' | 'reminder' | 'done',
+): Promise<void> {
+  try {
+    await deps.sendText(channel, userId, buildAgentProgressText(agent, phase));
+  } catch (error) {
+    log.warn('agent progress push failed', {
+      channel,
+      userId,
+      agentName: agent.name,
+      phase,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 function buildIdentityBootstrapPrompt(identityContent: string): string {
   const body = identityContent.trim() || '# Identity\n- 未初始化身份信息';
   return [
@@ -526,7 +556,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     ].join('\n');
 
     let lastStreamSend: Promise<void> = Promise.resolve();
+    let sawAgentOutput = false;
     try {
+      await sendAgentProgress(deps, channel, userId, runtimeAgent, 'reminder');
       const result = await deps.codexRunner.run({
         prompt: triggerPrompt,
         threadId: runtimeThreadId,
@@ -553,12 +585,16 @@ export function createChatHandler(deps: ChatHandlerDeps) {
           if (!output) {
             return;
           }
+          sawAgentOutput = true;
           lastStreamSend = deps.sendText(channel, userId, output).catch((err) => {
             log.error('runReminderTrigger onMessage 推送失败', err);
           });
         },
       });
       await lastStreamSend;
+      if (!sawAgentOutput) {
+        await sendAgentProgress(deps, channel, userId, runtimeAgent, 'done');
+      }
       persistSession(
         sessionUserKey,
         runtimeAgent.agentId,
@@ -1208,6 +1244,7 @@ ${clipMessage(text, 500)}
       const streamId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       let streamedText = '';
       let lastFeishuStreamFlushAt = 0;
+      let sawAgentOutput = false;
       const runtimeAgent = shouldStartMemoryOnboarding && onboardingThreadId
         ? ensureMemoryOnboardingAgent()
         : currentAgent;
@@ -1233,6 +1270,7 @@ ${clipMessage(text, 500)}
 
       const startTime = Date.now();
       const runtimePrompt = buildOutboundMessageProtocolPrompt(channel, prompt);
+      await sendAgentProgress(deps, channel, userId, runtimeAgent, 'received');
       const result = await deps.codexRunner.run({
         prompt: runtimePrompt,
         threadId: runtimeThreadId,
@@ -1266,6 +1304,7 @@ ${clipMessage(userVisibleOutput, 500)}
           if (!userVisibleOutput) {
             return;
           }
+          sawAgentOutput = true;
           if (channel === 'feishu' && deps.sendStreamingText) {
             streamedText += userVisibleOutput;
             const now = Date.now();
@@ -1299,6 +1338,9 @@ ${clipMessage(userVisibleOutput, 500)}
         await deps.sendStreamingText(channel, userId, streamId, streamedText, true);
       }
       await lastStreamSend;
+      if (!sawAgentOutput) {
+        await sendAgentProgress(deps, channel, userId, runtimeAgent, 'done');
+      }
 
       log.info('<<< handleText Codex 执行完成', {
         userId,

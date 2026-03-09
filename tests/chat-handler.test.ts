@@ -375,6 +375,35 @@ describe('createChatHandler', () => {
     );
   });
 
+  it('sends progress status before running a normal agent task', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.setSession('local-owner', 'default', 'thread_existing');
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_existing', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '[默认Agent] ⏳ 已接收请求，正在处理...');
+    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '[默认Agent] ✅ 已处理完成。');
+  });
+
   it('pushes help card automatically when a new feishu session starts', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async (input: { onMessage?: (text: string) => void }) => {
@@ -442,10 +471,11 @@ describe('createChatHandler', () => {
     await handler({ channel: 'wecom', userId: 'u1', content: '你好' });
 
     expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', expect.stringContaining('可用命令（按功能分组，帮助页 1/2）：'));
-    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '[默认Agent] 开始处理。');
+    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '[默认Agent] ⏳ 已接收请求，正在处理...');
+    expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '[默认Agent] 开始处理。');
   });
 
-  it('sends fallback error text when stream push fails', async () => {
+  it('keeps running when the progress status push fails', async () => {
     const sendText = vi
       .fn<(
         channel: 'wecom' | 'feishu',
@@ -480,8 +510,8 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '[默认Agent] 第一条回复');
-    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '[默认Agent] ⏳ 已接收请求，正在处理...');
+    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '[默认Agent] 第一条回复');
   });
 
   it('creates and switches agent by command', async () => {
