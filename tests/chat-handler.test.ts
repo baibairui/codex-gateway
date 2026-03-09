@@ -334,6 +334,44 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', structured);
   });
 
+  it('falls back to visible default agent when current agent is hidden onboarding agent', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.createAgent('local-owner', {
+      agentId: 'memory-onboarding',
+      name: '记忆初始化引导',
+      workspaceDir: '/tmp/memory-onboarding',
+    });
+    sessionStore.setCurrentAgent('local-owner', 'memory-onboarding');
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async (input) => {
+          input.onMessage?.('继续回答问题');
+          return { threadId: 'thread_existing', rawOutput: '' };
+        },
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[默认Agent] 继续回答问题');
+    const systemPrefixed = sendText.mock.calls.some((call) => String(call[2] ?? '').includes('[记忆初始化引导]'));
+    expect(systemPrefixed).toBe(false);
+  });
+
   it('renders current agent and shared memory summary via /memory', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
@@ -1614,7 +1652,7 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('当前 agent 自身份未初始化'));
   });
 
-  it('routes follow-up user replies to hidden onboarding session while shared memory is still empty', async () => {
+  it('keeps normal conversation on visible agent even when onboarding session exists', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async () => ({ threadId: 'thread_onboarding', rawOutput: '' }));
     const sessionStore = createSessionStore();
@@ -1645,9 +1683,11 @@ describe('createChatHandler', () => {
     await handler({ channel: 'wecom', userId: 'u1', content: '我叫 Alice' });
 
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      prompt: expect.stringContaining('用户输入如下：\n我叫 Alice'),
+      prompt: expect.stringContaining('我叫 Alice'),
+      workdir: '/repo/default',
+    }));
+    expect(run).not.toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread_onboarding',
-      workdir: '/tmp',
     }));
     expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
   });

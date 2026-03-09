@@ -246,6 +246,9 @@ function formatAgentVisibleReply(agent: { name: string }, text: string): string 
   if (parseGatewayStructuredMessage(text)) {
     return text;
   }
+  if (isSystemAgentRecord({ agentId: '', name: agent.name })) {
+    return text;
+  }
   const prefix = `[${agent.name}] `;
   if (text.startsWith(prefix)) {
     return text;
@@ -1251,12 +1254,10 @@ ${clipMessage(text, 500)}
       let streamedText = '';
       let lastFeishuStreamFlushAt = 0;
       let sawAgentOutput = false;
-      const runtimeAgent = shouldStartMemoryOnboarding && onboardingThreadId
-        ? ensureMemoryOnboardingAgent()
-        : currentAgent;
-      const initialRuntimeThreadId = shouldStartMemoryOnboarding && onboardingThreadId
-        ? onboardingThreadId
-        : existingThreadId;
+      // 普通对话始终使用当前可见 agent，初始化引导仅通过显式引导流程触发，
+      // 避免 memory-onboarding 线程长期劫持后续会话。
+      const runtimeAgent = currentAgent;
+      const initialRuntimeThreadId = existingThreadId;
       const identityBinding = await ensureIdentityBound({
         channel,
         userId,
@@ -1299,7 +1300,7 @@ ${clipMessage(text, 500)}
           );
         },
         onMessage: (text) => {
-          const rawVisibleOutput = isSystemAgentId(currentAgent.agentId) ? sanitizeOnboardingText(text) : text;
+          const rawVisibleOutput = isSystemAgentId(runtimeAgent.agentId) ? sanitizeOnboardingText(text) : text;
           const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, rawVisibleOutput);
           log.info(`
 ════════════════════════════════════════════════════════════
