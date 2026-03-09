@@ -256,6 +256,8 @@ function buildIdentityPatchPrompt(identityContent: string): string {
   ].join('\n');
 }
 
+const BROWSER_HANDOFF_TRIGGER_PROMPT = '浏览器人工接管触发条件包括但不限于：登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义；出现这些情况时不要硬做完，而要明确请求用户接管或确认。';
+
 function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
   return [
     '你必须遵循以下飞书回发协议：',
@@ -274,7 +276,7 @@ function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
     '12.1 若是在汇报浏览器执行中的阶段性进度，且内容天然包含 Action/Evidence/Result/Next step 这类多段结构，优先使用 post，不要把多段进度压成一条 text。',
     '12.2 若是在请求用户接管浏览器步骤，或说明阻塞原因、风险点、待确认项，且内容天然是多段说明/清单，优先使用 post。',
     '12.3 若是在汇报浏览器任务已完成，并需要总结已执行动作、最终结果、产出物和后续建议，且内容天然是多段摘要，优先使用 post。',
-    '12.4 浏览器人工接管触发条件包括但不限于：登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义；出现这些情况时不要硬做完，而要明确请求用户接管或确认。',
+    `12.4 ${BROWSER_HANDOFF_TRIGGER_PROMPT}`,
     '13. image/file/audio/media/sticker/share_chat/share_user 只在用户明确要求发送对应类型，或你已经拿到可发送资源（如 key、本地路径、分享对象ID）时使用。',
     '14. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 post 或 interactive。',
     '',
@@ -295,7 +297,7 @@ function buildWeComOutboundMessageProtocolPrompt(userPrompt: string): string {
     '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path，可先读取对应本地文件并给出分析结果；若明确需要回发企微非文本消息，且你已经拿到本地路径，可在 JSON content 中直接提供这些路径，网关会先上传再发送。',
     '8. 选择消息类型时遵循：简单一句话优先 text；多段说明或列表优先 markdown；只有在用户明确要发送图片/语音/视频/文件时才用 image/voice/video/file。',
     '8.1 若是在汇报浏览器执行中的阶段性进度、阻塞原因、用户接管请求或完成态总结，且内容天然是多段说明/清单，优先使用 markdown。',
-    '8.2 浏览器人工接管触发条件包括但不限于：登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义；出现这些情况时不要硬做完，而要明确请求用户接管或确认。',
+    `8.2 ${BROWSER_HANDOFF_TRIGGER_PROMPT}`,
     '9. image/voice/video/file 仅在用户明确要求发送对应类型，或你已拿到可发送资源（如 media_id、本地路径）时使用。',
     '10. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 markdown 或媒体类型。',
     '',
