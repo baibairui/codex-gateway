@@ -31,6 +31,7 @@ interface CreateAgentWorkspaceInput {
 
 const MEMORY_ONBOARDING_AGENT_ID = 'memory-onboarding';
 const SKILL_ONBOARDING_AGENT_ID = 'skill-onboarding';
+const BROWSER_HANDOFF_TRIGGER_SUMMARY = '登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义';
 
 export class AgentWorkspaceManager {
   private readonly rootDir: string;
@@ -432,7 +433,7 @@ function renderWorkspaceAgentsMd(
     '- 页面意图模糊、多个相似目标并存、或预期状态未出现时，先暂停并请求用户决策。',
     '- 涉及提交、发布、支付、外部数据发送、文件上传时，若用户未明确授权，先暂停并确认。',
     '- 如果网页需要登录、验证码或支付确认，先提示用户接管，不要编造已完成。',
-    '- 人工接管触发条件可直接按这组理解：登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义。',
+    `- 人工接管触发条件可直接按这组理解：${BROWSER_HANDOFF_TRIGGER_SUMMARY}。`,
     '- 扫码登录时先截图二维码再等待；用户明确回复“继续”后再恢复自动操作。',
     '',
     '定时提醒职责：',
@@ -613,7 +614,7 @@ function renderBrowserPlaybook(): string {
     '6. 出现歧义、高风险提交或作用域意外变化时，不继续自动推进，先停下并请求用户决策。',
     '',
     '## Login & QR Flow',
-    '- 人工接管触发条件总览：登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义。',
+    `- 人工接管触发条件总览：${BROWSER_HANDOFF_TRIGGER_SUMMARY}。`,
     '- 需要账号登录、OTP、验证码、扫码、支付确认时，立即切换为“人工接管”。',
     '- 扫码登录场景：先等待二维码渲染完成，再 browser_take_screenshot 输出截图给用户。',
     '- 人工接管阶段不继续自动点击，明确等待用户回复“继续”。',
