@@ -25,12 +25,45 @@ describe('config-check bin', () => {
     const result = spawnSync('node', [configCheckPath.pathname], {
       cwd: dir,
       encoding: 'utf8',
+      env: {
+        ...process.env,
+        FEISHU_APP_ID: 'cli_xxx',
+        FEISHU_APP_SECRET: 'sec_xxx',
+      },
     });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('飞书安装检查');
     expect(result.stdout).toContain('接入模式：长连接（不需要公网回调地址）');
     expect(result.stdout).toContain('下一步：确认飞书事件订阅已开启长连接');
+    expect(result.stdout).toContain('下一步：');
+  });
+
+  it('groups blocking items and env hints when feishu credentials are missing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-check-'));
+    fs.writeFileSync(path.join(dir, '.env'), [
+      'WECOM_ENABLED=false',
+      'FEISHU_ENABLED=true',
+      'FEISHU_LONG_CONNECTION=true',
+      'RUNNER_ENABLED=false',
+      'CODEX_BIN=node',
+    ].join('\n'));
+
+    const result = spawnSync('node', [configCheckPath.pathname], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        FEISHU_APP_ID: '',
+        FEISHU_APP_SECRET: '',
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('阻塞项：');
+    expect(result.stdout).toContain('FEISHU_ENABLED=true 时缺少 FEISHU_APP_ID');
+    expect(result.stdout).toContain('建议补充到 .env：');
+    expect(result.stdout).toContain('FEISHU_APP_ID=<please_set>');
   });
 
   it('shows doctor in codexclaw help', () => {
