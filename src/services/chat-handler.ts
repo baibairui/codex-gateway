@@ -4,7 +4,7 @@ import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/sess
 import type { MemorySummarySnapshot } from './agent-workspace-manager.js';
 import { formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
-import { formatCommandOutboundMessage } from './feishu-command-cards.js';
+import { buildFeishuLoginChoiceMessage, formatCommandOutboundMessage } from './feishu-command-cards.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
 import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
 import { createLogger } from '../utils/logger.js';
@@ -932,6 +932,10 @@ ${clipMessage(prompt, 500)}
       if (commandResult.initLogin) {
         if (!deps.runnerEnabled) {
           await sendCommandText('⚠️ 当前服务已禁用命令执行，无法进行登录。');
+          return;
+        }
+        if (channel === 'feishu') {
+          await deps.sendText(channel, userId, buildFeishuLoginChoiceMessage());
           return;
         }
         await sendCommandText('⏳ 正在请求设备登录码，请稍候...');

@@ -41,6 +41,12 @@ interface AppDeps {
     replyTargetId?: string;
     replyTargetType?: 'open_id' | 'chat_id';
   }) => Promise<void>;
+  handleFeishuCardAction?: (input: {
+    userId: string;
+    chatId?: string;
+    action: string;
+    value: Record<string, unknown>;
+  }) => Promise<void>;
 }
 
 interface FeishuEventDeps {
@@ -48,6 +54,7 @@ interface FeishuEventDeps {
   feishuGroupRequireMention?: boolean;
   isDuplicateMessage: (msgId?: string) => boolean;
   handleText: AppDeps['handleText'];
+  handleFeishuCardAction?: AppDeps['handleFeishuCardAction'];
 }
 
 /**
@@ -220,27 +227,49 @@ export function dispatchFeishuCardActionEvent(
     ? operatorId.open_id
     : (typeof operator.open_id === 'string' ? operator.open_id : '');
   const action = (event.action ?? {}) as Record<string, unknown>;
-  const value = (action.value ?? {}) as Record<string, unknown>;
+  const rawValue = (action.value ?? {}) as Record<string, unknown>;
+  const formValue = asObject(action.form_value) ?? asObject(action.formValue) ?? {};
+  const value = { ...formValue, ...rawValue };
   const context = (event.context ?? {}) as Record<string, unknown>;
   const chatId = typeof context.chat_id === 'string' ? context.chat_id : '';
+  const gatewayAction = firstNonEmptyString(value.gateway_action);
   const command = firstNonEmptyString(value.gateway_cmd, value.command, value.text) ?? '';
   log.info('飞书卡片动作入站', {
     openId,
     chatId: chatId || '(empty)',
+    hasGatewayAction: typeof value.gateway_action === 'string',
     hasGatewayCmd: typeof value.gateway_cmd === 'string',
     hasCommand: typeof value.command === 'string',
     hasText: typeof value.text === 'string',
+    gatewayActionPreview: clipText(gatewayAction ?? ''),
     commandPreview: clipText(command),
   });
-  if (!openId || !command) {
-    log.warn('飞书卡片动作忽略：缺少 openId 或 command', {
+  if (!openId || (!gatewayAction && !command)) {
+    log.warn('飞书卡片动作忽略：缺少 openId 或 action/command', {
       openId: openId || '(empty)',
+      action: gatewayAction || '(empty)',
       command: command || '(empty)',
     });
     return 'ignored';
   }
   if (!allowList(deps.allowFrom, openId)) {
     log.warn('飞书卡片动作忽略：用户不在 allow list', { openId });
+    return 'success';
+  }
+  if (gatewayAction && deps.handleFeishuCardAction) {
+    deps.handleFeishuCardAction({
+      userId: openId,
+      chatId: chatId || undefined,
+      action: gatewayAction,
+      value,
+    }).catch((err) => {
+      log.error('飞书卡片受控动作异步处理失败', err);
+    });
+    log.info('飞书卡片受控动作已分流', {
+      openId,
+      action: gatewayAction,
+      chatId: chatId || '(empty)',
+    });
     return 'success';
   }
   // 卡片点击回调里的 open_message_id 不等价于普通消息的 reply message_id。
@@ -569,6 +598,7 @@ export function createApp(deps: AppDeps) {
             allowFrom: deps.allowFrom,
             isDuplicateMessage: deps.isDuplicateMessage,
             handleText: deps.handleText,
+            handleFeishuCardAction: deps.handleFeishuCardAction,
           }, event);
           // 飞书卡片动作回调不能复用普通事件回执格式（code/msg）。
           // 这里返回空对象，表示卡片点击已被服务端接收，由异步消息结果继续反馈给用户。

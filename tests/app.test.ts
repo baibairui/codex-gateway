@@ -26,6 +26,12 @@ async function startTestServer(options?: {
     replyTargetId?: string;
     replyTargetType?: 'open_id' | 'chat_id';
   }) => Promise<void>;
+  handleFeishuCardAction?: (input: {
+    userId: string;
+    chatId?: string;
+    action: string;
+    value: Record<string, unknown>;
+  }) => Promise<void>;
 }) {
   const app = createApp({
     wecomEnabled: true,
@@ -43,6 +49,7 @@ async function startTestServer(options?: {
     feishuStartupHelpAdminConfigured: options?.feishuStartupHelpAdminConfigured,
     isDuplicateMessage: () => false,
     handleText: options?.handleText ?? (async () => undefined),
+    handleFeishuCardAction: options?.handleFeishuCardAction,
   });
 
   const server = app.listen(0);
@@ -297,6 +304,58 @@ describe('createApp feishu callback', () => {
       content: '/skills global',
       replyTargetId: 'oc_group_1',
       replyTargetType: 'chat_id',
+    });
+  });
+
+  it('accepts card.action.trigger and routes gateway action without forwarding text', async () => {
+    const handleText = vi.fn(async () => undefined);
+    const handleFeishuCardAction = vi.fn(async () => undefined);
+    const baseUrl = await startTestServer({
+      feishuVerificationToken: 'expected-token',
+      handleText,
+      handleFeishuCardAction,
+    });
+
+    const response = await fetch(`${baseUrl}/feishu/callback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        schema: '2.0',
+        header: {
+          token: 'expected-token',
+          event_type: 'card.action.trigger',
+        },
+        event: {
+          operator: {
+            operator_id: {
+              open_id: 'ou_card_2',
+            },
+          },
+          context: {
+            chat_id: 'oc_group_2',
+          },
+          action: {
+            value: {
+              gateway_action: 'codex_login.open_api_form',
+              base_url: 'https://codex.ai02.cn',
+            },
+          },
+        },
+      }),
+    });
+    const payload = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({});
+    expect(handleText).not.toHaveBeenCalled();
+    expect(handleFeishuCardAction).toHaveBeenCalledWith({
+      userId: 'ou_card_2',
+      chatId: 'oc_group_2',
+      action: 'codex_login.open_api_form',
+      value: {
+        gateway_action: 'codex_login.open_api_form',
+        base_url: 'https://codex.ai02.cn',
+      },
     });
   });
 });

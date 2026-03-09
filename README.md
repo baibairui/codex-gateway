@@ -423,7 +423,7 @@ FEISHU_LONG_CONNECTION=true
 
 ## 登录教程
 
-第一次使用前，需要先授权本机上的 Codex CLI。
+第一次使用前，需要先完成 Codex 登录授权。
 
 在企业微信里给机器人发送：
 
@@ -431,7 +431,33 @@ FEISHU_LONG_CONNECTION=true
 /login
 ```
 
-系统会返回设备码和授权提示。你按提示完成授权后，就可以正常使用这套 agent 系统。
+企业微信里，`/login` 仍然会直接返回设备码和授权提示。
+
+飞书里，`/login` 现在会先返回一张登录方式卡片：
+
+- `设备授权登录`：继续走原来的 device auth 流程
+- `API URL / Key 登录`：填写表单后，直接写当前项目下的 `.codex/config.toml` 和 `.codex/auth.json`
+
+API 登录模式会写入：
+
+```toml
+# .codex/config.toml
+model = "gpt-5.3-codex"
+model_provider = "codex"
+
+[model_providers.codex]
+name = "codex"
+base_url = "https://codex.ai02.cn"
+wire_api = "responses"
+requires_openai_auth = true
+
+[features]
+enable_request_compression = false
+```
+
+```json
+{"OPENAI_API_KEY":"sk-你的密钥"}
+```
 
 如果 15 分钟内没有完成授权，需要重新发送 `/login`。
 
@@ -598,6 +624,12 @@ which codex
 - `.env` 中 `RUNNER_ENABLED=true`
 - 机器网络正常
 - `codex` CLI 本身可单独启动
+
+如果你在飞书里走的是 `API URL / Key 登录`，再额外检查：
+
+- 当前项目目录下的 `.codex/` 可写
+- `base_url` 是合法的 `http/https` URL
+- `api_key` 不为空
 
 ### 企业微信收不到回复
 

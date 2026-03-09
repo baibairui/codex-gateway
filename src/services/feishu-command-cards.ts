@@ -14,6 +14,12 @@ interface FeishuCardButton {
   type?: 'default' | 'primary' | 'danger';
 }
 
+interface FeishuValueButton {
+  label: string;
+  value: Record<string, unknown>;
+  type?: 'default' | 'primary' | 'danger';
+}
+
 interface FeishuCardField {
   label: string;
   value: string;
@@ -150,6 +156,10 @@ function buildGatewayStructuredMessage(msgType: string, content: Record<string, 
     msg_type: msgType,
     content,
   });
+}
+
+function buildFeishuInteractiveMessage(card: Record<string, unknown>): string {
+  return buildGatewayStructuredMessage('interactive', card);
 }
 
 function resolveCommandLabel(commandName: string): string {
@@ -679,6 +689,18 @@ function resolveHelpShortcutButtons(groupName: string): FeishuCardButton[] {
 }
 
 function buildCommandButtonRows(buttons: FeishuCardButton[], buttonsPerRow = 2): Array<Record<string, unknown>> {
+  return buildValueButtonRows(buttons.map((item) => ({
+    label: item.label,
+    type: item.type,
+    value: {
+      gateway_cmd: item.cmd,
+      command: item.cmd,
+      text: item.cmd,
+    },
+  })), buttonsPerRow);
+}
+
+function buildValueButtonRows(buttons: FeishuValueButton[], buttonsPerRow = 2): Array<Record<string, unknown>> {
   const rows: Array<Record<string, unknown>> = [];
   const step = Math.max(1, buttonsPerRow);
   for (let i = 0; i < buttons.length; i += step) {
@@ -692,11 +714,7 @@ function buildCommandButtonRows(buttons: FeishuCardButton[], buttonsPerRow = 2):
           tag: 'plain_text',
           content: item.label,
         },
-        value: {
-          gateway_cmd: item.cmd,
-          command: item.cmd,
-          text: item.cmd,
-        },
+        value: item.value,
       })),
     });
   }
@@ -834,4 +852,173 @@ export function formatCommandOutboundMessage(channel: Channel, commandName: stri
     return text;
   }
   return buildGatewayStructuredMessage('interactive', buildFeishuInteractiveCommandCard(commandName, normalized));
+}
+
+export function buildFeishuLoginChoiceMessage(): string {
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+    },
+    header: {
+      template: 'blue',
+      title: {
+        tag: 'plain_text',
+        content: '登录授权',
+      },
+    },
+    elements: [
+      buildFeishuTitleBlock('选择登录方式', '飞书下可以使用设备授权，或直接写入项目内的 API 配置。'),
+      buildFeishuFieldGrid([
+        { label: '写入位置', value: '.codex/config.toml' },
+        { label: '认证文件', value: '.codex/auth.json' },
+      ]),
+      buildFeishuTipsNote('API Key 不会通过普通聊天文本转发给 Codex。'),
+      ...buildValueButtonRows([
+        {
+          label: '设备授权登录',
+          type: 'primary',
+          value: {
+            gateway_cmd: '/login',
+            command: '/login',
+            text: '/login',
+          },
+        },
+        {
+          label: 'API URL / Key 登录',
+          value: {
+            gateway_action: 'codex_login.open_api_form',
+          },
+        },
+      ], 2),
+    ],
+  });
+}
+
+export function buildFeishuApiLoginFormMessage(defaults?: { baseUrl?: string; model?: string }): string {
+  const baseUrl = defaults?.baseUrl?.trim() || 'https://codex.ai02.cn';
+  const model = defaults?.model?.trim() || 'gpt-5.3-codex';
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: false,
+    },
+    header: {
+      template: 'wathet',
+      title: {
+        tag: 'plain_text',
+        content: 'API URL / Key 登录',
+      },
+    },
+    elements: [
+      buildFeishuTitleBlock('写入 Codex API 配置', '提交后会覆盖当前项目 `.codex/` 下的登录配置。'),
+      {
+        tag: 'input',
+        name: 'base_url',
+        label: {
+          tag: 'plain_text',
+          content: 'API URL',
+        },
+        placeholder: {
+          tag: 'plain_text',
+          content: 'https://codex.ai02.cn',
+        },
+        default_value: baseUrl,
+      },
+      {
+        tag: 'input',
+        name: 'api_key',
+        label: {
+          tag: 'plain_text',
+          content: 'API Key',
+        },
+        placeholder: {
+          tag: 'plain_text',
+          content: 'sk-...',
+        },
+      },
+      {
+        tag: 'input',
+        name: 'model',
+        label: {
+          tag: 'plain_text',
+          content: 'Model',
+        },
+        placeholder: {
+          tag: 'plain_text',
+          content: 'gpt-5.3-codex',
+        },
+        default_value: model,
+      },
+      {
+        tag: 'action',
+        actions: [
+          {
+            tag: 'button',
+            type: 'primary',
+            text: {
+              tag: 'plain_text',
+              content: '保存并启用',
+            },
+            value: {
+              gateway_action: 'codex_login.submit_api_credentials',
+            },
+          },
+        ],
+      },
+    ],
+  });
+}
+
+export function buildFeishuApiLoginResultMessage(input: {
+  ok: boolean;
+  baseUrl?: string;
+  model?: string;
+  maskedApiKey?: string;
+  message: string;
+}): string {
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+    },
+    header: {
+      template: input.ok ? 'green' : 'red',
+      title: {
+        tag: 'plain_text',
+        content: '登录授权',
+      },
+    },
+    elements: [
+      buildFeishuTitleBlock(input.ok ? '配置写入成功' : '配置写入失败', input.message),
+      buildFeishuFieldGrid([
+        { label: 'API URL', value: input.baseUrl ?? '' },
+        { label: 'Model', value: input.model ?? '' },
+        { label: 'API Key', value: input.maskedApiKey ?? (input.ok ? '已配置' : '') },
+      ]),
+      ...buildValueButtonRows(input.ok
+        ? [
+            {
+              label: '重新登录',
+              type: 'primary',
+              value: {
+                gateway_cmd: '/login',
+                command: '/login',
+                text: '/login',
+              },
+            },
+          ]
+        : [
+            {
+              label: '返回表单',
+              type: 'primary',
+              value: {
+                gateway_action: 'codex_login.open_api_form',
+                base_url: input.baseUrl ?? '',
+                model: input.model ?? '',
+              },
+            },
+          ]),
+    ],
+  });
 }

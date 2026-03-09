@@ -707,6 +707,54 @@ describe('createChatHandler', () => {
     expect(cmds).toContain('/search off');
   });
 
+  it('returns a login choice card for feishu /login without starting device auth', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const login = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+        login,
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/login' });
+
+    expect(login).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenCalledTimes(1);
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as {
+      __gateway_message__?: boolean;
+      msg_type?: string;
+      content?: {
+        header?: { title?: { content?: string } };
+        elements?: Array<{ tag?: string; actions?: Array<{ text?: { content?: string }; value?: Record<string, unknown> }> }>;
+      };
+    };
+    expect(parsed.__gateway_message__).toBe(true);
+    expect(parsed.msg_type).toBe('interactive');
+    expect(parsed.content?.header?.title?.content).toBe('登录授权');
+    const actionRows = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action');
+    const buttons = actionRows.flatMap((item) => item.actions ?? []);
+    const labels = buttons.map((button) => String(button.text?.content ?? ''));
+    expect(labels).toContain('设备授权登录');
+    expect(labels).toContain('API URL / Key 登录');
+    expect(buttons.some((button) => button.value?.gateway_cmd === '/login')).toBe(true);
+    expect(buttons.some((button) => button.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
+  });
+
   it('renders search toggle card with dynamic button emphasis', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();

@@ -11,6 +11,8 @@ import { BrowserManager } from './services/browser-manager.js';
 import { createBrowserAutomationBackend } from './services/browser-service.js';
 import { CodexRunner } from './services/codex-runner.js';
 import { createChatHandler } from './services/chat-handler.js';
+import { writeCodexApiLoginConfig } from './services/codex-config-writer.js';
+import { buildFeishuApiLoginFormMessage, buildFeishuApiLoginResultMessage } from './services/feishu-command-cards.js';
 import { MemorySteward } from './services/memory-steward.js';
 import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
@@ -419,6 +421,7 @@ const app = createApp({
   feishuStartupHelpAdminConfigured: feishuStatusSummary.startupHelpAdminConfigured,
   isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
   handleText: appDepsHandleText,
+  handleFeishuCardAction: appDepsHandleFeishuCardAction,
 });
 
 async function sendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
@@ -615,6 +618,7 @@ app.listen(config.port, () => {
           feishuGroupRequireMention: config.feishuGroupRequireMention,
           isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
           handleText: async (input) => appDepsHandleText(input),
+          handleFeishuCardAction: async (input) => appDepsHandleFeishuCardAction(input),
         }, data);
       },
       'card.action.trigger': async (data: Record<string, unknown>) => {
@@ -624,6 +628,7 @@ app.listen(config.port, () => {
           feishuGroupRequireMention: config.feishuGroupRequireMention,
           isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
           handleText: async (input) => appDepsHandleText(input),
+          handleFeishuCardAction: async (input) => appDepsHandleFeishuCardAction(input),
         }, data);
       },
     });
@@ -690,6 +695,75 @@ async function appDepsHandleText(input: {
     } finally {
       inboundReplyContext.delete(contextKey);
     }
+  });
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function extractCardField(value: Record<string, unknown>, key: string): string | undefined {
+  const direct = value[key];
+  if (typeof direct === 'string' && direct.trim()) {
+    return direct.trim();
+  }
+  const nested = asRecord(direct);
+  if (typeof nested?.value === 'string' && nested.value.trim()) {
+    return nested.value.trim();
+  }
+  if (typeof nested?.default_value === 'string' && nested.default_value.trim()) {
+    return nested.default_value.trim();
+  }
+  return undefined;
+}
+
+async function appDepsHandleFeishuCardAction(input: {
+  userId: string;
+  chatId?: string;
+  action: string;
+  value: Record<string, unknown>;
+}): Promise<void> {
+  if (input.action === 'codex_login.open_api_form') {
+    await sendText('feishu', input.userId, buildFeishuApiLoginFormMessage({
+      baseUrl: extractCardField(input.value, 'base_url'),
+      model: extractCardField(input.value, 'model'),
+    }));
+    return;
+  }
+
+  if (input.action === 'codex_login.submit_api_credentials') {
+    try {
+      const result = await writeCodexApiLoginConfig({
+        rootDir: gatewayRootDir,
+        baseUrl: extractCardField(input.value, 'base_url') ?? '',
+        apiKey: extractCardField(input.value, 'api_key') ?? '',
+        model: extractCardField(input.value, 'model') ?? 'gpt-5.3-codex',
+      });
+      await sendText('feishu', input.userId, buildFeishuApiLoginResultMessage({
+        ok: true,
+        message: '项目内 Codex API 配置已更新。',
+        baseUrl: result.baseUrl,
+        model: result.model,
+        maskedApiKey: result.maskedApiKey,
+      }));
+    } catch (error) {
+      await sendText('feishu', input.userId, buildFeishuApiLoginResultMessage({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+        baseUrl: extractCardField(input.value, 'base_url') ?? '',
+        model: extractCardField(input.value, 'model') ?? 'gpt-5.3-codex',
+      }));
+    }
+    return;
+  }
+
+  log.warn('收到未识别的飞书卡片受控动作', {
+    userId: input.userId,
+    chatId: input.chatId ?? '(empty)',
+    action: input.action,
   });
 }
 
