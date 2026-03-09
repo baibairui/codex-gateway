@@ -4,3 +4,4 @@ dist/
 .env
 npm-debug.log*
 package.json.bak.*
+.pem

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { installReminderToolSkill } from './reminder-tool-skill.js';
 import { installFeishuOfficialOpsSkill } from './feishu-official-ops-skill.js';
 import { installGatewayBrowserSkill } from './gateway-browser-skill.js';
+import { installSocialIntelSkills } from './social-intel-skill.js';
 
 export interface AgentWorkspaceRecord {
   agentId: string;
@@ -154,6 +155,7 @@ export class AgentWorkspaceManager {
     installGatewayBrowserSkill(workspaceDir);
     installReminderToolSkill(workspaceDir);
     installFeishuOfficialOpsSkill(workspaceDir);
+    installSocialIntelSkills(workspaceDir);
 
     return {
       agentId,
@@ -375,6 +377,7 @@ export class AgentWorkspaceManager {
     installGatewayBrowserSkill(workspaceDir);
     installReminderToolSkill(workspaceDir);
     installFeishuOfficialOpsSkill(workspaceDir);
+    installSocialIntelSkills(workspaceDir);
     this.writeIfMissing(path.join(workspaceDir, 'browser-playbook.md'), renderBrowserPlaybook());
     this.writeIfMissing(path.join(workspaceDir, 'feishu-ops-playbook.md'), renderFeishuOpsPlaybook());
     this.writeIfMissing(path.join(workspaceDir, 'SOUL.md'), renderSoulBootstrap(meta.agentName, meta.agentId, meta.template));
@@ -516,6 +519,11 @@ function renderWorkspaceAgentsMd(
     '- 优先使用 `./.codex/skills/reminder-tool/SKILL.md`，并执行 skill 自带脚本创建提醒。',
     '- 不要输出 reminder-action 文本块，也不要要求用户输入 `/remind`。',
     '',
+    '社媒调研职责：',
+    '- 跨平台公开信息调研优先使用 `./.codex/skills/social-intel/SKILL.md`。',
+    '- 单平台深挖优先使用对应 skill：`x-research`、`xiaohongshu-research`、`douyin-research`、`bilibili-research`、`wechat-article-research`。',
+    '- 把调研结果沉淀为飞书文档时，优先使用 `./.codex/skills/social-doc-writer/SKILL.md`。',
+    '',
     '开始任何任务前，先阅读这些记忆文件：',
     '- `./SOUL.md`',
     '- `./TOOLS.md`',
@@ -592,6 +600,8 @@ function renderAgentMd(
     '- `memory/open-loops.md`: 尚未闭环但未来要继续跟进的事',
     '- `memory/daily/`: 当天短期上下文与临时笔记',
     '- `browser-playbook.md`: 浏览器操作规范',
+    '- `social-intel` / 平台 research skills: 公开社媒信息调研',
+    '- `social-doc-writer`: 将调研结果写入飞书文档',
     '',
   ].join('\n');
 }
@@ -609,6 +619,7 @@ function renderWorkspaceReadme(
         '- 若当前业务 agent 的自身份缺失，也由该引导 agent 负责补齐。',
         '- 每轮提问后都要把信息写入 shared-memory；冲突按最新用户输入直接覆盖。',
         '- 浏览器操作策略写在 `browser-playbook.md`。',
+        '- 如需做社媒调研，优先使用内置 `social-intel` 与平台 research skills。',
       ]
     : template === 'skill-onboarding'
     ? [
@@ -880,6 +891,8 @@ function renderToolsBootstrap(): string {
     '- 浏览器任务：只用 `gateway-browser` skill，自带脚本执行真实浏览器动作。',
     '- 定时提醒：只用 `reminder-tool` skill，自带脚本创建提醒。',
     '- 飞书官方写文档 / wiki：只用 `feishu-official-ops` skill，自带脚本执行真实 OpenAPI。',
+    '- 社媒公开调研：优先使用 `social-intel` skill；单平台深挖改用对应 research skill。',
+    '- 调研结果写回飞书：优先使用 `social-doc-writer` skill，底层仍走 `feishu-official-ops`。',
     '',
     '通用规则：',
     '- 没有真实执行证据前，不得声称完成。',
