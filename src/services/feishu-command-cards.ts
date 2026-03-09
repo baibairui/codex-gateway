@@ -963,20 +963,17 @@ export function buildFeishuApiLoginFormMessage(defaults?: { baseUrl?: string; mo
             max_length: 120,
           },
           {
-            tag: 'action',
-            actions: [
-              {
-                tag: 'button',
-                type: 'primary',
-                text: {
-                  tag: 'plain_text',
-                  content: '保存并启用',
-                },
-                value: {
-                  gateway_action: 'codex_login.submit_api_credentials',
-                },
-              },
-            ],
+            tag: 'button',
+            name: 'submit_api_login',
+            type: 'primary',
+            action_type: 'form_submit',
+            text: {
+              tag: 'plain_text',
+              content: '保存并启用',
+            },
+            value: {
+              gateway_action: 'codex_login.submit_api_credentials',
+            },
           },
         ],
       },

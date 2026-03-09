@@ -27,5 +27,10 @@ describe('buildFeishuApiLoginFormMessage', () => {
     const inputs = (form?.elements ?? []).filter((item) => item.tag === 'input');
     expect(inputs.map((item) => item.name)).toEqual(['base_url', 'api_key', 'model']);
     expect(inputs.every((item) => item.label_position === 'top')).toBe(true);
+    const submitButton = (form?.elements ?? []).find((item) => item.tag === 'button') as
+      | { action_type?: string; name?: string }
+      | undefined;
+    expect(submitButton?.action_type).toBe('form_submit');
+    expect(submitButton?.name).toBe('submit_api_login');
   });
 });
