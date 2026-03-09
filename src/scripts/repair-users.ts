@@ -9,6 +9,8 @@ interface RepairStats {
   users: number;
   workspaces: number;
   skipped: number;
+  repairedDefaultWorkdir: boolean;
+  repairedConfiguredWorkdir: boolean;
 }
 
 function resolveAgentsDir(): string {
@@ -23,18 +25,29 @@ function resolveAgentsDir(): string {
 }
 
 function repairWorkspace(workspaceDir: string): void {
+  fs.mkdirSync(workspaceDir, { recursive: true });
   installReminderToolSkill(workspaceDir);
   installFeishuOfficialOpsSkill(workspaceDir);
+}
+
+function tryEnsureDir(dir: string): boolean {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    return fs.statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function run(): void {
   const agentsDir = resolveAgentsDir();
   fs.mkdirSync(agentsDir, { recursive: true });
   // 初始化全局 memory 骨架，保证目录结构存在。
-  void new AgentWorkspaceManager(agentsDir);
+  const workspaceManager = new AgentWorkspaceManager(agentsDir);
 
   // 修复默认工作区（占位 default 所在根目录）的内置技能和规则。
   repairWorkspace(agentsDir);
+  workspaceManager.repairWorkspaceScaffold(agentsDir);
 
   const usersDir = path.join(agentsDir, 'users');
   if (!fs.existsSync(usersDir)) {
@@ -46,7 +59,16 @@ function run(): void {
     users: 0,
     workspaces: 0,
     skipped: 0,
+    repairedDefaultWorkdir: false,
+    repairedConfiguredWorkdir: false,
   };
+
+  const defaultWorkdir = path.resolve(agentsDir);
+  stats.repairedDefaultWorkdir = tryEnsureDir(defaultWorkdir);
+  const configuredWorkdirRaw = process.env.CODEX_WORKDIR?.trim();
+  if (configuredWorkdirRaw) {
+    stats.repairedConfiguredWorkdir = tryEnsureDir(path.resolve(configuredWorkdirRaw));
+  }
 
   for (const userDirName of fs.readdirSync(usersDir)) {
     const userDir = path.join(usersDir, userDirName);
@@ -54,6 +76,7 @@ function run(): void {
       continue;
     }
     stats.users += 1;
+    workspaceManager.repairUserSharedMemoryTree(userDir);
 
     for (const workspaceName of fs.readdirSync(userDir)) {
       if (workspaceName === 'shared-memory' || workspaceName === '_memory-steward') {
@@ -65,12 +88,13 @@ function run(): void {
         continue;
       }
       repairWorkspace(workspaceDir);
+      workspaceManager.repairWorkspaceScaffold(workspaceDir);
       stats.workspaces += 1;
     }
   }
 
   process.stdout.write(
-    `repair:users done (agentsDir=${agentsDir}, users=${stats.users}, workspaces=${stats.workspaces}, skipped=${stats.skipped})\n`,
+    `repair:users done (agentsDir=${agentsDir}, users=${stats.users}, workspaces=${stats.workspaces}, skipped=${stats.skipped}, defaultWorkdirReady=${stats.repairedDefaultWorkdir}, configuredWorkdirReady=${stats.repairedConfiguredWorkdir})\n`,
   );
 }
 

@@ -123,6 +123,14 @@ export class AgentWorkspaceManager {
       path.join(workspaceDir, 'README.md'),
       renderWorkspaceReadme(input.agentName, agentId, template),
     );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'SOUL.md'),
+      renderSoulBootstrap(input.agentName, agentId, template),
+    );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'TOOLS.md'),
+      renderToolsBootstrap(),
+    );
     if (template === 'memory-onboarding') {
       this.writeIfMissing(
         path.join(workspaceDir, 'memory-init-checklist.md'),
@@ -273,6 +281,14 @@ export class AgentWorkspaceManager {
       path.join(workspaceDir, 'README.md'),
       renderSystemMemoryStewardReadme(),
     );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'SOUL.md'),
+      renderSystemMemoryStewardSoul(),
+    );
+    this.writeIfMissing(
+      path.join(workspaceDir, 'TOOLS.md'),
+      renderToolsBootstrap(),
+    );
 
     return {
       workspaceDir,
@@ -322,6 +338,7 @@ export class AgentWorkspaceManager {
     const sharedMemoryDir = path.join(userDir, 'shared-memory');
     fs.mkdirSync(path.join(sharedMemoryDir, 'daily'), { recursive: true });
 
+    this.writeIfMissing(path.join(sharedMemoryDir, 'USER.md'), renderUserBootstrap());
     this.writeIfMissing(path.join(sharedMemoryDir, 'profile.md'), renderProfileMemory());
     this.writeIfMissing(path.join(sharedMemoryDir, 'identity.md'), renderIdentityMemory());
     this.upgradeIdentityTemplateFile(path.join(sharedMemoryDir, 'identity.md'));
@@ -351,6 +368,19 @@ export class AgentWorkspaceManager {
     );
 
     return sharedMemoryDir;
+  }
+
+  repairWorkspaceScaffold(workspaceDir: string): void {
+    const meta = readWorkspaceMeta(workspaceDir);
+    this.writeIfMissing(path.join(workspaceDir, 'browser-playbook.md'), renderBrowserPlaybook());
+    this.writeIfMissing(path.join(workspaceDir, 'feishu-ops-playbook.md'), renderFeishuOpsPlaybook());
+    this.writeIfMissing(path.join(workspaceDir, 'SOUL.md'), renderSoulBootstrap(meta.agentName, meta.agentId, meta.template));
+    this.writeIfMissing(path.join(workspaceDir, 'TOOLS.md'), renderToolsBootstrap());
+    this.upgradeWorkspaceAgentsBootstrapReferences(workspaceDir);
+  }
+
+  repairUserSharedMemoryTree(userDir: string): string {
+    return this.ensureUserSharedMemory(userDir);
   }
 
   private writeIfMissing(filePath: string, content: string): void {
@@ -394,6 +424,24 @@ export class AgentWorkspaceManager {
       const identityPath = path.join(userDir, entry.name, 'memory', 'identity.md');
       this.upgradeIdentityTemplateFile(identityPath);
     }
+  }
+
+  private upgradeWorkspaceAgentsBootstrapReferences(workspaceDir: string): void {
+    const agentsPath = path.join(workspaceDir, 'AGENTS.md');
+    if (!fs.existsSync(agentsPath)) {
+      return;
+    }
+    const content = fs.readFileSync(agentsPath, 'utf8');
+    if (content.includes('`./SOUL.md`') && content.includes('`./TOOLS.md`')) {
+      return;
+    }
+    const marker = '开始任何任务前，先阅读这些记忆文件：';
+    if (content.includes(marker)) {
+      const next = content.replace(marker, `${marker}\n- \`./SOUL.md\`\n- \`./TOOLS.md\``);
+      fs.writeFileSync(agentsPath, next, 'utf8');
+      return;
+    }
+    fs.writeFileSync(agentsPath, `${content.trimEnd()}\n\n- \`./SOUL.md\`\n- \`./TOOLS.md\`\n`, 'utf8');
   }
 
   private resolveInitialAgentIdentityContent(
@@ -466,6 +514,8 @@ function renderWorkspaceAgentsMd(
     '- 不要输出 reminder-action 文本块，也不要要求用户输入 `/remind`。',
     '',
     '开始任何任务前，先阅读这些记忆文件：',
+    '- `./SOUL.md`',
+    '- `./TOOLS.md`',
     '- `./agent.md`',
     '- `./memory/identity.md`',
     '- `./memory/profile.md`',
@@ -477,6 +527,7 @@ function renderWorkspaceAgentsMd(
     '- `./browser-playbook.md`',
     '- `./feishu-ops-playbook.md`',
     `- \`${sharedDir}/identity.md\``,
+    `- \`${sharedDir}/USER.md\``,
     `- \`${sharedDir}/profile.md\``,
     `- \`${sharedDir}/preferences.md\``,
     `- \`${sharedDir}/projects.md\``,
@@ -719,7 +770,10 @@ function renderSystemMemoryStewardAgentsMd(relativeGlobalDir: string, relativeSh
     '- 把只适合短期保留的信息留在 daily 目录，不要污染长期记忆。',
     '',
     '开始任务前，先阅读这些文件：',
+    '- `./SOUL.md`',
+    '- `./TOOLS.md`',
     '- `./agent.md`',
+    `- \`${sharedDir}/USER.md\``,
     `- \`${sharedDir}/README.md\``,
     `- \`${sharedDir}/identity.md\``,
     `- \`${sharedDir}/profile.md\``,
@@ -763,6 +817,90 @@ function renderSystemMemoryStewardReadme(): string {
   ].join('\n');
 }
 
+function renderUserBootstrap(): string {
+  return [
+    '# USER',
+    '',
+    '这个文件用于给工作区提供一个稳定入口，快速理解“用户是谁”。',
+    '真实内容仍以同目录下的长期记忆文件为准，尤其是：',
+    '- `identity.md`: 用户身份内核',
+    '- `profile.md`: 用户稳定画像',
+    '- `preferences.md`: 用户偏好',
+    '- `projects.md`: 长期项目',
+    '- `relationships.md`: 重要关系',
+    '- `decisions.md`: 已确认决定',
+    '- `open-loops.md`: 待继续跟进事项',
+    '',
+    '使用规则：',
+    '- 先读 `identity.md`，再读其余文件。',
+    '- 这里是入口索引，不在此重复维护事实，避免双写漂移。',
+    '',
+  ].join('\n');
+}
+
+function renderSoulBootstrap(
+  agentName: string,
+  agentId: string,
+  template: 'default' | 'memory-onboarding' | 'skill-onboarding',
+): string {
+  const role = template === 'memory-onboarding'
+    ? '记忆初始化引导'
+    : template === 'skill-onboarding'
+    ? '技能扩展助手'
+    : agentName;
+  return [
+    '# SOUL',
+    '',
+    `- Agent name: ${agentName}`,
+    `- Agent ID: ${agentId}`,
+    `- Role: ${role}`,
+    '',
+    '执行原则：',
+    '- 先基于事实回答，不编造执行结果。',
+    '- 优先做完整方案，不做“兼容一下”的半途修改。',
+    '- 当前工作区的 `memory/identity.md` 定义当前 agent 身份；共享用户身份由上层 `shared-memory/identity.md` 定义。',
+    '- 两者同时生效，不可互相替代。',
+    '',
+    '工作方式：',
+    '- 先理解目标和约束，再动手执行。',
+    '- 输出要短、直接、可验证。',
+    '- 需要真实外部动作时，只能通过已接入的工具链完成，不能口头假装完成。',
+    '',
+  ].join('\n');
+}
+
+function renderToolsBootstrap(): string {
+  return [
+    '# TOOLS',
+    '',
+    '优先工具通道：',
+    '- 浏览器任务：只用 gateway `browser_*` MCP。',
+    '- 定时提醒：只用 `create_reminder`。',
+    '- 飞书官方写文档 / wiki：只用 `feishu-official-ops` 对应 CLI / OpenAPI。',
+    '',
+    '通用规则：',
+    '- 没有真实执行证据前，不得声称完成。',
+    '- 需要登录、验证码、扫码、支付、权限确认时，必须切人工接管。',
+    '- 动作前先明确目标，动作后给出证据、结果、下一步。',
+    '',
+  ].join('\n');
+}
+
+function renderSystemMemoryStewardSoul(): string {
+  return [
+    '# SOUL',
+    '',
+    '- Role: System Memory Steward',
+    '- Scope: 只维护 shared-memory，不作为通用对话助手。',
+    '',
+    '执行原则：',
+    '- 只保留跨会话稳定、未来仍值得读取的信息。',
+    '- 高敏感信息不直接写长期记忆，先记录待确认项。',
+    '- 避免重复、近义改写和噪声堆积。',
+    '',
+  ].join('\n');
+}
+
 function renderProfileMemory(): string {
   return [
     '# Profile',
@@ -779,6 +917,46 @@ function renderProfileMemory(): string {
     '-',
     '',
   ].join('\n');
+}
+
+function readWorkspaceMeta(workspaceDir: string): {
+  agentName: string;
+  agentId: string;
+  template: 'default' | 'memory-onboarding' | 'skill-onboarding';
+} {
+  const agentMdPath = path.join(workspaceDir, 'agent.md');
+  const fallbackAgentId = path.basename(workspaceDir);
+  if (!fs.existsSync(agentMdPath)) {
+    return {
+      agentName: fallbackAgentId,
+      agentId: fallbackAgentId,
+      template: resolveTemplateFromAgentId(fallbackAgentId),
+    };
+  }
+  const content = fs.readFileSync(agentMdPath, 'utf8');
+  const agentName = matchField(content, 'Agent Name') ?? fallbackAgentId;
+  const agentId = matchField(content, 'Agent ID') ?? fallbackAgentId;
+  return {
+    agentName,
+    agentId,
+    template: resolveTemplateFromAgentId(agentId),
+  };
+}
+
+function matchField(content: string, label: string): string | undefined {
+  const pattern = new RegExp(`^-\\s+${label}:\\s*(.+)$`, 'im');
+  const value = content.match(pattern)?.[1]?.trim();
+  return value || undefined;
+}
+
+function resolveTemplateFromAgentId(agentId: string): 'default' | 'memory-onboarding' | 'skill-onboarding' {
+  if (agentId === MEMORY_ONBOARDING_AGENT_ID) {
+    return 'memory-onboarding';
+  }
+  if (agentId === SKILL_ONBOARDING_AGENT_ID) {
+    return 'skill-onboarding';
+  }
+  return 'default';
 }
 
 function renderIdentityMemory(): string {

@@ -20,6 +20,8 @@ describe('AgentWorkspaceManager', () => {
     expect(result.agentId).toBe('frontend-pair');
     expect(fs.existsSync(path.join(result.workspaceDir, 'AGENTS.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'agent.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, 'SOUL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, 'TOOLS.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'identity.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'profile.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'preferences.md'))).toBe(true);
@@ -44,6 +46,7 @@ describe('AgentWorkspaceManager', () => {
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'agents', 'openai.yaml'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'shared-context.md'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'global-memory', 'house-rules.md'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'users', fs.readdirSync(path.join(dir, 'users'))[0]!, 'shared-memory', 'USER.md'))).toBe(true);
   });
 
   it('creates hidden system memory steward workspace', () => {
@@ -118,6 +121,8 @@ describe('AgentWorkspaceManager', () => {
     const playbook = fs.readFileSync(path.join(result.workspaceDir, 'browser-playbook.md'), 'utf8');
 
     expect(agentsMd).toContain('浏览器操作职责');
+    expect(agentsMd).toContain('./SOUL.md');
+    expect(agentsMd).toContain('./TOOLS.md');
     expect(agentsMd).toContain('Action / Evidence / Result / Next step');
     expect(agentsMd).toContain('多个相似目标并存');
     expect(agentsMd).toContain('文件上传时，若用户未明确授权，先暂停并确认');
@@ -133,6 +138,25 @@ describe('AgentWorkspaceManager', () => {
     expect(playbook).toContain('人工接管触发条件总览');
     expect(playbook).toContain('多个相似目标并存');
     expect(playbook).toContain('需要用户做出的精确决策');
+  });
+
+  it('repairs existing workspace scaffold with bootstrap files', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-'));
+    const manager = new AgentWorkspaceManager(dir);
+    const userId = 'wecom:u1';
+    const created = manager.createWorkspace({
+      userId,
+      agentName: 'Repair Target',
+      existingAgentIds: [],
+    });
+
+    fs.rmSync(path.join(created.workspaceDir, 'SOUL.md'));
+    fs.rmSync(path.join(created.workspaceDir, 'TOOLS.md'));
+
+    manager.repairWorkspaceScaffold(created.workspaceDir);
+
+    expect(fs.existsSync(path.join(created.workspaceDir, 'SOUL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(created.workspaceDir, 'TOOLS.md'))).toBe(true);
   });
 
   it('detects shared memory emptiness by meaningful content', () => {

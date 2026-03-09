@@ -1574,11 +1574,10 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('workspace 发布完成'));
   });
 
-  it('starts hidden memory onboarding flow when shared memory is empty', async () => {
+  it('keeps normal conversation and shows onboarding suggestion when shared memory is empty', async () => {
     const sendText = vi.fn(async () => undefined);
-    const run = vi.fn(async () => ({ threadId: 'thread_onboarding', rawOutput: '' }));
+    const run = vi.fn(async () => ({ threadId: 'thread_default', rawOutput: '' }));
     const sessionStore = createSessionStore();
-    const createWorkspace = vi.fn(() => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }));
     const handler = createChatHandler({
       sessionStore,
       rateLimitStore: { allow: () => true },
@@ -1587,7 +1586,7 @@ describe('createChatHandler', () => {
         review: async () => ({ rawOutput: '' }),
       },
       agentWorkspaceManager: {
-        createWorkspace,
+        createWorkspace: () => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }),
         isSharedMemoryEmpty: () => true,
       },
       runnerEnabled: true,
@@ -1598,22 +1597,20 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: '我们开始吧' });
 
-    expect(createWorkspace).toHaveBeenCalledWith(expect.objectContaining({
-      template: 'memory-onboarding',
-    }));
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      workdir: '/tmp',
+      workdir: '/repo/default',
       search: false,
+      prompt: expect.stringContaining('我们开始吧'),
     }));
     expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('shared-memory 为空'));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('shared-memory 尚未初始化'));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('/agent init-memory'));
   });
 
-  it('starts onboarding when current agent identity is empty even if shared memory is ready', async () => {
+  it('keeps normal conversation and shows onboarding suggestion when current agent identity is empty', async () => {
     const sendText = vi.fn(async () => undefined);
-    const run = vi.fn(async () => ({ threadId: 'thread_onboarding', rawOutput: '' }));
+    const run = vi.fn(async () => ({ threadId: 'thread_default', rawOutput: '' }));
     const sessionStore = createSessionStore();
-    const createWorkspace = vi.fn(() => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }));
     const handler = createChatHandler({
       sessionStore,
       rateLimitStore: { allow: () => true },
@@ -1622,7 +1619,7 @@ describe('createChatHandler', () => {
         review: async () => ({ rawOutput: '' }),
       },
       agentWorkspaceManager: {
-        createWorkspace,
+        createWorkspace: () => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }),
         isSharedMemoryEmpty: () => false,
         isWorkspaceIdentityEmpty: () => true,
         getSharedMemorySnapshot: () => ({
@@ -1640,16 +1637,14 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: '继续' });
 
-    expect(createWorkspace).toHaveBeenCalledWith(expect.objectContaining({
-      template: 'memory-onboarding',
-    }));
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      workdir: '/tmp',
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenLastCalledWith(expect.objectContaining({
+      workdir: '/repo/default',
       search: false,
-      prompt: expect.stringContaining('记忆初始化引导'),
+      prompt: expect.stringContaining('继续'),
     }));
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('当前 agent 自身份未初始化'));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('当前 agent 自身份尚未初始化'));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('/agent init-memory'));
   });
 
   it('keeps normal conversation on visible agent even when onboarding session exists', async () => {
@@ -1692,14 +1687,44 @@ describe('createChatHandler', () => {
     expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
   });
 
-  it('does not kick off memory onboarding twice while the first kickoff is still in flight', async () => {
+  it('shows onboarding suggestion only on the first message of the current agent', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 'thread_default', rawOutput: '' }));
+    const sessionStore = createSessionStore();
+    sessionStore.setSession('local-owner', 'default', 'thread_default');
+
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }),
+        isSharedMemoryEmpty: () => true,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '继续做当前任务' });
+
+    const suggestionCalls = sendText.mock.calls.filter((call) => String(call[2] ?? '').includes('/agent init-memory'));
+    expect(suggestionCalls).toHaveLength(0);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread_default',
+      prompt: expect.stringContaining('继续做当前任务'),
+    }));
+  });
+
+  it('does not repeat onboarding suggestion once a normal session already exists', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
     const createWorkspace = vi.fn(() => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }));
-    let resolveRun: ((value: { threadId: string; rawOutput: string }) => void) | undefined;
-    const run = vi.fn(() => new Promise<{ threadId: string; rawOutput: string }>((resolve) => {
-      resolveRun = resolve;
-    }));
+    const run = vi.fn(async () => ({ threadId: 'thread_default', rawOutput: '' }));
 
     const handler = createChatHandler({
       sessionStore,
@@ -1718,19 +1743,16 @@ describe('createChatHandler', () => {
       sendText,
     });
 
-    const first = handler({ channel: 'wecom', userId: 'u1', content: '开始吧' });
-    await Promise.resolve();
+    await handler({ channel: 'wecom', userId: 'u1', content: '开始吧' });
     await handler({ channel: 'wecom', userId: 'u1', content: '我补充一下' });
 
-    expect(createWorkspace).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('正在启动'));
-
-    resolveRun?.({ threadId: 'thread_onboarding', rawOutput: '' });
-    await first;
+    expect(createWorkspace).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledTimes(2);
+    const suggestionCalls = sendText.mock.calls.filter((call) => String(call[2] ?? '').includes('/agent init-memory'));
+    expect(suggestionCalls).toHaveLength(1);
   });
 
-  it('redacts internal file details in onboarding stream output', async () => {
+  it('redacts internal file details in manual onboarding stream output', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
     const run = vi.fn(async (input: {
@@ -1757,7 +1779,7 @@ describe('createChatHandler', () => {
       sendText,
     });
 
-    await handler({ channel: 'wecom', userId: 'u1', content: '开始' });
+    await handler({ channel: 'wecom', userId: 'u1', content: '/agent init-memory' });
 
     const payloads = sendText.mock.calls.map((call) => String(call[2]));
     const sanitized = payloads.find((text) => text.includes('[内部路径]') || text.includes('[记忆文件]'));
