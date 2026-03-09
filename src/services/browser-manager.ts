@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
 
 export interface BrowserLocatorLike {
@@ -45,6 +45,7 @@ export interface BrowserContextLike {
 }
 
 export type BrowserLauncher = () => Promise<BrowserContextLike>;
+export type BrowserLaunchMode = 'display' | 'xvfb' | 'headless';
 
 export interface BrowserTabSummary {
   index: number;
@@ -665,13 +666,169 @@ function optionalString(value: unknown): string | undefined {
 
 function createDefaultLauncher(profileDir = '.data/browser/profile'): BrowserLauncher {
   return async () => {
-    const context = await chromium.launchPersistentContext(profileDir, {
-      channel: 'chrome',
-      headless: false,
-      viewport: null,
-    });
-    return adaptContext(context);
+    const launch = await prepareBrowserLaunchEnvironment();
+    try {
+      const context = await chromium.launchPersistentContext(profileDir, {
+        channel: 'chrome',
+        headless: launch.headless,
+        viewport: null,
+        env: launch.env,
+      });
+      return adaptContext(context, launch.dispose);
+    } catch (error) {
+      await launch.dispose?.();
+      throw error;
+    }
   };
+}
+
+export function resolveBrowserLaunchMode(
+  env: NodeJS.ProcessEnv,
+  input: { hasXvfbRun: boolean },
+): BrowserLaunchMode {
+  const hasDisplay = Boolean(env.DISPLAY?.trim());
+  const forceXvfb = env.GATEWAY_FORCE_XVFB === 'true';
+  if (hasDisplay && !forceXvfb) {
+    return 'display';
+  }
+  if (input.hasXvfbRun) {
+    return 'xvfb';
+  }
+  return 'headless';
+}
+
+async function prepareBrowserLaunchEnvironment(): Promise<{
+  env: NodeJS.ProcessEnv;
+  headless: boolean;
+  dispose?: () => Promise<void>;
+}> {
+  const env = { ...process.env };
+  const mode = resolveBrowserLaunchMode(env, { hasXvfbRun: hasCommandInPath('xvfb-run') });
+  if (mode === 'display') {
+    return { env, headless: false };
+  }
+  if (mode === 'headless') {
+    return { env, headless: true };
+  }
+  const session = await startXvfbSession(env);
+  return {
+    env: {
+      ...env,
+      DISPLAY: session.display,
+    },
+    headless: false,
+    dispose: session.dispose,
+  };
+}
+
+async function startXvfbSession(env: NodeJS.ProcessEnv): Promise<{
+  display: string;
+  dispose: () => Promise<void>;
+}> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(
+      'xvfb-run',
+      [
+        '--auto-servernum',
+        '--server-args=-screen 0 1280x960x24',
+        'sh',
+        '-lc',
+        'echo "$DISPLAY"; trap "exit 0" TERM INT; while :; do sleep 3600; done',
+      ],
+      {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill('SIGKILL');
+      reject(new Error(`xvfb-run did not report DISPLAY: ${stderr || stdout || 'timeout'}`));
+    }, 5000);
+
+    const cleanupTimer = (): void => {
+      clearTimeout(timer);
+    };
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (settled) {
+        return;
+      }
+      stdout += chunk.toString('utf8');
+      const line = stdout
+        .split('\n')
+        .map((item) => item.trim())
+        .find(Boolean);
+      if (!line) {
+        return;
+      }
+      settled = true;
+      cleanupTimer();
+      resolve({
+        display: line,
+        dispose: () => stopChildProcess(child),
+      });
+    });
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+
+    child.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanupTimer();
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanupTimer();
+      reject(new Error(`xvfb-run exited before browser launch env was ready (code=${code}): ${stderr || stdout}`));
+    });
+  });
+}
+
+function hasCommandInPath(command: string): boolean {
+  const pathValue = process.env.PATH ?? '';
+  for (const dir of pathValue.split(path.delimiter)) {
+    const candidate = path.join(dir, command);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
+async function stopChildProcess(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.exitCode !== null || child.killed) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+    }, 2000);
+    child.once('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill('SIGTERM');
+  });
 }
 
 async function encodeRecordingWithFfmpeg(input: {
@@ -705,12 +862,16 @@ async function encodeRecordingWithFfmpeg(input: {
   });
 }
 
-function adaptContext(context: BrowserContext): BrowserContextLike {
+function adaptContext(context: BrowserContext, onClose?: () => Promise<void>): BrowserContextLike {
   return {
     pages: () => context.pages().map(adaptPage),
     newPage: async () => adaptPage(await context.newPage()),
     close: async () => {
-      await context.close();
+      try {
+        await context.close();
+      } finally {
+        await onClose?.();
+      }
     },
   };
 }

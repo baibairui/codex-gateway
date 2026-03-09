@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { EventDispatcher as LarkEventDispatcher, LoggerLevel as LarkSdkLoggerLevel, WSClient as LarkWSClient } from '@larksuiteoapi/node-sdk';
 
 import { createApp, dispatchFeishuCardActionEvent, dispatchFeishuMessageReceiveEvent } from './app.js';
@@ -7,7 +8,7 @@ import { config } from './config.js';
 import { WorkspacePublisher } from './services/workspace-publisher.js';
 import { AgentWorkspaceManager } from './services/agent-workspace-manager.js';
 import { BrowserManager } from './services/browser-manager.js';
-import { resolveBrowserMcpRuntime, startBrowserMcpServer } from './services/browser-mcp-server.js';
+import { createBrowserAutomationBackend } from './services/browser-service.js';
 import { CodexRunner } from './services/codex-runner.js';
 import { createChatHandler } from './services/chat-handler.js';
 import { MemorySteward } from './services/memory-steward.js';
@@ -29,13 +30,20 @@ import { RateLimitStore } from './stores/rate-limit-store.js';
 import { createLogger } from './utils/logger.js';
 
 const log = createLogger('Server');
-const codexWorkdir = resolveCodexWorkdir(config.codexWorkdir);
 const gatewayRootDir = resolveGatewayRootDir(config.gatewayRootDir);
+const dataDir = path.join(gatewayRootDir, '.data');
+fs.mkdirSync(dataDir, { recursive: true });
+const agentsDir = resolveAgentsDir({
+  configuredDir: config.codexAgentsDir,
+  dataDir,
+});
+const codexWorkdir = resolveCodexWorkdir(config.codexWorkdir, agentsDir);
+const codexHomeDir = path.join(dataDir, 'codex-home');
 const feishuStatusSummary = buildFeishuStatusSummary({
   enabled: config.feishuEnabled,
   longConnection: config.feishuLongConnection,
   groupRequireMention: config.feishuGroupRequireMention,
-  docBaseUrlConfigured: Boolean(process.env.FEISHU_DOC_BASE_URL?.trim()),
+  docBaseUrlConfigured: true,
   startupHelpEnabled: config.feishuStartupHelpEnabled,
   startupHelpAdminConfigured: Boolean(config.feishuStartupHelpAdminOpenId),
 });
@@ -52,10 +60,11 @@ log.info('服务启动初始化...', {
   commandTimeoutMinMs: config.commandTimeoutMinMs,
   commandTimeoutMaxMs: config.commandTimeoutMaxMs,
   commandTimeoutPerCharMs: config.commandTimeoutPerCharMs,
-  browserMcpEnabled: config.browserMcpEnabled,
-  browserMcpUrl: '(gateway-owned local only)',
-  browserMcpPort: config.browserMcpPort,
-  browserProfileDir: config.browserMcpProfileDir ?? '(default)',
+  browserAutomationEnabled: config.browserAutomationEnabled,
+  browserApiBaseUrl: '(gateway-owned local only)',
+  browserProfileDir: config.browserProfileDir ?? '(default)',
+  codexWorkdirIsolation: config.codexWorkdirIsolation,
+  codexHomeDir,
   runnerEnabled: config.runnerEnabled,
   memoryStewardEnabled: config.memoryStewardEnabled,
   memoryStewardIntervalHours: config.memoryStewardIntervalHours,
@@ -72,24 +81,21 @@ log.info('服务启动初始化...', {
   feishuStatus: feishuStatusSummary,
 });
 
-const dataDir = path.resolve(process.cwd(), '.data');
-fs.mkdirSync(dataDir, { recursive: true });
 log.debug('数据目录已就绪', { dataDir });
 const browserManager = new BrowserManager({
-  profileDir: resolveRuntimeDir(config.browserMcpProfileDir, path.join(dataDir, 'browser', 'profile')),
+  profileDir: resolveRuntimeDir(config.browserProfileDir, path.join(dataDir, 'browser', 'profile')),
 });
-const browserMcpRuntime = resolveBrowserMcpRuntime({
-  enabled: config.browserMcpEnabled,
-  port: config.browserMcpPort,
-});
-const activeBrowserMcpUrl = await ensureBrowserMcpUrl(browserMcpRuntime, browserManager);
+const internalApiToken = randomUUID();
+const browserAutomation = config.browserAutomationEnabled
+  ? createBrowserAutomationBackend(browserManager)
+  : undefined;
+const activeBrowserApiBaseUrl = config.browserAutomationEnabled
+  ? `http://127.0.0.1:${config.port}/internal/browser`
+  : undefined;
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
+fs.mkdirSync(codexHomeDir, { recursive: true });
 fs.mkdirSync(feishuImageCacheDir, { recursive: true });
 
-const agentsDir = resolveAgentsDir({
-  configuredDir: config.codexAgentsDir,
-  dataDir,
-});
 log.debug('Agent 工作区目录已就绪', { agentsDir });
 const reminderDbPath = path.join(dataDir, 'reminders.db');
 
@@ -115,8 +121,12 @@ const codexRunner = new CodexRunner({
   timeoutMinMs: config.commandTimeoutMinMs,
   timeoutMaxMs: config.commandTimeoutMaxMs,
   timeoutPerCharMs: config.commandTimeoutPerCharMs,
-  browserMcpUrl: activeBrowserMcpUrl,
+  browserApiBaseUrl: activeBrowserApiBaseUrl,
+  internalApiToken,
+  gatewayRootDir,
   sandbox: config.codexSandbox,
+  workdirIsolation: config.codexWorkdirIsolation,
+  codexHomeDir,
 });
 log.debug('CodexRunner 已初始化');
 
@@ -275,21 +285,25 @@ function resolveAgentsDir(input: { configuredDir?: string; dataDir: string }): s
   return fallbackDir;
 }
 
-function resolveCodexWorkdir(configuredDir: string): string {
+function resolveCodexWorkdir(configuredDir: string, agentsDir: string): string {
   const resolved = path.resolve(configuredDir);
-  try {
-    if (fs.statSync(resolved).isDirectory()) {
-      return resolved;
-    }
-  } catch {
-    // noop
+  if (canUseDir(resolved)) {
+    return resolved;
   }
-  const fallback = path.resolve(process.cwd());
-  log.warn('配置的 CODEX_WORKDIR 不可用，回退到当前目录', {
+  const fallback = path.resolve(agentsDir);
+  if (canUseDir(fallback)) {
+    log.warn('配置的 CODEX_WORKDIR 不可用，回退到 agents 工作目录', {
+      configured: resolved,
+      fallback,
+    });
+    return fallback;
+  }
+  const finalFallback = path.resolve(process.cwd());
+  log.warn('配置的 CODEX_WORKDIR 与 agents 工作目录都不可用，回退到当前目录', {
     configured: resolved,
-    fallback,
+    fallback: finalFallback,
   });
-  return fallback;
+  return finalFallback;
 }
 
 function resolveRuntimeDir(configuredDir: string | undefined, fallbackDir: string): string {
@@ -311,30 +325,6 @@ function resolveGatewayRootDir(configuredDir: string | undefined): string {
     });
   }
   return path.resolve(process.cwd());
-}
-
-async function ensureBrowserMcpUrl(
-  runtime: ReturnType<typeof resolveBrowserMcpRuntime>,
-  manager: BrowserManager,
-): Promise<string | undefined> {
-  if (!runtime) {
-    return undefined;
-  }
-
-  try {
-    await startBrowserMcpServer(runtime, manager);
-    log.debug('Browser MCP 运行时已启用', {
-      url: runtime.url,
-      shouldAutoStart: runtime.shouldAutoStart,
-    });
-    return runtime.url;
-  } catch (error) {
-    log.warn('Browser MCP 启动失败，当前将以无浏览器工具模式运行', {
-      url: runtime.url,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
-  }
 }
 
 function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void> {
@@ -419,6 +409,8 @@ const app = createApp({
   feishuEnabled: config.feishuEnabled,
   wecomCrypto,
   allowFrom: config.allowFrom,
+  internalApiToken,
+  browserAutomation,
   feishuVerificationToken: config.feishuVerificationToken,
   feishuLongConnection: feishuStatusSummary.mode === 'long-connection',
   feishuGroupRequireMention: feishuStatusSummary.groupRequireMention,
@@ -443,6 +435,20 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       receiveIdType: replyContext?.replyTargetType ?? 'open_id',
     } as const;
     if (structured) {
+      if (structured.op === 'recall') {
+        if (channel === 'wecom') {
+          if (!weComApi) {
+            throw new Error('wecom api not configured');
+          }
+          await weComApi.sendText(userId, '❌ 企微暂不支持 recall 消息操作。');
+          return;
+        }
+        if (!feishuApi) {
+          throw new Error('feishu api not configured');
+        }
+        await feishuApi.recallMessage(structured.message_id);
+        return;
+      }
       if (!isGatewayMessageTypeSupported(channel, structured.msg_type)) {
         const message = `❌ 不支持的 ${channel === 'feishu' ? '飞书' : '企微'} msg_type：${structured.msg_type}`;
         if (channel === 'wecom') {
@@ -464,6 +470,10 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
         if (!weComApi) {
           throw new Error('wecom api not configured');
         }
+        if (structured.op !== 'send') {
+          await weComApi.sendText(userId, `❌ 企微暂不支持 ${structured.op} 消息操作。`);
+          return;
+        }
         await weComApi.sendMessage(userId, {
           msgType: structured.msg_type,
           content: structured.content,
@@ -475,6 +485,21 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       }
       const normalizedFeishuMessage = normalizeFeishuStructuredMessage(structured.msg_type, structured.content);
       const feishuReplyOptions = extractFeishuReplyOptions(normalizedFeishuMessage.content);
+      if (structured.op === 'update') {
+        if (!isFeishuUpdateMessageType(normalizedFeishuMessage.msgType)) {
+          const message = `❌ 不支持的飞书 update msg_type：${normalizedFeishuMessage.msgType}`;
+          await feishuApi.sendText(feishuReplyTarget, message, {
+            replyToMessageId,
+          });
+          return;
+        }
+        await feishuApi.updateMessage({
+          messageId: structured.message_id,
+          msgType: normalizedFeishuMessage.msgType,
+          content: feishuReplyOptions.content,
+        });
+        return;
+      }
       await feishuApi.sendMessage(feishuReplyTarget, {
         msgType: normalizedFeishuMessage.msgType,
         content: feishuReplyOptions.content,
@@ -498,6 +523,10 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       replyToMessageId,
     });
   });
+}
+
+function isFeishuUpdateMessageType(msgType: string): msgType is 'text' | 'post' | 'interactive' {
+  return msgType === 'text' || msgType === 'post' || msgType === 'interactive';
 }
 
 async function enrichInboundContent(channel: 'wecom' | 'feishu', content: string): Promise<InboundEnrichResult> {

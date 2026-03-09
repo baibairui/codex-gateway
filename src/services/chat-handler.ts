@@ -191,6 +191,19 @@ function renderMemoryOnboardingResumeMessage(): string {
   return '🧭 记忆初始化已在进行中，请继续回答当前问题即可。';
 }
 
+function renderMemoryOnboardingSuggestion(reason: 'shared' | 'agent' | 'both'): string {
+  const reasonLine = reason === 'shared'
+    ? '检测到 shared-memory 尚未初始化。'
+    : reason === 'agent'
+    ? '检测到当前 agent 自身份尚未初始化。'
+    : '检测到 shared-memory 和当前 agent 自身份都尚未初始化。';
+  return [
+    `🧭 ${reasonLine}`,
+    '当前不会自动劫持到隐藏初始化 agent，先继续按当前 agent 执行。',
+    '如需补齐初始化，请手动执行 `/agent init-memory`。',
+  ].join('\n');
+}
+
 function renderSkillOnboardingStartMessage(agent: { name: string; agentId: string; workspaceDir: string }): string {
   return [
     `🛠️ 已切换到技能扩展助手：${agent.name} (${agent.agentId})`,
@@ -338,6 +351,10 @@ function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
     '2. 只有当用户明确要求“请发送/回发某种非文本消息”时，才输出单个 JSON 对象。',
     '3. 输出 JSON 时禁止使用 markdown 代码块，禁止附加解释文字，只输出 JSON 本体。',
     '4. JSON 格式必须为：{"__gateway_message__":true,"msg_type":"<type>","content":<object|string>}。',
+    '4.1 若要更新已发送的飞书消息，可输出 op=update。',
+    '4.1.1 示例：{"__gateway_message__":true,"op":"update","message_id":"<飞书消息ID>","msg_type":"<type>","content":<object|string>}。',
+    '4.2 若要撤回已发送的飞书消息，可输出 op=recall。',
+    '4.2.1 示例：{"__gateway_message__":true,"op":"recall","message_id":"<飞书消息ID>"}。',
     '5. 飞书常用 msg_type：text、markdown、post、image、file、audio、media、sticker、interactive、share_chat、share_user。',
     '6. 若用户只是发来图片/文件并让你分析，不算“要求回发非文本”，此时必须回复普通文本分析结果。',
     '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path/local_sticker_path，必须先读取对应本地文件并给出分析结果，不要先追问目标。',
@@ -1196,37 +1213,12 @@ ${clipMessage(text, 500)}
       : isSharedMemoryEmpty
       ? 'shared'
       : 'agent';
-    const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, MEMORY_ONBOARDING_AGENT_ID);
     const shouldPushStartupHelp = !existingThreadId
       && !shouldStartMemoryOnboarding
       && !isSystemAgentRecord(currentAgent);
 
-    if (shouldStartMemoryOnboarding) {
-      if (!onboardingThreadId) {
-        if (onboardingKickoffInFlight.has(sessionUserKey)) {
-          await deps.sendText(channel, userId, renderMemoryOnboardingPendingMessage());
-          return;
-        }
-
-        const agent = ensureMemoryOnboardingAgent();
-        await deps.sendText(
-          channel,
-          userId,
-          [
-            onboardingReason === 'shared'
-              ? '🧭 检测到 shared-memory 为空，先进行记忆初始化。'
-              : onboardingReason === 'agent'
-              ? '🧭 检测到当前 agent 自身份未初始化，先进行记忆初始化。'
-              : '🧭 检测到 shared-memory 与当前 agent 自身份都未初始化，先进行记忆初始化。',
-            renderMemoryOnboardingStartMessage(onboardingReason),
-          ].join('\n'),
-        );
-        await startMemoryOnboarding(agent, currentModel, {
-          reason: onboardingReason,
-          targetAgent: currentAgent,
-        });
-        return;
-      }
+    if (shouldStartMemoryOnboarding && !existingThreadId) {
+      await deps.sendText(channel, userId, renderMemoryOnboardingSuggestion(onboardingReason));
     }
 
     if (shouldPushStartupHelp) {

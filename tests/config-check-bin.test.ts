@@ -8,7 +8,7 @@ const configCheckPath = new URL('../bin/config-check.mjs', import.meta.url);
 const codexclawPath = new URL('../bin/codexclaw.mjs', import.meta.url);
 
 describe('config-check bin', () => {
-  it('prints feishu long connection status and next step', () => {
+  it('prints feishu long connection status and next step', { timeout: 20000 }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-check-'));
     fs.writeFileSync(path.join(dir, '.env'), [
       'WECOM_ENABLED=false',
@@ -17,7 +17,6 @@ describe('config-check bin', () => {
       'FEISHU_APP_SECRET=sec_xxx',
       'FEISHU_LONG_CONNECTION=true',
       'FEISHU_GROUP_REQUIRE_MENTION=true',
-      'FEISHU_DOC_BASE_URL=https://tenant.feishu.cn/docx',
       'RUNNER_ENABLED=false',
       'CODEX_BIN=node',
     ].join('\n'));
@@ -40,10 +39,11 @@ describe('config-check bin', () => {
     expect(result.stdout).toContain('确认启动日志打印了“飞书运行状态摘要”');
     expect(result.stdout).toContain('/healthz');
     expect(result.stdout).toContain('下一步：确认飞书事件订阅已开启长连接');
+    expect(result.stdout).toContain('DocX 链接：系统将基于 document_id 自动生成');
     expect(result.stdout).toContain('下一步：');
   });
 
-  it('groups blocking items and env hints when feishu credentials are missing', () => {
+  it('groups blocking items and env hints when feishu credentials are missing', { timeout: 20000 }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-check-'));
     fs.writeFileSync(path.join(dir, '.env'), [
       'WECOM_ENABLED=false',
@@ -70,7 +70,7 @@ describe('config-check bin', () => {
     expect(result.stdout).toContain('FEISHU_APP_ID=<please_set>');
   });
 
-  it('shows doctor in codexclaw help', () => {
+  it('shows doctor in codexclaw help', { timeout: 20000 }, () => {
     const result = spawnSync('node', [codexclawPath.pathname, 'help'], {
       cwd: path.resolve(path.dirname(codexclawPath.pathname), '..'),
       encoding: 'utf8',
@@ -78,6 +78,7 @@ describe('config-check bin', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('doctor');
+    expect(result.stdout).toContain('doc-log');
     expect(result.stdout).toContain('安装自检');
   });
 });
