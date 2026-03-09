@@ -19,6 +19,8 @@ export interface CodexRunInput {
   };
   /** 每产出一条 agent_message 就回调一次 */
   onMessage?: (text: string) => void;
+  /** 一旦收到 thread.started 就立刻回调，便于上层先持久化新会话 */
+  onThreadStarted?: (threadId: string) => void;
 }
 
 export interface CodexRunResult {
@@ -136,6 +138,7 @@ export class CodexRunner {
       prompt: input.prompt,
       workdir: input.workdir,
       onMessage: input.onMessage,
+      onThreadStarted: input.onThreadStarted,
       initialThreadId: input.threadId,
       requireThreadId: true,
       logMeta: {
@@ -223,6 +226,7 @@ export class CodexRunner {
     prompt: string;
     workdir?: string;
     onMessage?: (text: string) => void;
+    onThreadStarted?: (threadId: string) => void;
     initialThreadId?: string;
     requireThreadId: boolean;
     logMeta?: Record<string, unknown>;
@@ -291,6 +295,7 @@ export class CodexRunner {
             },
             (threadId) => {
               observedThreadId = threadId;
+              options.onThreadStarted?.(threadId);
             },
           );
         }
@@ -347,6 +352,7 @@ export class CodexRunner {
             },
             (threadId) => {
               observedThreadId = threadId;
+              options.onThreadStarted?.(threadId);
             },
           );
         }

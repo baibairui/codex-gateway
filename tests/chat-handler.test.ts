@@ -201,6 +201,37 @@ describe('createChatHandler', () => {
     expect(sessionStore.getSession('local-owner', 'default')).toBeUndefined();
   });
 
+  it('persists a new session as soon as thread.started is observed', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async (input) => {
+          input.onThreadStarted?.('thread_started_1');
+          throw new Error('boom-after-thread');
+        },
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(sessionStore.getSession('local-owner', 'default')).toBe('thread_started_1');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '❌ 请求执行失败，请稍后重试。');
+  });
+
   it('sends ack when receiving normalized non-text inbound message', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async () => ({ threadId: 't1', rawOutput: '' }));

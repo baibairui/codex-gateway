@@ -50,6 +50,7 @@ interface CodexRunnerLike {
       agentId: string;
     };
     onMessage?: (text: string) => void;
+    onThreadStarted?: (threadId: string) => void;
   }): Promise<{ threadId: string; rawOutput: string }>;
   review(input: {
     mode: 'uncommitted' | 'base' | 'commit';
@@ -419,6 +420,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
           agentId: agent.agentId,
           dbPath: deps.reminderDbPath,
         },
+        onThreadStarted: (startedThreadId) => {
+          persistSession(sessionUserKey, agent.agentId, startedThreadId, 'identity bootstrap', targetVersion);
+        },
       });
       threadId = bootstrapResult.threadId;
       persistSession(sessionUserKey, agent.agentId, threadId, 'identity bootstrap', targetVersion);
@@ -437,6 +441,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
           userId,
           agentId: agent.agentId,
           dbPath: deps.reminderDbPath,
+        },
+        onThreadStarted: (startedThreadId) => {
+          persistSession(sessionUserKey, agent.agentId, startedThreadId, 'identity refresh', targetVersion);
         },
       });
       threadId = patchResult.threadId;
@@ -495,6 +502,15 @@ export function createChatHandler(deps: ChatHandlerDeps) {
           userId,
           agentId: runtimeAgent.agentId,
           dbPath: deps.reminderDbPath,
+        },
+        onThreadStarted: (startedThreadId) => {
+          persistSession(
+            sessionUserKey,
+            runtimeAgent.agentId,
+            startedThreadId,
+            `⏰ ${reminder.message}`,
+            identityBinding.boundIdentityVersion,
+          );
         },
         onMessage: (text) => {
           const output = text.trim();
@@ -610,6 +626,9 @@ ${clipMessage(prompt, 500)}
             userId,
             agentId: onboardingAgent.agentId,
             dbPath: deps.reminderDbPath,
+          },
+          onThreadStarted: (startedThreadId) => {
+            deps.sessionStore.setSession(sessionUserKey, onboardingAgent.agentId, startedThreadId, 'memory onboarding kickoff');
           },
           onMessage: (text) => {
             const sanitized = sanitizeOnboardingText(text);
@@ -789,6 +808,9 @@ ${clipMessage(prompt, 500)}
               userId,
               agentId: agent.agentId,
               dbPath: deps.reminderDbPath,
+            },
+            onThreadStarted: (startedThreadId) => {
+              deps.sessionStore.setSession(sessionUserKey, agent.agentId, startedThreadId, 'skill onboarding kickoff');
             },
             onMessage: (text) => {
               const sanitized = sanitizeOnboardingText(text);
@@ -1177,6 +1199,15 @@ ${clipMessage(text, 500)}
           userId,
           agentId: runtimeAgent.agentId,
           dbPath: deps.reminderDbPath,
+        },
+        onThreadStarted: (startedThreadId) => {
+          persistSession(
+            sessionUserKey,
+            runtimeAgent.agentId,
+            startedThreadId,
+            prompt,
+            identityBinding.boundIdentityVersion,
+          );
         },
         onMessage: (text) => {
           const userVisibleOutput = isSystemAgentId(currentAgent.agentId) ? sanitizeOnboardingText(text) : text;
