@@ -25,6 +25,11 @@ describe('gateway-browser-skill', () => {
     expect(skill).toContain('Report format:');
     expect(skill).toContain('Evidence: snapshot/screenshot/console/network findings');
     expect(skill).toContain('Next step: the next minimal action or the exact user takeover request.');
+    expect(skill).toContain('Status templates:');
+    expect(skill).toContain('In progress: report the latest action');
+    expect(skill).toContain('Blocked: report the blocker, risk');
+    expect(skill).toContain('Handoff: report why user takeover is required');
+    expect(skill).toContain('Done: report what was completed');
     expect(skill).toContain('Stop conditions:');
     expect(skill).toContain('multiple similar targets exist');
     expect(skill).toContain('upload files, or submit content the user did not explicitly approve');
