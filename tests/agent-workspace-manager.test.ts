@@ -121,9 +121,11 @@ describe('AgentWorkspaceManager', () => {
     expect(agentsMd).toContain('Action / Evidence / Result / Next step');
     expect(agentsMd).toContain('多个相似目标并存');
     expect(agentsMd).toContain('文件上传时，若用户未明确授权，先暂停并确认');
+    expect(agentsMd).toContain('人工接管触发条件可直接按这组理解');
     expect(playbook).toContain('Browser Playbook');
     expect(playbook).toContain('回报格式固定：已执行动作 -> 页面证据 -> 当前结论 -> 下一步。');
     expect(playbook).toContain('## Stop Conditions');
+    expect(playbook).toContain('人工接管触发条件总览');
     expect(playbook).toContain('多个相似目标并存');
     expect(playbook).toContain('需要用户做出的精确决策');
   });
