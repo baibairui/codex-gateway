@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { defaultGlobalSkillRoots } from './gateway-browser-skill.js';
+
 export interface SkillCatalogEntry {
   name: string;
   description?: string;
@@ -8,11 +10,9 @@ export interface SkillCatalogEntry {
   skillDir: string;
 }
 
-const GLOBAL_SKILL_ROOTS = ['/root/.codex/skills', '/root/.agents/skills'];
-
 export function listSkillsForAgentWorkspace(workspaceDir: string): SkillCatalogEntry[] {
   const result: SkillCatalogEntry[] = [];
-  for (const root of GLOBAL_SKILL_ROOTS) {
+  for (const root of defaultGlobalSkillRoots()) {
     result.push(...listSkillsInRoot(root, 'global'));
   }
   result.push(...listSkillsInRoot(path.join(workspaceDir, '.codex', 'skills'), 'agent-local'));

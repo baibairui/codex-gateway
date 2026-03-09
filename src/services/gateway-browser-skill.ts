@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export const GATEWAY_BROWSER_SKILL_NAME = 'gateway-browser';
@@ -13,7 +14,7 @@ export function installGatewayBrowserSkill(workspaceDir: string): void {
 }
 
 export function syncManagedGlobalSkills(options: GlobalSkillSyncOptions = {}): void {
-  const roots = options.roots ?? ['/root/.codex/skills', '/root/.agents/skills'];
+  const roots = options.roots ?? defaultGlobalSkillRoots();
   for (const root of roots) {
     installToSkillRoot(root);
     purgeLegacySkills(root);
@@ -65,4 +66,12 @@ function writeIfChanged(filePath: string, content: string): void {
   }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, 'utf8');
+}
+
+export function defaultGlobalSkillRoots(): string[] {
+  const homeDir = process.env.HOME?.trim() || os.homedir();
+  return [
+    path.join(homeDir, '.codex', 'skills'),
+    path.join(homeDir, '.agents', 'skills'),
+  ];
 }
