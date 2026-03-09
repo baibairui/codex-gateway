@@ -29,6 +29,9 @@ interface SessionStoreLike {
     options?: { boundIdentityVersion?: string },
   ): void;
   clearSession(userId: string, agentId: string): boolean;
+  getModelOverride?(userId: string, agentId: string): string | undefined;
+  setModelOverride?(userId: string, agentId: string, model: string): void;
+  clearModelOverride?(userId: string, agentId: string): boolean;
   listDetailed(userId: string, agentId: string): SessionListItem[];
   resolveSwitchTarget(userId: string, agentId: string, target: string): string | undefined;
   renameSession(targetThreadId: string, name: string): boolean;
@@ -426,7 +429,6 @@ function buildMemoryOnboardingKickoffPrompt(input: {
 }
 
 export function createChatHandler(deps: ChatHandlerDeps) {
-  const userModelOverrides = new Map<string, string>();
   const userSearchOverrides = new Map<string, boolean>();
   const onboardingKickoffInFlight = new Set<string>();
   const skillManager = deps.skillManager ?? new AgentSkillManager();
@@ -436,6 +438,10 @@ export function createChatHandler(deps: ChatHandlerDeps) {
       return deps.sessionStore.getSessionState(userKey, agentId);
     }
     return { threadId: deps.sessionStore.getSession(userKey, agentId) };
+  }
+
+  function getCurrentModel(userKey: string, agentId: string): string | undefined {
+    return deps.sessionStore.getModelOverride?.(userKey, agentId) ?? deps.defaultModel;
   }
 
   function persistSession(
@@ -527,12 +533,12 @@ export function createChatHandler(deps: ChatHandlerDeps) {
   }): Promise<void> {
     const { channel, userId, reminder } = input;
     const sessionUserKey = resolveUserKey(userId);
-    const currentModel = userModelOverrides.get(sessionUserKey) ?? deps.defaultModel;
     const listedAgents = deps.sessionStore.listAgents(sessionUserKey, { includeHidden: true });
     const targetAgent = reminder.sourceAgentId
       ? listedAgents.find((item) => item.agentId === reminder.sourceAgentId)
       : undefined;
     const runtimeAgent = targetAgent ?? deps.sessionStore.getCurrentAgent(sessionUserKey);
+    const currentModel = getCurrentModel(sessionUserKey, runtimeAgent.agentId);
 
     if (!deps.runnerEnabled) {
       await deps.sendText(channel, userId, `⏰ 定时提醒：${reminder.message}`);
@@ -650,7 +656,7 @@ ${clipMessage(prompt, 500)}
     const currentAgent = normalizeVisibleCurrentAgent(sessionUserKey);
     const existingSessionState = getSessionState(sessionUserKey, currentAgent.agentId);
     const existingThreadId = existingSessionState.threadId;
-    const currentModel = userModelOverrides.get(sessionUserKey) ?? deps.defaultModel;
+    const currentModel = getCurrentModel(sessionUserKey, currentAgent.agentId);
     const currentSearch = userSearchOverrides.get(sessionUserKey) ?? deps.defaultSearch;
     // 对用户展示时，过滤掉系统内置 agent（如 memory-onboarding）
     const allAgents = commandNeedsAgentList(prompt) ? deps.sessionStore.listAgents(sessionUserKey, { includeHidden: true }) : [];
@@ -1042,7 +1048,7 @@ ${clipMessage(text, 500)}
         return;
       }
       if (commandResult.clearModel) {
-        userModelOverrides.delete(sessionUserKey);
+        deps.sessionStore.clearModelOverride?.(sessionUserKey, currentAgent.agentId);
         const snapshot = loadCodexModels();
         await sendCommandText([
           `✅ 已重置模型：${deps.defaultModel ?? '(codex cli 默认模型)'}`,
@@ -1057,7 +1063,7 @@ ${clipMessage(text, 500)}
           await sendCommandText(`❌ ${resolved.reason ?? '模型校验失败'}`);
           return;
         }
-        userModelOverrides.set(sessionUserKey, resolved.model);
+        deps.sessionStore.setModelOverride?.(sessionUserKey, currentAgent.agentId, resolved.model);
         const note = resolved.reason ? `\n⚠️ ${resolved.reason}` : '';
         await sendCommandText([
           `✅ 已切换模型为：${resolved.model}${note}`,

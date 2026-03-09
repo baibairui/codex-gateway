@@ -1,6 +1,9 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { formatCodexModelsText, resolveModelFromSnapshot } from '../src/services/codex-models.js';
+import { formatCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from '../src/services/codex-models.js';
 
 describe('formatCodexModelsText', () => {
   it('renders listed and hidden models', () => {
@@ -56,5 +59,15 @@ describe('resolveModelFromSnapshot', () => {
     expect(result.ok).toBe(true);
     expect(result.model).toBe('anything-model');
     expect(result.reason).toContain('跳过合法性校验');
+  });
+});
+
+describe('loadCodexModels', () => {
+  it('falls back to empty list when cache json is broken', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-models-'));
+    const cachePath = path.join(dir, 'models_cache.json');
+    fs.writeFileSync(cachePath, '');
+
+    expect(loadCodexModels(cachePath)).toEqual({ models: [] });
   });
 });

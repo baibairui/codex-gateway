@@ -8,6 +8,7 @@ import { createChatHandler } from '../src/services/chat-handler.js';
 function createSessionStore() {
   const currentAgent = new Map<string, string>();
   const threads = new Map<string, string>();
+  const modelOverrides = new Map<string, string>();
   const agents = new Map<string, Array<{
     agentId: string;
     name: string;
@@ -79,6 +80,15 @@ function createSessionStore() {
     },
     clearSession(userId: string, agentId: string) {
       return threads.delete(`${userId}:${agentId}`);
+    },
+    getModelOverride(userId: string, agentId: string) {
+      return modelOverrides.get(`${userId}:${agentId}`);
+    },
+    setModelOverride(userId: string, agentId: string, model: string) {
+      modelOverrides.set(`${userId}:${agentId}`, model);
+    },
+    clearModelOverride(userId: string, agentId: string) {
+      return modelOverrides.delete(`${userId}:${agentId}`);
     },
     listDetailed() {
       return [];
@@ -992,6 +1002,43 @@ describe('createChatHandler', () => {
         .find((action) => action.value?.gateway_cmd === '/model');
       expect(currentModelAction?.type).toBe('primary');
     });
+  });
+
+  it('reads persisted model selection per agent when switching agents', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.createAgent('local-owner', {
+      agentId: 'frontend',
+      name: '前端Agent',
+      workspaceDir: '/tmp/frontend',
+    });
+    sessionStore.setModelOverride('local-owner', 'default', 'gpt-5');
+    sessionStore.setModelOverride('local-owner', 'frontend', 'gpt-5-codex');
+
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'fallback-model',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/model' });
+    await handler({ channel: 'wecom', userId: 'u1', content: '/agent use frontend' });
+    await handler({ channel: 'wecom', userId: 'u1', content: '/model' });
+
+    expect(String(sendText.mock.calls[0]?.[2] ?? '')).toContain('当前模型：gpt-5');
+    expect(String(sendText.mock.calls[2]?.[2] ?? '')).toContain('当前模型：gpt-5-codex');
   });
 
   it('truncates long model list and adds full-list entry', async () => {
