@@ -40,6 +40,7 @@ export interface UserCommandResult {
   initSkillAgent?: boolean;
   useAgentTarget?: string;
   initLogin?: boolean;
+  initFeishuAuth?: boolean;
 }
 
 export function maskThreadId(threadId?: string): string {
@@ -127,6 +128,7 @@ const HELP_PAGES: Array<{ title: string; lines: string[] }> = [
       '/review commit [SHA] - 审查指定提交',
       '/repair-users - 清理并修复已部署用户工作区（技能注入、规则升级、工作目录自愈）',
       '/login - 使用设备码登录 Codex',
+      '/feishu-auth - 获取飞书个人任务/日历授权入口',
       '提醒任务请直接用自然语言描述，由已安装的 reminder-tool skill 执行内置脚本创建提醒。',
     ],
   },
@@ -267,6 +269,11 @@ export function handleUserCommand(content: string, context: UserCommandContext =
       return {
         handled: true,
         initLogin: true,
+      };
+    case '/feishu-auth':
+      return {
+        handled: true,
+        initFeishuAuth: true,
       };
     case '/rename': {
       const target = parts[1] ?? '';

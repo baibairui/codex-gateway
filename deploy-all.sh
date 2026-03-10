@@ -9,9 +9,6 @@ echo "🎯 同步并部署节点 1 (/opt/gateway)"
 ssh -o StrictHostKeyChecking=no -i ./br.pem root@115.190.233.134 << 'INSIDEOF'
   set -e
   cd /opt/gateway
-  # 强制清除 untracked 文件和修改过的本地文件，防止 pull/merge 因为未追踪文件导致 abort
-  git clean -fd
-  git reset --hard HEAD
   git pull origin master
   npm install
   npm run build
@@ -25,12 +22,10 @@ echo "🎯 同步并部署节点 2 (/opt/gateway-copy)"
 ssh -o StrictHostKeyChecking=no -i ./br.pem root@115.190.233.134 << 'INSIDEOF2'
   set -e
   cd /opt/gateway-copy
-  git clean -fd
-  git reset --hard HEAD
   git pull origin master
   npm install
   npm run build
-  # 如果这个节点有其他的 PM2 服务名，你可以替换这里。目前暂不重启。
+  pm2 restart gateway-copy
 INSIDEOF2
 echo "✅ 节点 2 部署成功！"
 
