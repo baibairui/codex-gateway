@@ -557,6 +557,103 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '[默认Agent] 你好，我已开始处理。');
   });
 
+  it('intercepts the first ordinary feishu message and sends auth card before running codex when personal auth is unbound', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      feishuPersonalAuth: {
+        isAvailable: () => true,
+        isBound: () => false,
+      },
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '你好' });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(String(sendText.mock.calls[0]?.[2] ?? '')).toContain('"飞书个人授权"');
+  });
+
+  it('intercepts the first ordinary feishu message and sends unavailable card when personal auth is disabled', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      feishuPersonalAuth: {
+        isAvailable: () => false,
+        isBound: () => false,
+      },
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '你好' });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(String(sendText.mock.calls[0]?.[2] ?? '')).toContain('"飞书个人权限连接"');
+  });
+
+  it('allows ordinary feishu messages through after personal auth is already bound', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      feishuPersonalAuth: {
+        isAvailable: () => true,
+        isBound: () => true,
+      },
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '你好' });
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it('pushes help text automatically when a new wecom session starts', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async (input: { onMessage?: (text: string) => void }) => {
@@ -910,7 +1007,6 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'feishu', userId: 'u1', content: '请创建 task create-personal 任务' });
 
-    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('feishu binding required'))).toBe(true);
     const authPayload = sendText.mock.calls
       .map((call) => String(call[2] ?? ''))
       .find((payload) => payload.includes('"飞书个人授权"'));
@@ -920,7 +1016,41 @@ describe('createChatHandler', () => {
       content?: { header?: { title?: { content?: string } } };
     };
     expect(parsed.content?.header?.title?.content).toBe('飞书个人授权');
-    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('❌ 请求执行失败'))).toBe(true);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('feishu binding required'))).toBe(false);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('❌ 请求执行失败'))).toBe(false);
+  });
+
+  it('auto-sends a personal auth unavailable card instead of raw gateway errors', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => {
+          throw new Error('feishu personal auth unavailable');
+        },
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '帮我创建今天下午的个人飞书日程' });
+
+    const authPayload = sendText.mock.calls
+      .map((call) => String(call[2] ?? ''))
+      .find((payload) => payload.includes('"飞书个人权限连接"'));
+    expect(authPayload).toBeTruthy();
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('feishu personal auth unavailable'))).toBe(false);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('❌ 请求执行失败'))).toBe(false);
   });
 
   it('renders search toggle card with dynamic button emphasis', async () => {

@@ -144,6 +144,13 @@ if (!feishuEnabled) {
   console.log(`- App 凭据：${missingIfEmpty('FEISHU_APP_ID') || missingIfEmpty('FEISHU_APP_SECRET') ? '缺失' : '已配置'}`);
   console.log(`- 群聊触发：${feishuGroupRequireMention ? '要求 @ 机器人' : '群内任意消息都触发'}`);
   console.log('- DocX 链接：系统将基于 document_id 自动生成，无需额外域名配置');
+  if ((process.env.GATEWAY_PUBLIC_BASE_URL || '').trim()) {
+    console.log(`- 个人授权：已配置公网基址，将自动推导 /feishu/oauth/callback`);
+  } else if ((process.env.FEISHU_OAUTH_REDIRECT_URI || '').trim()) {
+    console.log(`- 个人授权：使用兼容模式 FEISHU_OAUTH_REDIRECT_URI`);
+  } else {
+    console.log('- 个人授权：未启用；个人任务/个人日历会返回明确错误，基础机器人能力不受影响');
+  }
   console.log(`- 启动 help 推送：${feishuStartupHelpEnabled ? '已开启' : '未开启'}`);
   if (feishuStartupHelpEnabled) {
     console.log(`- help 推送管理员：${feishuStartupHelpAdminOpenId || '(未配置 FEISHU_STARTUP_HELP_ADMIN_OPEN_ID)'}`);

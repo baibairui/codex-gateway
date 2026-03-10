@@ -142,6 +142,10 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function sendFeishuPersonalAuthUnavailable(res: express.Response): void {
+  res.status(503).json({ ok: false, error: 'feishu personal auth unavailable' });
+}
+
 function parseJsonObject(raw: string): Record<string, unknown> | undefined {
   try {
     return asObject(JSON.parse(raw));
@@ -392,7 +396,7 @@ export function createApp(deps: AppDeps) {
 
   app.get('/feishu/oauth/start', (req, res) => {
     if (!deps.feishuOAuthService) {
-      res.status(404).json({ ok: false, error: 'feishu oauth unavailable' });
+      sendFeishuPersonalAuthUnavailable(res);
       return;
     }
     const gatewayUserId = qs(req.query.gateway_user_id).trim();
@@ -406,7 +410,7 @@ export function createApp(deps: AppDeps) {
 
   app.get('/feishu/oauth/callback', async (req, res) => {
     if (!deps.feishuOAuthService || !deps.feishuUserBindingStore) {
-      res.status(404).json({ ok: false, error: 'feishu oauth unavailable' });
+      sendFeishuPersonalAuthUnavailable(res);
       return;
     }
     const code = qs(req.query.code).trim();
@@ -444,7 +448,7 @@ export function createApp(deps: AppDeps) {
 
   app.get('/feishu/auth/status', (req, res) => {
     if (!deps.feishuUserBindingStore) {
-      res.status(404).json({ ok: false, error: 'feishu oauth unavailable' });
+      sendFeishuPersonalAuthUnavailable(res);
       return;
     }
     const gatewayUserId = qs(req.query.gateway_user_id).trim();
@@ -512,14 +516,18 @@ export function createApp(deps: AppDeps) {
     });
   }
 
-  if (deps.feishuUserApi) {
+  if (deps.internalApiToken) {
     app.use('/internal', express.json({ type: 'application/json', limit: '2mb' }));
     app.post('/internal/feishu/user-task', async (req, res) => {
       const feishuUserApi = deps.feishuUserApi;
       const remoteAddress = req.socket.remoteAddress;
       const token = req.header('x-gateway-internal-token');
-      if (!feishuUserApi || !deps.internalApiToken || token !== deps.internalApiToken || !isLoopbackAddress(remoteAddress)) {
+      if (!deps.internalApiToken || token !== deps.internalApiToken || !isLoopbackAddress(remoteAddress)) {
         res.status(403).json({ ok: false, error: 'forbidden' });
+        return;
+      }
+      if (!feishuUserApi?.createPersonalTask) {
+        sendFeishuPersonalAuthUnavailable(res);
         return;
       }
       const body = asObject(req.body);
@@ -549,8 +557,12 @@ export function createApp(deps: AppDeps) {
       const feishuUserApi = deps.feishuUserApi;
       const remoteAddress = req.socket.remoteAddress;
       const token = req.header('x-gateway-internal-token');
-      if (!feishuUserApi || !deps.internalApiToken || token !== deps.internalApiToken || !isLoopbackAddress(remoteAddress)) {
+      if (!deps.internalApiToken || token !== deps.internalApiToken || !isLoopbackAddress(remoteAddress)) {
         res.status(403).json({ ok: false, error: 'forbidden' });
+        return;
+      }
+      if (!feishuUserApi?.createPersonalCalendarEvent) {
+        sendFeishuPersonalAuthUnavailable(res);
         return;
       }
       const body = asObject(req.body);

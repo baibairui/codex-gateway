@@ -22,6 +22,7 @@ describe('offline deployment scripts', () => {
     expect(script).toContain('read -r -p "选择要部署的实例');
     expect(script).toContain('/opt/gateway|wecom-codex|');
     expect(script).toContain('/opt/gateway-copy|gateway-copy|');
+    expect(script).toContain("printf '可选实例:\\n' >&2");
   });
 
   it('deploy-all.sh remains a thin wrapper for full deployment', () => {
@@ -39,6 +40,7 @@ describe('offline deployment scripts', () => {
     expect(script).toContain('--update-env');
     expect(script).toContain('choose_instance');
     expect(script).toContain('case "$INSTANCE_NAME" in');
+    expect(script).toContain("printf '可选实例:\\n' >&2");
   });
 
   it('deploy-new.sh creates instances from an uploaded release package instead of cloning remotely', () => {

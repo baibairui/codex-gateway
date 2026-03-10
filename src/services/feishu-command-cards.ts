@@ -1091,3 +1091,48 @@ export function buildFeishuUserAuthMessage(input: {
     ],
   });
 }
+
+export function buildFeishuPersonalAuthUnavailableMessage(input?: {
+  reason?: string;
+}): string {
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+    },
+    header: {
+      template: 'grey',
+      title: {
+        tag: 'plain_text',
+        content: '飞书个人权限连接',
+      },
+    },
+    elements: [
+      buildFeishuTitleBlock(
+        '当前环境未启用个人权限连接',
+        input?.reason?.trim() || '当前环境还不能直接连接你的个人飞书权限，因此我暂时无法创建你的个人任务或个人日历事件。',
+      ),
+      buildFeishuFieldGrid([
+        { label: '当前状态', value: '基础飞书机器人能力可用，个人任务/个人日历未启用' },
+        { label: '下一步', value: '请让管理员为当前服务启用飞书个人权限连接后，再重试该请求' },
+      ]),
+      buildFeishuTipsNote('这不是 /login 问题，而是当前环境尚未启用“以你的身份访问飞书个人能力”。'),
+      {
+        tag: 'action',
+        actions: [
+          {
+            tag: 'button',
+            text: {
+              tag: 'plain_text',
+              content: '知道了',
+            },
+            type: 'default',
+            value: {
+              gateway_action: 'noop',
+            },
+          },
+        ],
+      },
+    ],
+  });
+}

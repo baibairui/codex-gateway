@@ -394,6 +394,7 @@ const handleChatText = createChatHandler({
   sessionStore,
   rateLimitStore,
   codexRunner,
+  codexHomeDir,
   agentWorkspaceManager,
   workspacePublisher,
   runnerEnabled: config.runnerEnabled,
@@ -401,6 +402,10 @@ const handleChatText = createChatHandler({
   defaultSearch: config.codexSearch,
   reminderDbPath,
   sendText,
+  feishuPersonalAuth: {
+    isAvailable: () => Boolean(feishuOAuthService && feishuUserBindingStore),
+    isBound: (gatewayUserId: string) => Boolean(feishuUserBindingStore.getByGatewayUserId(gatewayUserId)),
+  },
 });
 
 const reminderStore = new ReminderStore(reminderDbPath);
@@ -762,6 +767,7 @@ async function appDepsHandleFeishuCardAction(input: {
         channel: 'feishu',
         userId: input.userId,
         sendText,
+        codexHomeDir,
         codexRunner,
       });
     } catch (error) {
