@@ -25,6 +25,7 @@ const CONFIG_ENV_KEYS = [
   'FEISHU_STARTUP_HELP_ENABLED',
   'FEISHU_STARTUP_HELP_ADMIN_OPEN_ID',
   'FEISHU_OAUTH_REDIRECT_URI',
+  'GATEWAY_PUBLIC_BASE_URL',
   'DEDUP_WINDOW_SECONDS',
   'RATE_LIMIT_MAX_MESSAGES',
   'RATE_LIMIT_WINDOW_SECONDS',
@@ -214,5 +215,19 @@ describe('config feishu mention trigger', () => {
       FEISHU_APP_SECRET: undefined,
       CODEX_SANDBOX: 'full-auto',
     })).rejects.toThrow(/codexclaw setup|codexclaw doctor/);
+  });
+
+  it('derives feishu oauth redirect uri from the public gateway base url', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'true',
+      FEISHU_APP_ID: 'cli_xxx',
+      FEISHU_APP_SECRET: 'sec_xxx',
+      GATEWAY_PUBLIC_BASE_URL: 'https://gateway.example.com/base/',
+      FEISHU_OAUTH_REDIRECT_URI: undefined,
+      CODEX_SANDBOX: 'full-auto',
+    });
+
+    expect(config.feishuOAuthRedirectUri).toBe('https://gateway.example.com/base/feishu/oauth/callback');
   });
 });

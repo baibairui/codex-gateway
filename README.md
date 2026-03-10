@@ -228,10 +228,11 @@ WECOM_ENABLED=false
 FEISHU_ENABLED=true
 FEISHU_APP_ID=你的飞书AppID
 FEISHU_APP_SECRET=你的飞书AppSecret
-FEISHU_OAUTH_REDIRECT_URI=http://127.0.0.1:3000/feishu/oauth/callback
 FEISHU_LONG_CONNECTION=true
 FEISHU_VERIFICATION_TOKEN=你的校验Token
 FEISHU_GROUP_REQUIRE_MENTION=true
+# 可选：如果你还要启用“个人任务/个人日历”授权，再补充统一公网地址
+# GATEWAY_PUBLIC_BASE_URL=https://gateway.example.com
 # 可选：固定的项目迭代 DocX 文档引用（支持 id / token / url）
 # FEISHU_ITERATION_DOCX_REF=https://feishu.cn/docx/EChBdybp4oCAf2x6VqqcXQhmnvh
 ```
@@ -241,11 +242,12 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 - `FEISHU_LONG_CONNECTION=true`：启用官方 SDK 长连接收事件，不需要公网回调地址
 - 开启 `FEISHU_LONG_CONNECTION=true` 后，会关闭 `/feishu/callback` webhook 接口（不再做兜底双通道）
 - `FEISHU_VERIFICATION_TOKEN`：仅 webhook 模式需要；长连接模式可留空
-- `FEISHU_OAUTH_REDIRECT_URI`：用户态飞书能力使用的 OAuth 回调地址；如果你要创建“你的个人任务/日历”，必须配置
 - `FEISHU_GROUP_REQUIRE_MENTION=true`：群聊默认要求 `@机器人` 才触发；私聊不受影响。显式设为 `false` 可恢复“群里任何消息都触发”
 - DocX 链接默认由系统基于 `document_id` 自动生成，不要求用户额外配置 URL
 - `FEISHU_ITERATION_DOCX_REF`：可选。用于把每轮迭代记录追加到固定的项目 DocX 文档；支持 `document_id`、token 或飞书文档 URL
 - `FEISHU_ITERATION_DOCX_ID`：兼容旧配置，仍可继续使用，但推荐升级为 `FEISHU_ITERATION_DOCX_REF`
+- `GATEWAY_PUBLIC_BASE_URL`：可选。仅当你要启用“个人任务/个人日历”时需要；系统会基于它自动推导 `/feishu/oauth/callback`
+- `FEISHU_OAUTH_REDIRECT_URI`：旧兼容项，仍可读取，但不再建议作为用户手填配置
 
 安装建议：
 
@@ -305,13 +307,13 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 - 飞书应用已开通对应的 IM / Docs / Bitable / Calendar / Task / Wiki OpenAPI 权限
 
 - user / 个人态能力额外前提：
-- 已配置 `FEISHU_OAUTH_REDIRECT_URI`
+- 已配置 `GATEWAY_PUBLIC_BASE_URL`，或保留旧兼容项 `FEISHU_OAUTH_REDIRECT_URI`
 - 当前 gateway 用户已完成一次飞书 OAuth 绑定
 - 当前用户和飞书应用都具有对应的 Calendar / Task 权限
 
 首次绑定流程：
 
-1. 先确保服务可通过 `FEISHU_OAUTH_REDIRECT_URI` 被当前用户访问。
+1. 先配置 `GATEWAY_PUBLIC_BASE_URL`，让系统可推导出可被当前用户访问的 `/feishu/oauth/callback`。
 2. 现在可以直接在飞书里发送 `/feishu-auth`，机器人会回一张带授权按钮的卡片。
 3. 也可以手动打开 `GET /feishu/oauth/start?gateway_user_id=<当前用户ID>` 完成授权。
 4. 回调成功后，用 `GET /feishu/auth/status?gateway_user_id=<当前用户ID>` 确认 `bound: true`。
@@ -326,6 +328,7 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 
 - `/feishu-auth` 仅在飞书渠道中可用
 - `/login` 只负责 Codex CLI 登录，不负责飞书个人身份授权
+- 若未启用个人授权能力，`/feishu/oauth/start` 和内部个人任务/日历接口会返回明确错误，不再是 404
 
 边界说明：
 

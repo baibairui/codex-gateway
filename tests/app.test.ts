@@ -335,6 +335,45 @@ describe('createApp feishu oauth routes', () => {
 });
 
 describe('createApp internal feishu user ops', () => {
+  it('returns explicit unavailable errors instead of 404 when personal feishu auth is not enabled', async () => {
+    const baseUrl = await startTestServer({
+      internalApiToken: 'token-123',
+      browserAutomation: {
+        execute: vi.fn(async () => ({ text: 'ok' })),
+      },
+    });
+
+    const calendarResponse = await fetch(`${baseUrl}/internal/feishu/user-calendar-event`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gateway-internal-token': 'token-123',
+      },
+      body: JSON.stringify({
+        gatewayUserId: 'u1',
+        summary: '评审会',
+        startTime: '2026-03-10T09:00:00+08:00',
+        endTime: '2026-03-10T10:00:00+08:00',
+      }),
+    });
+    const calendarPayload = await calendarResponse.json() as { ok?: boolean; error?: string };
+
+    expect(calendarResponse.status).toBe(503);
+    expect(calendarPayload).toMatchObject({
+      ok: false,
+      error: 'feishu personal auth unavailable',
+    });
+
+    const oauthStartResponse = await fetch(`${baseUrl}/feishu/oauth/start?gateway_user_id=u1`);
+    const oauthStartPayload = await oauthStartResponse.json() as { ok?: boolean; error?: string };
+
+    expect(oauthStartResponse.status).toBe(503);
+    expect(oauthStartPayload).toMatchObject({
+      ok: false,
+      error: 'feishu personal auth unavailable',
+    });
+  });
+
   it('executes personal task creation through the protected internal endpoint', async () => {
     const createPersonalTask = vi.fn(async () => ({
       ok: true,

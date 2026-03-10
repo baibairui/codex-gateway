@@ -27,10 +27,10 @@ choose_target() {
     return
   fi
 
-  printf '可选实例:\n'
-  printf '  1) gateway\n'
-  printf '  2) gateway-copy\n'
-  printf '  3) all\n'
+  printf '可选实例:\n' >&2
+  printf '  1) gateway\n' >&2
+  printf '  2) gateway-copy\n' >&2
+  printf '  3) all\n' >&2
   read -r -p "选择要部署的实例 [gateway/gateway-copy/all]: " input
   printf '%s\n' "$input"
 }

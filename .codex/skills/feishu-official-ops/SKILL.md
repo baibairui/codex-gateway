@@ -40,6 +40,12 @@ The script reads these environment variables:
 - The same internal gateway variables are also required for `calendar create-event-personal`
 
 If either credential is missing, stop and report the real blocker instead of inventing success.
+For personal task/calendar actions, treat auth as a product flow first:
+
+- If the environment reports personal auth unavailable, tell the user that personal Feishu connection is not enabled in the current environment.
+- If the current user is not bound yet, tell the user to complete the in-product Feishu personal auth flow first.
+- Do not tell the user to fill `FEISHU_OAUTH_REDIRECT_URI` directly.
+- Do not invent fallback behavior for personal task/calendar writes.
 
 ## Official docs
 
@@ -187,11 +193,13 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki create-
 
 1. Confirm the target object type and destination.
 2. 如果用户给了飞书文档链接、wiki 链接或 document_id，直接解析并继续；只有目标对象完全不明确时才追问。
-3. Run the matching command from this skill.
-4. Read the returned JSON and report the real result back to the user.
-5. If the API returns a permission error, say that the Feishu app lacks the required OpenAPI permission instead of inventing success.
-6. If the user wants to insert a local image or the message already contains `local_image_path=...`, prefer `--image-file` instead of trying to stuff the image into markdown.
-7. 优先选最小命令面：读取就用 `im/doc/bitable/calendar/task`，写文档或知识库才用 `docx/wiki`。
+3. For DocX / Wiki actions, run the matching command from this skill directly.
+4. For personal task / personal calendar actions, assume the product flow is “先连接，再执行”:
+   if auth is unavailable or unbound, report that state cleanly instead of探测无关接口。
+5. Read the returned JSON and report the real result back to the user.
+6. If the API returns a permission error, say that the Feishu app lacks the required OpenAPI permission instead of inventing success.
+7. If the user wants to insert a local image or the message already contains `local_image_path=...`, prefer `--image-file` instead of trying to stuff the image into markdown.
+8. 优先选最小命令面：读取就用 `im/doc/bitable/calendar/task`，写文档或知识库才用 `docx/wiki`。
 
 ## Location rules
 

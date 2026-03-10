@@ -76,11 +76,16 @@ describe('AgentWorkspaceManager', () => {
     expect(tools).toContain('自带脚本执行真实 OpenAPI');
     expect(tools).not.toContain('MCP');
     expect(tools).not.toContain('gateway_feishu');
-    expect(feishuPlaybook).toContain('`wiki list-spaces`');
+    expect(feishuPlaybook).toContain('DocX / Wiki');
+    expect(feishuPlaybook).toContain('个人任务 / 个人日历');
     expect(feishuPlaybook).toContain('`docx create`');
     expect(feishuPlaybook).toContain('skill 自带执行脚本');
+    expect(feishuPlaybook).toContain('先连接，再执行');
+    expect(feishuPlaybook).toContain('不要改跑无关只读探测');
     expect(feishuPlaybook).not.toContain('gateway_feishu');
     expect(feishuSkill).toContain('Use the bundled script');
+    expect(feishuSkill).toContain('For personal task/calendar actions, treat auth as a product flow first');
+    expect(feishuSkill).toContain('Do not tell the user to fill `FEISHU_OAUTH_REDIRECT_URI` directly');
     expect(feishuSkill).not.toContain('gateway_feishu');
     expect(socialIntelSkill).toContain('name: social-intel');
     expect(socialIntelSkill).toContain('sources, publish time, author/account, summary, and evidence');

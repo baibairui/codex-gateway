@@ -19,9 +19,9 @@ choose_instance() {
     return
   fi
 
-  printf '可选实例:\n'
-  printf '  1) gateway\n'
-  printf '  2) gateway-copy\n'
+  printf '可选实例:\n' >&2
+  printf '  1) gateway\n' >&2
+  printf '  2) gateway-copy\n' >&2
   read -r -p "选择要更新配置的实例 [gateway/gateway-copy]: " input
   printf '%s\n' "$input"
 }

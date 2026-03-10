@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFeishuApiLoginFormMessage,
   buildFeishuLoginChoiceMessage,
+  buildFeishuPersonalAuthUnavailableMessage,
   buildFeishuUserAuthMessage,
 } from '../src/services/feishu-command-cards.js';
 
@@ -89,5 +90,31 @@ describe('buildFeishuUserAuthMessage', () => {
       }>;
     expect(actions.some((item) => item.text?.content === '去飞书授权' && item.multi_url?.url === '/feishu/oauth/start?gateway_user_id=ou_123')).toBe(true);
     expect(actions.some((item) => item.text?.content === '查看授权状态' && item.multi_url?.url === '/feishu/auth/status?gateway_user_id=ou_123')).toBe(true);
+  });
+});
+
+describe('buildFeishuPersonalAuthUnavailableMessage', () => {
+  it('renders an unavailable card without a broken auth button', () => {
+    const payload = buildFeishuPersonalAuthUnavailableMessage({
+      reason: '当前环境尚未启用飞书个人权限连接。',
+    });
+    const parsed = JSON.parse(payload) as {
+      __gateway_message__?: boolean;
+      msg_type?: string;
+      content?: {
+        header?: { title?: { content?: string } };
+        elements?: Array<Record<string, unknown>>;
+      };
+    };
+
+    expect(parsed.__gateway_message__).toBe(true);
+    expect(parsed.msg_type).toBe('interactive');
+    expect(parsed.content?.header?.title?.content).toBe('飞书个人权限连接');
+    const actions = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
+        text?: { content?: string };
+      }>;
+    expect(actions.some((item) => item.text?.content === '去飞书授权')).toBe(false);
   });
 });
