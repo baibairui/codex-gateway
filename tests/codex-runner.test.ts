@@ -1,10 +1,31 @@
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { PassThrough } from 'node:stream';
+import { describe, expect, it, vi } from 'vitest';
 
-import { buildCodexArgs, buildCodexChildEnv, buildCodexReviewArgs, parseCodexJsonl, summarizeCodexItem } from '../src/services/codex-runner.js';
+vi.mock('node:child_process', () => ({
+  spawn: vi.fn(),
+}));
+
+import { spawn } from 'node:child_process';
+import { CodexRunner, buildCodexArgs, buildCodexChildEnv, buildCodexReviewArgs, parseCodexJsonl, summarizeCodexItem } from '../src/services/codex-runner.js';
 import { buildCodexSpawnSpec } from '../src/services/codex-bwrap.js';
+
+function createMockChildProcess() {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: PassThrough;
+    stderr: PassThrough;
+    kill: ReturnType<typeof vi.fn>;
+    pid: number;
+  };
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = vi.fn();
+  child.pid = 12345;
+  return child;
+}
 
 describe('parseCodexJsonl', () => {
   it('parses thread id and latest agent message', () => {
@@ -535,5 +556,46 @@ describe('buildCodexSpawnSpec', () => {
     });
 
     expect(isolatedSpec.env.OPENAI_API_KEY).toBeUndefined();
+  });
+});
+
+describe('CodexRunner', () => {
+  it('does not kill an active run when stdout activity keeps arriving before the idle timeout', async () => {
+    vi.useFakeTimers();
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const runner = new CodexRunner({
+      codexBin: 'codex',
+      workdir: '/tmp/agent-active-timeout',
+      timeoutMs: 50,
+    });
+
+    const runPromise = runner.run({
+      prompt: 'hello',
+      onMessage: vi.fn(),
+    });
+
+    child.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread_active' })}\n`);
+    await vi.advanceTimersByTimeAsync(40);
+
+    child.stdout.write(`${JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'agent_message', text: 'still working' },
+    })}\n`);
+    await vi.advanceTimersByTimeAsync(40);
+
+    child.emit('close', 0);
+
+    await expect(runPromise).resolves.toEqual({
+      threadId: 'thread_active',
+      rawOutput: [
+        JSON.stringify({ type: 'thread.started', thread_id: 'thread_active' }),
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'still working' } }),
+        '',
+      ].join('\n'),
+    });
+    expect(child.kill).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

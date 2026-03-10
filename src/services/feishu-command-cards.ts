@@ -1038,8 +1038,12 @@ export function buildFeishuApiLoginResultMessage(input: {
 export function buildFeishuUserAuthMessage(input: {
   gatewayUserId: string;
   reason?: string;
+  authStartUrl?: string;
+  authStatusUrl?: string;
 }): string {
   const gatewayUserId = input.gatewayUserId.trim();
+  const authStartUrl = input.authStartUrl?.trim() || `/feishu/oauth/start?gateway_user_id=${gatewayUserId}`;
+  const authStatusUrl = input.authStatusUrl?.trim() || `/feishu/auth/status?gateway_user_id=${gatewayUserId}`;
   return buildFeishuInteractiveMessage({
     config: {
       wide_screen_mode: true,
@@ -1058,8 +1062,8 @@ export function buildFeishuUserAuthMessage(input: {
         input.reason?.trim() || '完成一次飞书 OAuth 绑定后，agent 才能创建到你本人的任务和主日历事件。',
       ),
       buildFeishuFieldGrid([
-        { label: '授权入口', value: `/feishu/oauth/start?gateway_user_id=${gatewayUserId}` },
-        { label: '状态检查', value: `/feishu/auth/status?gateway_user_id=${gatewayUserId}` },
+        { label: '授权入口', value: authStartUrl },
+        { label: '状态检查', value: authStatusUrl },
       ]),
       buildFeishuTipsNote('这是飞书个人身份授权，不是 Codex CLI 的 /login。'),
       {
@@ -1073,7 +1077,7 @@ export function buildFeishuUserAuthMessage(input: {
               content: '去飞书授权',
             },
             multi_url: {
-              url: `/feishu/oauth/start?gateway_user_id=${gatewayUserId}`,
+              url: authStartUrl,
             },
           },
           {
@@ -1083,7 +1087,7 @@ export function buildFeishuUserAuthMessage(input: {
               content: '查看授权状态',
             },
             multi_url: {
-              url: `/feishu/auth/status?gateway_user_id=${gatewayUserId}`,
+              url: authStatusUrl,
             },
           },
         ],

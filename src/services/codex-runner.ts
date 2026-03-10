@@ -319,25 +319,36 @@ export class CodexRunner {
       let eventCount = 0;
       let observedThreadId = options.initialThreadId;
 
-      const timer = setTimeout(() => {
+      let timer: NodeJS.Timeout | undefined;
+      const refreshIdleTimeout = () => {
         if (settled) {
           return;
         }
-        settled = true;
-        child.kill('SIGKILL');
-        log.error('Codex 子进程超时，已 SIGKILL', {
-          pid: child.pid,
-          timeoutMs: effectiveTimeoutMs,
-          stdoutLength: stdout.length,
-          stderrLength: stderr.length,
-          eventCount,
-        });
-        reject(new Error(`codex timeout after ${effectiveTimeoutMs}ms`));
-      }, effectiveTimeoutMs);
+        if (timer) {
+          clearTimeout(timer);
+        }
+        timer = setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          child.kill('SIGKILL');
+          log.error('Codex 子进程空闲超时，已 SIGKILL', {
+            pid: child.pid,
+            timeoutMs: effectiveTimeoutMs,
+            stdoutLength: stdout.length,
+            stderrLength: stderr.length,
+            eventCount,
+          });
+          reject(new Error(`codex timeout after ${effectiveTimeoutMs}ms`));
+        }, effectiveTimeoutMs);
+      };
+      refreshIdleTimeout();
 
       child.stdout.on('data', (chunk) => {
         const text = chunk.toString('utf8');
         stdout += text;
+        refreshIdleTimeout();
 
         lineBuf += text;
         const lines = lineBuf.split('\n');
@@ -363,6 +374,7 @@ export class CodexRunner {
       child.stderr.on('data', (chunk) => {
         const text = chunk.toString('utf8');
         stderr += text;
+        refreshIdleTimeout();
         log.warn('Codex stderr 输出', { text: text.substring(0, 500) });
       });
 
@@ -371,7 +383,9 @@ export class CodexRunner {
           return;
         }
         settled = true;
-        clearTimeout(timer);
+        if (timer) {
+          clearTimeout(timer);
+        }
         log.error('Codex 子进程 error 事件', error);
         reject(error);
       });
@@ -381,7 +395,9 @@ export class CodexRunner {
           return;
         }
         settled = true;
-        clearTimeout(timer);
+        if (timer) {
+          clearTimeout(timer);
+        }
 
         log.info('Codex 子进程退出', {
           pid: child.pid,

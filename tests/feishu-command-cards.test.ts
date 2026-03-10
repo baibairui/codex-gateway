@@ -91,6 +91,28 @@ describe('buildFeishuUserAuthMessage', () => {
     expect(actions.some((item) => item.text?.content === '去飞书授权' && item.multi_url?.url === '/feishu/oauth/start?gateway_user_id=ou_123')).toBe(true);
     expect(actions.some((item) => item.text?.content === '查看授权状态' && item.multi_url?.url === '/feishu/auth/status?gateway_user_id=ou_123')).toBe(true);
   });
+
+  it('renders absolute auth links when a public gateway base url is provided', () => {
+    const payload = buildFeishuUserAuthMessage({
+      gatewayUserId: 'ou_123',
+      authStartUrl: 'https://gateway.example.com/feishu/oauth/start?gateway_user_id=ou_123',
+      authStatusUrl: 'https://gateway.example.com/feishu/auth/status?gateway_user_id=ou_123',
+    });
+    const parsed = JSON.parse(payload) as {
+      content?: {
+        elements?: Array<Record<string, unknown>>;
+      };
+    };
+
+    const actions = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
+        text?: { content?: string };
+        multi_url?: { url?: string };
+      }>;
+    expect(actions.some((item) => item.text?.content === '去飞书授权' && item.multi_url?.url === 'https://gateway.example.com/feishu/oauth/start?gateway_user_id=ou_123')).toBe(true);
+    expect(actions.some((item) => item.text?.content === '查看授权状态' && item.multi_url?.url === 'https://gateway.example.com/feishu/auth/status?gateway_user_id=ou_123')).toBe(true);
+  });
 });
 
 describe('buildFeishuPersonalAuthUnavailableMessage', () => {

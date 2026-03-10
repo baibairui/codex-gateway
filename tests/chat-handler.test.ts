@@ -277,6 +277,39 @@ describe('createChatHandler', () => {
     expect(sessionStore.getSession('u1', 'default')).toBeUndefined();
   });
 
+  it('does not expose raw timeout errors after partial agent output', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async (input) => {
+          input.onMessage?.('先给你一个阶段性结论。');
+          throw new Error('codex timeout after 1000ms');
+        },
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[默认Agent] 先给你一个阶段性结论。');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[默认Agent] ⚠️ 本次回复中断了，你可以直接回复“继续”让我接着处理。');
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('codex timeout after'))).toBe(false);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('❌ 请求执行失败'))).toBe(false);
+  });
+
   it('persists a new session as soon as thread.started is observed', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
