@@ -6,3 +6,4 @@ npm-debug.log*
 package.json.bak.*
 .pem
 docs/
+deploy*.sh
