@@ -1,6 +1,34 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildFeishuApiLoginFormMessage, buildFeishuUserAuthMessage } from '../src/services/feishu-command-cards.js';
+import {
+  buildFeishuApiLoginFormMessage,
+  buildFeishuLoginChoiceMessage,
+  buildFeishuUserAuthMessage,
+} from '../src/services/feishu-command-cards.js';
+
+describe('buildFeishuLoginChoiceMessage', () => {
+  it('renders both device auth and API login actions', () => {
+    const payload = buildFeishuLoginChoiceMessage();
+    const parsed = JSON.parse(payload) as {
+      __gateway_message__?: boolean;
+      msg_type?: string;
+      content?: {
+        elements?: Array<Record<string, unknown>>;
+      };
+    };
+
+    expect(parsed.__gateway_message__).toBe(true);
+    expect(parsed.msg_type).toBe('interactive');
+    const actions = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
+        text?: { content?: string };
+        value?: Record<string, unknown>;
+      }>;
+    expect(actions.some((item) => item.text?.content === '设备授权登录' && item.value?.gateway_action === 'codex_login.start_device_auth')).toBe(true);
+    expect(actions.some((item) => item.text?.content === 'API URL / Key 登录' && item.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
+  });
+});
 
 describe('buildFeishuApiLoginFormMessage', () => {
   it('wraps login inputs inside a form card element', () => {

@@ -13,6 +13,7 @@ import { CodexRunner } from './services/codex-runner.js';
 import { createChatHandler } from './services/chat-handler.js';
 import { readCodexHomeDefaultModel } from './services/codex-home-config.js';
 import { writeCodexApiLoginConfig } from './services/codex-config-writer.js';
+import { startCodexDeviceLogin } from './services/codex-login-flow.js';
 import { FeishuOAuthService } from './services/feishu-oauth-service.js';
 import { buildFeishuApiLoginFormMessage, buildFeishuApiLoginResultMessage } from './services/feishu-command-cards.js';
 import { FeishuUserApi } from './services/feishu-user-api.js';
@@ -755,6 +756,24 @@ async function appDepsHandleFeishuCardAction(input: {
   action: string;
   value: Record<string, unknown>;
 }): Promise<void> {
+  if (input.action === 'codex_login.start_device_auth') {
+    try {
+      await startCodexDeviceLogin({
+        channel: 'feishu',
+        userId: input.userId,
+        sendText,
+        codexRunner,
+      });
+    } catch (error) {
+      log.error('飞书设备授权登录失败', {
+        userId: input.userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await sendText('feishu', input.userId, '❌ 登录超时或遇到错误。请重试 /login 命令。');
+    }
+    return;
+  }
+
   if (input.action === 'codex_login.open_api_form') {
     await sendText('feishu', input.userId, buildFeishuApiLoginFormMessage({
       baseUrl: extractCardField(input.value, 'base_url'),

@@ -817,7 +817,7 @@ describe('createChatHandler', () => {
     const labels = buttons.map((button) => String(button.text?.content ?? ''));
     expect(labels).toContain('设备授权登录');
     expect(labels).toContain('API URL / Key 登录');
-    expect(buttons.some((button) => button.value?.gateway_cmd === '/login')).toBe(true);
+    expect(buttons.some((button) => button.value?.gateway_action === 'codex_login.start_device_auth')).toBe(true);
     expect(buttons.some((button) => button.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
   });
 
