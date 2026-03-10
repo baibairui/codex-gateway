@@ -14,9 +14,7 @@ import { createChatHandler } from './services/chat-handler.js';
 import { readCodexHomeDefaultModel } from './services/codex-home-config.js';
 import { writeCodexApiLoginConfig } from './services/codex-config-writer.js';
 import { startCodexDeviceLogin } from './services/codex-login-flow.js';
-import { FeishuOAuthService } from './services/feishu-oauth-service.js';
 import { buildFeishuApiLoginFormMessage, buildFeishuApiLoginResultMessage } from './services/feishu-command-cards.js';
-import { FeishuUserApi } from './services/feishu-user-api.js';
 import { MemorySteward } from './services/memory-steward.js';
 import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
@@ -34,7 +32,6 @@ import { SessionStore } from './stores/session-store.js';
 import { MessageDedupStore } from './stores/message-dedup-store.js';
 import { RateLimitStore } from './stores/rate-limit-store.js';
 import { createLogger } from './utils/logger.js';
-import { FeishuUserBindingStore } from './stores/feishu-user-binding-store.js';
 
 const log = createLogger('Server');
 const gatewayRootDir = resolveGatewayRootDir(config.gatewayRootDir);
@@ -101,7 +98,6 @@ const activeBrowserApiBaseUrl = config.browserAutomationEnabled
   : undefined;
 const internalApiBaseUrl = `http://127.0.0.1:${config.port}/internal`;
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
-const feishuUserBindingDbPath = path.join(dataDir, 'feishu-user-binding.db');
 fs.mkdirSync(codexHomeDir, { recursive: true });
 fs.mkdirSync(feishuImageCacheDir, { recursive: true });
 
@@ -174,21 +170,6 @@ const feishuApi = config.feishuEnabled && config.feishuAppId && config.feishuApp
 if (feishuApi) {
   log.debug('FeishuApi 已初始化');
 }
-
-const feishuUserBindingStore = new FeishuUserBindingStore(feishuUserBindingDbPath);
-const feishuOAuthService = config.feishuEnabled && config.feishuAppId && config.feishuAppSecret && config.feishuOAuthRedirectUri
-  ? new FeishuOAuthService({
-      appId: config.feishuAppId,
-      appSecret: config.feishuAppSecret,
-      redirectUri: config.feishuOAuthRedirectUri,
-    })
-  : undefined;
-const feishuUserApi = feishuOAuthService
-  ? new FeishuUserApi({
-      bindingStore: feishuUserBindingStore,
-      oauthService: feishuOAuthService,
-    })
-  : undefined;
 
 const wecomCrypto = config.wecomEnabled && config.token && config.encodingAesKey && config.corpId
   ? new WeComCrypto({
@@ -356,21 +337,6 @@ function resolveGatewayRootDir(configuredDir: string | undefined): string {
   return path.resolve(process.cwd());
 }
 
-function deriveGatewayBaseUrl(feishuOAuthRedirectUri: string | undefined): string | undefined {
-  if (!feishuOAuthRedirectUri) {
-    return undefined;
-  }
-  try {
-    const url = new URL(feishuOAuthRedirectUri);
-    url.pathname = url.pathname.replace(/\/feishu\/oauth\/callback\/?$/, '') || '/';
-    url.search = '';
-    url.hash = '';
-    return url.toString().replace(/\/$/, '');
-  } catch {
-    return undefined;
-  }
-}
-
 function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void> {
   const previous = userTaskQueue.get(userId) ?? Promise.resolve();
   const next = previous
@@ -417,22 +383,6 @@ const handleChatText = createChatHandler({
   defaultSearch: config.codexSearch,
   reminderDbPath,
   sendText,
-  feishuPersonalAuth: {
-    isAvailable: () => Boolean(feishuOAuthService && feishuUserBindingStore),
-    isBound: (gatewayUserId: string) => Boolean(feishuUserBindingStore.getByGatewayUserId(gatewayUserId)),
-    getAuthStartUrl: (gatewayUserId: string) => {
-      const baseUrl = deriveGatewayBaseUrl(config.feishuOAuthRedirectUri);
-      return baseUrl
-        ? `${baseUrl}/feishu/oauth/start?gateway_user_id=${encodeURIComponent(gatewayUserId)}`
-        : `/feishu/oauth/start?gateway_user_id=${encodeURIComponent(gatewayUserId)}`;
-    },
-    getAuthStatusUrl: (gatewayUserId: string) => {
-      const baseUrl = deriveGatewayBaseUrl(config.feishuOAuthRedirectUri);
-      return baseUrl
-        ? `${baseUrl}/feishu/auth/status?gateway_user_id=${encodeURIComponent(gatewayUserId)}`
-        : `/feishu/auth/status?gateway_user_id=${encodeURIComponent(gatewayUserId)}`;
-    },
-  },
 });
 
 const reminderStore = new ReminderStore(reminderDbPath);
@@ -478,9 +428,6 @@ const app = createApp({
   feishuDocBaseUrlConfigured: feishuStatusSummary.docBaseUrlConfigured,
   feishuStartupHelpEnabled: feishuStatusSummary.startupHelpEnabled,
   feishuStartupHelpAdminConfigured: feishuStatusSummary.startupHelpAdminConfigured,
-  feishuOAuthService,
-  feishuUserBindingStore,
-  feishuUserApi,
   isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
   handleText: appDepsHandleText,
   handleFeishuCardAction: appDepsHandleFeishuCardAction,

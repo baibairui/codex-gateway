@@ -40,7 +40,6 @@ describe('config-check bin', () => {
     expect(result.stdout).toContain('/healthz');
     expect(result.stdout).toContain('下一步：确认飞书事件订阅已开启长连接');
     expect(result.stdout).toContain('DocX 链接：系统将基于 document_id 自动生成');
-    expect(result.stdout).toContain('个人授权：未启用；个人任务/个人日历会返回明确错误');
     expect(result.stdout).toContain('下一步：');
   });
 

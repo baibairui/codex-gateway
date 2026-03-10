@@ -11,15 +11,14 @@ Use this skill when the user wants the agent to perform real Feishu operations t
 - Read DocX / cloud document content
 - Query Bitable tables or records
 - Read calendar lists, events, or freebusy windows
-- Create a personal calendar event for the current bound Feishu user
 - Create or inspect tasks / subtasks
-- Create a personal task for the current bound Feishu user
 - Create a DocX document
 - Create a Wiki node in a knowledge space
 - List Wiki spaces
 - Query a Wiki node
 
 Do not claim the action is done unless you actually run the skill's bundled script and verify success from the returned payload.
+For DocX / Wiki writes, a chat markdown answer is not a successful write; success means the script returned a real `document_id`, `document_url`, or wiki node token.
 
 ## Executor
 
@@ -34,18 +33,7 @@ The script reads these environment variables:
 - `FEISHU_APP_ID`
 - `FEISHU_APP_SECRET`
 - `FEISHU_DOC_BASE_URL` (optional)
-- `GATEWAY_INTERNAL_API_BASE` (required for `task create-personal`)
-- `GATEWAY_INTERNAL_API_TOKEN` (required for `task create-personal`)
-- `GATEWAY_USER_ID` (required for `task create-personal`)
-- The same internal gateway variables are also required for `calendar create-event-personal`
-
 If either credential is missing, stop and report the real blocker instead of inventing success.
-For personal task/calendar actions, treat auth as a product flow first:
-
-- If the environment reports personal auth unavailable, tell the user that personal Feishu connection is not enabled in the current environment.
-- If the current user is not bound yet, tell the user to complete the in-product Feishu personal auth flow first.
-- Do not tell the user to fill `FEISHU_OAUTH_REDIRECT_URI` directly.
-- Do not invent fallback behavior for personal task/calendar writes.
 
 ## Official docs
 
@@ -111,22 +99,10 @@ Read calendar freebusy:
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar freebusy --time-min 2026-03-09T00:00:00Z --time-max 2026-03-10T00:00:00Z --user-id ou_xxx
 ```
 
-Create a personal calendar event for the currently bound Feishu user:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar create-event-personal --summary "评审会" --start-time 2026-03-10T09:00:00+08:00 --end-time 2026-03-10T10:00:00+08:00 --timezone Asia/Shanghai
-```
-
 Create a task:
 
 ```bash
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create --summary "整理周报"
-```
-
-Create a personal task for the currently bound Feishu user:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create-personal --summary "整理周报"
 ```
 
 Create a task subtask:
@@ -194,17 +170,16 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki create-
 1. Confirm the target object type and destination.
 2. 如果用户给了飞书文档链接、wiki 链接或 document_id，直接解析并继续；只有目标对象完全不明确时才追问。
 3. For DocX / Wiki actions, run the matching command from this skill directly.
-4. For personal task / personal calendar actions, assume the product flow is “先连接，再执行”:
-   if auth is unavailable or unbound, report that state cleanly instead of探测无关接口。
-5. Read the returned JSON and report the real result back to the user.
-6. If the API returns a permission error, say that the Feishu app lacks the required OpenAPI permission instead of inventing success.
-7. If the user wants to insert a local image or the message already contains `local_image_path=...`, prefer `--image-file` instead of trying to stuff the image into markdown.
-8. 优先选最小命令面：读取就用 `im/doc/bitable/calendar/task`，写文档或知识库才用 `docx/wiki`。
+4. Read the returned JSON and report the real result back to the user.
+5. If the API returns a permission error, say that the Feishu app lacks the required OpenAPI permission instead of inventing success.
+6. If the user wants to insert a local image or the message already contains `local_image_path=...`, prefer `--image-file` instead of trying to stuff the image into markdown.
+7. 优先选最小命令面：读取就用 `im/doc/bitable/calendar/task`，写文档或知识库才用 `docx/wiki`。
 
 ## Location rules
 
 - To create a standalone document, prefer `docx create`.
 - To create content inside a knowledge space, prefer `wiki create-node`.
 - If the user only says "建一个飞书文档" and does not specify a knowledge space or folder, create a standalone DocX document first.
+- After a DocX / Wiki write succeeds, reply with the returned document URL or node info directly; do not bounce the user into personal auth.
 - For appending content, accept either a full Feishu document URL, a wiki URL, or a raw `document_id`; do not insist on a user-provided URL format config.
 - For read-only queries, prefer the narrowest command: `im` for messages, `doc` for document content, `bitable` for records, `calendar` for calendars/freebusy, `task` for tasks.

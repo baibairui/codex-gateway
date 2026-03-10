@@ -63,18 +63,6 @@ function normalizeBaseUrl(value: string | undefined): string | undefined {
   return trimmed.replace(/\/+$/, '');
 }
 
-function deriveFeishuOAuthRedirectUri(): string | undefined {
-  const explicit = optionalStringUndefined('FEISHU_OAUTH_REDIRECT_URI');
-  if (explicit) {
-    return explicit;
-  }
-  const publicBaseUrl = normalizeBaseUrl(optionalStringUndefined('GATEWAY_PUBLIC_BASE_URL'));
-  if (!publicBaseUrl) {
-    return undefined;
-  }
-  return `${publicBaseUrl}/feishu/oauth/callback`;
-}
-
 function optionalBoolean(name: string): boolean | undefined {
   const raw = process.env[name];
   if (raw === undefined) {
@@ -131,8 +119,6 @@ export const config = {
   feishuApiTimeoutMs: optionalNumber('FEISHU_API_TIMEOUT_MS', 15_000),
   feishuStartupHelpEnabled: process.env.FEISHU_STARTUP_HELP_ENABLED === 'true',
   feishuStartupHelpAdminOpenId: optionalStringUndefined('FEISHU_STARTUP_HELP_ADMIN_OPEN_ID'),
-  gatewayPublicBaseUrl: normalizeBaseUrl(optionalStringUndefined('GATEWAY_PUBLIC_BASE_URL')),
-  feishuOAuthRedirectUri: deriveFeishuOAuthRedirectUri(),
   dedupWindowSeconds: optionalNumber('DEDUP_WINDOW_SECONDS', 60),
   rateLimitMaxMessages: optionalNumber('RATE_LIMIT_MAX_MESSAGES', 20),
   rateLimitWindowSeconds: optionalNumber('RATE_LIMIT_WINDOW_SECONDS', 60),

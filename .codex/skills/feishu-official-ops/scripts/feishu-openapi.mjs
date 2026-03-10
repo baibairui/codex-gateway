@@ -49,9 +49,7 @@ export function buildHelpText() {
     '  calendar list-calendars [--page-size <n>] [--page-token <token>]',
     '  calendar list-events --calendar-id <id> --time-min <time> --time-max <time> [--page-size <n>] [--page-token <token>]',
     '  calendar freebusy --time-min <time> --time-max <time> [--user-id <id>] [--room-id <id>] [--only-busy <true|false>]',
-    '  calendar create-event-personal --summary <text> --start-time <time> --end-time <time> [--timezone <iana>]',
     '  task create --summary <text>',
-    '  task create-personal --summary <text>',
     '  task list [--page-size <n>] [--page-token <token>]',
     '  task get --task-id <id>',
     '  task update --task-id <id> --task-json <json> --update-fields-json <json>',
@@ -190,18 +188,10 @@ export async function runCommand(input) {
     return handleBitableCommand(action, args, resolveSdkClient(args, sdkClient));
   }
   if (resource === 'calendar') {
-    return handleCalendarCommand(
-      action,
-      args,
-      action === 'create-event-personal' ? sdkClient : resolveSdkClient(args, sdkClient),
-    );
+    return handleCalendarCommand(action, args, resolveSdkClient(args, sdkClient));
   }
   if (resource === 'task') {
-    return handleTaskCommand(
-      action,
-      args,
-      action === 'create-personal' ? sdkClient : resolveSdkClient(args, sdkClient),
-    );
+    return handleTaskCommand(action, args, resolveSdkClient(args, sdkClient));
   }
   if (resource === 'docx' && action === 'create') {
     return createDocx(await resolveTenantToken(args, token), args);
@@ -402,14 +392,6 @@ async function handleBitableCommand(action, args, sdkClient) {
 }
 
 async function handleCalendarCommand(action, args, sdkClient) {
-  if (action === 'create-event-personal') {
-    const event = await createPersonalCalendarEventViaGateway(args);
-    return {
-      ok: true,
-      operation: 'calendar.create-event-personal',
-      event,
-    };
-  }
   if (action === 'list-calendars') {
     const response = await sdkClient.calendar.calendar.list({
       params: buildPagingParams(args),
@@ -458,38 +440,6 @@ async function handleCalendarCommand(action, args, sdkClient) {
   throw new Error(`unsupported command: calendar ${action ?? ''}`.trim());
 }
 
-async function createPersonalCalendarEventViaGateway(args) {
-  const apiBase = firstNonEmptyString(process.env.GATEWAY_INTERNAL_API_BASE);
-  const internalToken = firstNonEmptyString(process.env.GATEWAY_INTERNAL_API_TOKEN);
-  const gatewayUserId = firstNonEmptyString(process.env.GATEWAY_USER_ID);
-  if (!apiBase || !internalToken || !gatewayUserId) {
-    throw new Error(
-      'missing GATEWAY_INTERNAL_API_BASE, GATEWAY_INTERNAL_API_TOKEN, or GATEWAY_USER_ID for calendar create-event-personal',
-    );
-  }
-
-  const payload = await fetchJson(`${apiBase.replace(/\/+$/, '')}/feishu/user-calendar-event`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'x-gateway-internal-token': internalToken,
-    },
-    body: JSON.stringify({
-      gatewayUserId,
-      summary: parseRequiredStringFlag(args.summary, '--summary'),
-      startTime: parseRequiredStringFlag(args['start-time'], '--start-time'),
-      endTime: parseRequiredStringFlag(args['end-time'], '--end-time'),
-      ...(firstNonEmptyString(args.description) ? { description: firstNonEmptyString(args.description) } : {}),
-      ...(firstNonEmptyString(args.timezone) ? { timezone: firstNonEmptyString(args.timezone) } : {}),
-    }),
-  });
-
-  if (!payload?.ok) {
-    throw new Error(`gateway personal calendar event request failed: ${payload?.error ?? 'unknown error'}`);
-  }
-  return payload?.data ?? null;
-}
-
 async function handleTaskCommand(action, args, sdkClient) {
   if (action === 'create') {
     const summary = parseRequiredStringFlag(args.summary, '--summary');
@@ -507,14 +457,6 @@ async function handleTaskCommand(action, args, sdkClient) {
       ok: true,
       operation: 'task.create',
       task: response?.data?.task ?? null,
-    };
-  }
-  if (action === 'create-personal') {
-    const task = await createPersonalTaskViaGateway(args);
-    return {
-      ok: true,
-      operation: 'task.create-personal',
-      task,
     };
   }
   if (action === 'list') {
@@ -579,35 +521,6 @@ async function handleTaskCommand(action, args, sdkClient) {
     };
   }
   throw new Error(`unsupported command: task ${action ?? ''}`.trim());
-}
-
-async function createPersonalTaskViaGateway(args) {
-  const apiBase = firstNonEmptyString(process.env.GATEWAY_INTERNAL_API_BASE);
-  const internalToken = firstNonEmptyString(process.env.GATEWAY_INTERNAL_API_TOKEN);
-  const gatewayUserId = firstNonEmptyString(process.env.GATEWAY_USER_ID);
-  if (!apiBase || !internalToken || !gatewayUserId) {
-    throw new Error(
-      'missing GATEWAY_INTERNAL_API_BASE, GATEWAY_INTERNAL_API_TOKEN, or GATEWAY_USER_ID for task create-personal',
-    );
-  }
-
-  const payload = await fetchJson(`${apiBase.replace(/\/+$/, '')}/feishu/user-task`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'x-gateway-internal-token': internalToken,
-    },
-    body: JSON.stringify({
-      gatewayUserId,
-      summary: parseRequiredStringFlag(args.summary, '--summary'),
-      ...(firstNonEmptyString(args.description) ? { description: firstNonEmptyString(args.description) } : {}),
-    }),
-  });
-
-  if (!payload?.ok) {
-    throw new Error(`gateway personal task request failed: ${payload?.error ?? 'unknown error'}`);
-  }
-  return payload?.data ?? null;
 }
 
 export async function createDocx(token, args) {

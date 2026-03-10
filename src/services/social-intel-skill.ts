@@ -102,11 +102,13 @@ function renderSocialDocWriterSkill(): string {
     '- Normalize the research into sections: background, scope, findings, evidence links, risks, and next steps.',
     '- Use `./.codex/skills/feishu-official-ops/SKILL.md` for the real write operation.',
     '- Create a Feishu DocX or append to an existing DocX only after the structure is clear.',
+    '- The final result must be a real Feishu DocX/Wiki write with returned document metadata; a markdown answer in chat is not a substitute.',
     '',
     'Rules:',
     '- Keep raw evidence links in the final document; do not replace them with unsupported summaries.',
     '- When the evidence set is incomplete, include a risk or gap section instead of guessing.',
     '- If the user asks for a Wiki node, probe spaces first, then create or update the target node.',
+    '- Do not ask the user for any personal Feishu auth or user login when the target is DocX/Wiki.',
     '',
   ].join('\n');
 }
