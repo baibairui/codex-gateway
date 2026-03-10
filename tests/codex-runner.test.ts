@@ -381,6 +381,37 @@ describe('buildCodexSpawnSpec', () => {
     expect(spec.env.GATEWAY_REMINDER_DB_PATH).toBe('/tmp/reminders.db');
   });
 
+  it('bridges gateway root node_modules into isolated runs for skill scripts', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-gateway-root-'));
+    const hostHome = path.join(tempRoot, 'host-home');
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+    const gatewayRootDir = path.join(tempRoot, 'gateway-root');
+    const nodeModulesDir = path.join(gatewayRootDir, 'node_modules');
+
+    fs.mkdirSync(hostHome, { recursive: true });
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.mkdirSync(nodeModulesDir, { recursive: true });
+
+    const spec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: hostHome,
+        PATH: '/usr/bin:/bin',
+        GATEWAY_ROOT_DIR: gatewayRootDir,
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(spec.args).toContain(nodeModulesDir);
+    expect(spec.args).toContain('/workspace/.codex-runtime/gateway-root/node_modules');
+    expect(spec.env.NODE_PATH).toBe('/workspace/.codex-runtime/gateway-root/node_modules');
+  });
+
   it('bridges host git and ssh config into isolated runtime home', () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-host-home-'));
     const hostHome = path.join(tempRoot, 'host-home');

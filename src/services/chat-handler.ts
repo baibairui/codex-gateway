@@ -7,8 +7,6 @@ import { AgentSkillManager } from './agent-skill-manager.js';
 import { startCodexDeviceLogin } from './codex-login-flow.js';
 import {
   buildFeishuLoginChoiceMessage,
-  buildFeishuPersonalAuthUnavailableMessage,
-  buildFeishuUserAuthMessage,
   formatCommandOutboundMessage,
 } from './feishu-command-cards.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
@@ -134,12 +132,6 @@ interface ChatHandlerDeps {
     disableGlobalSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
     enableGlobalSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
     disableAgentSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
-  };
-  feishuPersonalAuth?: {
-    isAvailable: () => boolean;
-    isBound: (gatewayUserId: string) => boolean;
-    getAuthStartUrl?: (gatewayUserId: string) => string;
-    getAuthStatusUrl?: (gatewayUserId: string) => string;
   };
 }
 
@@ -430,48 +422,6 @@ function buildOutboundMessageProtocolPrompt(channel: Channel, userPrompt: string
   return buildWeComOutboundMessageProtocolPrompt(userPrompt);
 }
 
-function isFeishuUserAuthError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /feishu binding required|reauthorization required|authorization expired/i.test(message);
-}
-
-function isFeishuPersonalAuthUnavailableError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /feishu personal auth unavailable/i.test(message);
-}
-
-async function maybeInterceptFeishuPersonalAuth(
-  deps: ChatHandlerDeps,
-  input: {
-    channel: Channel;
-    userId: string;
-  },
-): Promise<boolean> {
-  if (input.channel !== 'feishu') {
-    return false;
-  }
-  const auth = deps.feishuPersonalAuth;
-  if (!auth) {
-    return false;
-  }
-  if (!auth.isAvailable()) {
-    await deps.sendText('feishu', input.userId, buildFeishuPersonalAuthUnavailableMessage({
-      reason: '当前环境尚未启用飞书个人权限连接。启用后我才能继续处理你的飞书消息和个人能力请求。',
-    }));
-    return true;
-  }
-  if (auth.isBound(input.userId)) {
-    return false;
-  }
-  await deps.sendText('feishu', input.userId, buildFeishuUserAuthMessage({
-    gatewayUserId: input.userId,
-    reason: '继续使用飞书对话前，请先完成一次个人权限授权。完成后我会继续处理你的请求。',
-    authStartUrl: auth.getAuthStartUrl?.(input.userId),
-    authStatusUrl: auth.getAuthStatusUrl?.(input.userId),
-  }));
-  return true;
-}
-
 function buildInboundNonTextAck(prompt: string): string | undefined {
   const patterns: Array<{ regex: RegExp; label: string }> = [
     { regex: /^\[飞书图片]/, label: '飞书图片' },
@@ -748,9 +698,6 @@ ${clipMessage(prompt, 500)}
     const currentAgent = normalizeVisibleCurrentAgent(sessionUserKey);
     const existingSessionState = getSessionState(sessionUserKey, currentAgent.agentId);
     const existingThreadId = existingSessionState.threadId;
-    if (await maybeInterceptFeishuPersonalAuth(deps, { channel, userId })) {
-      return;
-    }
     const currentModel = getCurrentModel(sessionUserKey, currentAgent.agentId);
     const currentSearch = userSearchOverrides.get(sessionUserKey) ?? deps.defaultSearch;
     // 对用户展示时，过滤掉系统内置 agent（如 memory-onboarding）
@@ -1040,18 +987,6 @@ ${clipMessage(text, 500)}
           });
           await sendCommandText('❌ 登录超时或遇到错误。请重试 /login 命令。');
         }
-        return;
-      }
-      if (commandResult.initFeishuAuth) {
-        if (channel !== 'feishu') {
-          await sendCommandText('⚠️ /feishu-auth 仅支持在飞书渠道中触发。');
-          return;
-        }
-        await deps.sendText(channel, userId, buildFeishuUserAuthMessage({
-          gatewayUserId: userId,
-          authStartUrl: deps.feishuPersonalAuth?.getAuthStartUrl?.(userId),
-          authStatusUrl: deps.feishuPersonalAuth?.getAuthStatusUrl?.(userId),
-        }));
         return;
       }
       if (commandResult.useAgentTarget) {
@@ -1463,21 +1398,6 @@ ${clipMessage(userVisibleOutput, 500)}
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       });
-      if (channel === 'feishu' && isFeishuUserAuthError(error)) {
-        await deps.sendText(channel, userId, buildFeishuUserAuthMessage({
-          gatewayUserId: userId,
-          reason: '当前账号尚未完成飞书个人授权，或授权已过期。',
-          authStartUrl: deps.feishuPersonalAuth?.getAuthStartUrl?.(userId),
-          authStatusUrl: deps.feishuPersonalAuth?.getAuthStatusUrl?.(userId),
-        }));
-        return;
-      }
-      if (channel === 'feishu' && isFeishuPersonalAuthUnavailableError(error)) {
-        await deps.sendText(channel, userId, buildFeishuPersonalAuthUnavailableMessage({
-          reason: '当前环境尚未启用飞书个人权限连接。等管理员启用后，我就可以直接帮你创建个人任务和个人日历。',
-        }));
-        return;
-      }
       if (isCodexTimeoutError(error)) {
         await deps.sendText(
           channel,

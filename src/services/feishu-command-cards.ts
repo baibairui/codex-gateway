@@ -38,7 +38,6 @@ const COMMAND_LABELS: Record<string, string> = {
   '/skillagent': '技能扩展助手',
   '/skill': '技能扩展助手',
   '/login': '登录授权',
-  '/feishu-auth': '飞书个人授权',
   '/rename': '会话重命名',
   '/switch': '会话切换',
   '/model': '模型管理',
@@ -62,7 +61,6 @@ const COMMAND_SUMMARIES: Record<string, string> = {
   '/search': '控制本会话的联网搜索开关，按需临时开启。',
   '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
   '/login': '重新触发登录授权流程，恢复 Codex 执行能力。',
-  '/feishu-auth': '打开飞书个人任务与个人日历的授权入口，并查看当前绑定状态。',
   '/repair-users': '批量清理并升级已部署用户工作区，修复内置 skill、规则注入与工作目录状态。',
 };
 
@@ -80,7 +78,6 @@ const COMMAND_TEMPLATES: Record<string, FeishuCardTemplate> = {
   '/search': 'wathet',
   '/review': 'orange',
   '/login': 'blue',
-  '/feishu-auth': 'blue',
   '/repair-users': 'orange',
 };
 

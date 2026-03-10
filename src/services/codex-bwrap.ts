@@ -23,6 +23,7 @@ interface BuildCodexSpawnSpecInput {
 const DEFAULT_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const RUNTIME_HOME_DIR = '.codex-runtime/home';
 const RUNTIME_HOME_MOUNT_DIR = '/workspace/.codex-runtime/home';
+const RUNTIME_GATEWAY_ROOT_MOUNT_DIR = '/workspace/.codex-runtime/gateway-root';
 const CODEx_SYNC_FILES = ['auth.json', 'config.toml', 'models_cache.json'] as const;
 const DEFAULT_HOME_READONLY_PATHS = ['.gitconfig', '.ssh/config', '.ssh/known_hosts'] as const;
 const SSH_CONFIG_RELATIVE_PATH = '.ssh/config';
@@ -31,6 +32,7 @@ const EXTRA_READS_ENV_NAME = 'CODEX_WORKDIR_ISOLATION_EXTRA_READS';
 export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawnSpec {
   const hostHomeDir = resolveHostHomeDir(input.env);
   const hostEnv = buildHostCodexEnv(input.env, input.codexHomeDir);
+  const gatewayRootDir = resolveGatewayRootDir(hostEnv);
   if (input.isolationMode === 'off') {
     return {
       command: input.codexBin,
@@ -52,10 +54,11 @@ export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawn
       workspaceDir,
       runtimeHomeDir,
       hostHomeDir,
+      gatewayRootDir,
       input.env[EXTRA_READS_ENV_NAME],
     ),
     cwd: workspaceDir,
-    env: buildIsolatedEnv(hostEnv, runtimeHomeDir),
+    env: buildIsolatedEnv(hostEnv, runtimeHomeDir, gatewayRootDir),
   };
 }
 
@@ -65,6 +68,7 @@ function buildBubblewrapArgs(
   workspaceDir: string,
   runtimeHomeDir: string,
   hostHomeDir: string | undefined,
+  gatewayRootDir: string | undefined,
   extraReadsRaw: string | undefined,
 ): string[] {
   const sandboxArgs = normalizeArgsForWorkspace(args, workspaceDir);
@@ -100,6 +104,7 @@ function buildBubblewrapArgs(
   for (const mount of readonlyMounts) {
     result.push('--ro-bind', mount.source, mount.sandboxTarget);
   }
+  appendGatewayNodeModulesMount(result, gatewayRootDir);
 
   result.push(
     '--chdir',
@@ -150,7 +155,11 @@ function buildHostCodexEnv(env: NodeJS.ProcessEnv, codexHomeDir?: string): NodeJ
   return nextEnv;
 }
 
-function buildIsolatedEnv(env: NodeJS.ProcessEnv, runtimeHomeDir: string): NodeJS.ProcessEnv {
+function buildIsolatedEnv(
+  env: NodeJS.ProcessEnv,
+  runtimeHomeDir: string,
+  gatewayRootDir: string | undefined,
+): NodeJS.ProcessEnv {
   const nextEnv: NodeJS.ProcessEnv = {
     PATH: env.PATH || DEFAULT_PATH,
     HOME: runtimeHomeDir,
@@ -163,6 +172,7 @@ function buildIsolatedEnv(env: NodeJS.ProcessEnv, runtimeHomeDir: string): NodeJ
     LANG: env.LANG || 'C.UTF-8',
     LC_ALL: env.LC_ALL || 'C.UTF-8',
     TERM: env.TERM || 'xterm-256color',
+    NODE_PATH: resolveGatewayNodeModules(gatewayRootDir),
     HTTPS_PROXY: env.HTTPS_PROXY,
     HTTP_PROXY: env.HTTP_PROXY,
     ALL_PROXY: env.ALL_PROXY,
@@ -192,6 +202,42 @@ function buildIsolatedEnv(env: NodeJS.ProcessEnv, runtimeHomeDir: string): NodeJ
     }
   }
   return nextEnv;
+}
+
+function resolveGatewayRootDir(env: NodeJS.ProcessEnv): string | undefined {
+  const configured = env.GATEWAY_ROOT_DIR?.trim();
+  if (!configured) {
+    return undefined;
+  }
+  const resolved = path.resolve(configured);
+  return fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()
+    ? resolved
+    : undefined;
+}
+
+function resolveGatewayNodeModules(gatewayRootDir: string | undefined): string | undefined {
+  if (!gatewayRootDir) {
+    return undefined;
+  }
+  const nodeModulesDir = path.join(gatewayRootDir, 'node_modules');
+  return fs.existsSync(nodeModulesDir) && fs.statSync(nodeModulesDir).isDirectory()
+    ? `${RUNTIME_GATEWAY_ROOT_MOUNT_DIR}/node_modules`
+    : undefined;
+}
+
+function appendGatewayNodeModulesMount(result: string[], gatewayRootDir: string | undefined): void {
+  if (!gatewayRootDir) {
+    return;
+  }
+  const nodeModulesDir = path.join(gatewayRootDir, 'node_modules');
+  if (!fs.existsSync(nodeModulesDir) || !fs.statSync(nodeModulesDir).isDirectory()) {
+    return;
+  }
+  result.push(
+    '--ro-bind',
+    nodeModulesDir,
+    `${RUNTIME_GATEWAY_ROOT_MOUNT_DIR}/node_modules`,
+  );
 }
 
 function syncCodexRuntimeHome(sourceDir: string | undefined, targetDir: string): void {

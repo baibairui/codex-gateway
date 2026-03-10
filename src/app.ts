@@ -47,55 +47,6 @@ interface AppDeps {
     action: string;
     value: Record<string, unknown>;
   }) => Promise<void>;
-  feishuOAuthService?: {
-    buildAuthUrl: (input: { state: string }) => string;
-    exchangeCode: (code: string) => Promise<{
-      accessToken: string;
-      refreshToken: string;
-      expiresIn: number;
-    }>;
-    getAuthorizedUser: (accessToken: string) => Promise<{
-      openId: string;
-      userId: string;
-      name?: string;
-      enName?: string;
-    }>;
-  };
-  feishuUserBindingStore?: {
-    upsertBinding: (input: {
-      gatewayUserId: string;
-      feishuOpenId?: string;
-      feishuUserId?: string;
-      accessToken: string;
-      refreshToken: string;
-      expiresAt: number;
-      scopeSnapshot?: string;
-    }) => unknown;
-    getByGatewayUserId: (gatewayUserId: string) => {
-      gatewayUserId: string;
-      feishuOpenId?: string;
-      feishuUserId?: string;
-      accessToken: string;
-      refreshToken: string;
-      expiresAt: number;
-      scopeSnapshot?: string;
-    } | undefined;
-  };
-  feishuUserApi?: {
-    createPersonalTask: (input: {
-      gatewayUserId: string;
-      summary: string;
-      description?: string;
-    }) => Promise<Record<string, unknown>>;
-    createPersonalCalendarEvent: (input: {
-      gatewayUserId: string;
-      summary: string;
-      description?: string;
-      startTime: string;
-      endTime: string;
-      timezone?: string;
-    }) => Promise<Record<string, unknown>>;
-  };
 }
 
 interface FeishuEventDeps {
@@ -140,10 +91,6 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
     return undefined;
   }
   return value as Record<string, unknown>;
-}
-
-function sendFeishuPersonalAuthUnavailable(res: express.Response): void {
-  res.status(503).json({ ok: false, error: 'feishu personal auth unavailable' });
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> | undefined {
@@ -394,88 +341,6 @@ export function createApp(deps: AppDeps) {
     });
   });
 
-  app.get('/feishu/oauth/start', (req, res) => {
-    if (!deps.feishuOAuthService) {
-      sendFeishuPersonalAuthUnavailable(res);
-      return;
-    }
-    const gatewayUserId = qs(req.query.gateway_user_id).trim();
-    if (!gatewayUserId) {
-      res.status(400).json({ ok: false, error: 'missing gateway_user_id' });
-      return;
-    }
-    const redirectUrl = deps.feishuOAuthService.buildAuthUrl({ state: gatewayUserId });
-    res.redirect(302, redirectUrl);
-  });
-
-  app.get('/feishu/oauth/callback', async (req, res) => {
-    if (!deps.feishuOAuthService || !deps.feishuUserBindingStore) {
-      sendFeishuPersonalAuthUnavailable(res);
-      return;
-    }
-    const code = qs(req.query.code).trim();
-    const gatewayUserId = qs(req.query.state).trim();
-    if (!code || !gatewayUserId) {
-      res.status(400).json({ ok: false, error: 'missing code or state' });
-      return;
-    }
-    try {
-      const tokenPayload = await deps.feishuOAuthService.exchangeCode(code);
-      const authorizedUser = await deps.feishuOAuthService.getAuthorizedUser(tokenPayload.accessToken);
-      const expiresAt = Date.now() + tokenPayload.expiresIn * 1000;
-      deps.feishuUserBindingStore.upsertBinding({
-        gatewayUserId,
-        feishuOpenId: authorizedUser.openId,
-        feishuUserId: authorizedUser.userId,
-        accessToken: tokenPayload.accessToken,
-        refreshToken: tokenPayload.refreshToken,
-        expiresAt,
-      });
-      res.json({
-        ok: true,
-        gatewayUserId,
-        feishuOpenId: authorizedUser.openId,
-        feishuUserId: authorizedUser.userId,
-        expiresAt,
-      });
-    } catch (error) {
-      res.status(400).json({
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  app.get('/feishu/auth/status', (req, res) => {
-    if (!deps.feishuUserBindingStore) {
-      sendFeishuPersonalAuthUnavailable(res);
-      return;
-    }
-    const gatewayUserId = qs(req.query.gateway_user_id).trim();
-    if (!gatewayUserId) {
-      res.status(400).json({ ok: false, error: 'missing gateway_user_id' });
-      return;
-    }
-    const binding = deps.feishuUserBindingStore.getByGatewayUserId(gatewayUserId);
-    if (!binding) {
-      res.json({
-        ok: true,
-        gatewayUserId,
-        bound: false,
-      });
-      return;
-    }
-    res.json({
-      ok: true,
-      gatewayUserId,
-      bound: true,
-      feishuOpenId: binding.feishuOpenId,
-      feishuUserId: binding.feishuUserId,
-      expiresAt: binding.expiresAt,
-      scopeSnapshot: binding.scopeSnapshot,
-    });
-  });
-
   if (deps.browserAutomation) {
     const browserAutomation = deps.browserAutomation;
     app.post('/internal/browser/execute', async (req, res) => {
@@ -518,81 +383,6 @@ export function createApp(deps: AppDeps) {
 
   if (deps.internalApiToken) {
     app.use('/internal', express.json({ type: 'application/json', limit: '2mb' }));
-    app.post('/internal/feishu/user-task', async (req, res) => {
-      const feishuUserApi = deps.feishuUserApi;
-      const remoteAddress = req.socket.remoteAddress;
-      const token = req.header('x-gateway-internal-token');
-      if (!deps.internalApiToken || token !== deps.internalApiToken || !isLoopbackAddress(remoteAddress)) {
-        res.status(403).json({ ok: false, error: 'forbidden' });
-        return;
-      }
-      if (!feishuUserApi?.createPersonalTask) {
-        sendFeishuPersonalAuthUnavailable(res);
-        return;
-      }
-      const body = asObject(req.body);
-      const gatewayUserId = firstNonEmptyString(body?.gatewayUserId, body?.gateway_user_id);
-      const summary = firstNonEmptyString(body?.summary);
-      const description = firstNonEmptyString(body?.description);
-      if (!gatewayUserId || !summary) {
-        res.status(400).json({ ok: false, error: 'missing gatewayUserId or summary' });
-        return;
-      }
-      try {
-        const result = await feishuUserApi.createPersonalTask({
-          gatewayUserId,
-          summary,
-          description,
-        });
-        res.json({ ok: true, data: result });
-      } catch (error) {
-        res.status(400).json({
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    });
-
-    app.post('/internal/feishu/user-calendar-event', async (req, res) => {
-      const feishuUserApi = deps.feishuUserApi;
-      const remoteAddress = req.socket.remoteAddress;
-      const token = req.header('x-gateway-internal-token');
-      if (!deps.internalApiToken || token !== deps.internalApiToken || !isLoopbackAddress(remoteAddress)) {
-        res.status(403).json({ ok: false, error: 'forbidden' });
-        return;
-      }
-      if (!feishuUserApi?.createPersonalCalendarEvent) {
-        sendFeishuPersonalAuthUnavailable(res);
-        return;
-      }
-      const body = asObject(req.body);
-      const gatewayUserId = firstNonEmptyString(body?.gatewayUserId, body?.gateway_user_id);
-      const summary = firstNonEmptyString(body?.summary);
-      const description = firstNonEmptyString(body?.description);
-      const startTime = firstNonEmptyString(body?.startTime, body?.start_time);
-      const endTime = firstNonEmptyString(body?.endTime, body?.end_time);
-      const timezone = firstNonEmptyString(body?.timezone);
-      if (!gatewayUserId || !summary || !startTime || !endTime) {
-        res.status(400).json({ ok: false, error: 'missing gatewayUserId, summary, startTime, or endTime' });
-        return;
-      }
-      try {
-        const result = await feishuUserApi.createPersonalCalendarEvent({
-          gatewayUserId,
-          summary,
-          description,
-          startTime,
-          endTime,
-          timezone,
-        });
-        res.json({ ok: true, data: result });
-      } catch (error) {
-        res.status(400).json({
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    });
   }
 
   // ===================== GET 验证 URL =====================
