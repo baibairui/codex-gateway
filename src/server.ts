@@ -356,6 +356,21 @@ function resolveGatewayRootDir(configuredDir: string | undefined): string {
   return path.resolve(process.cwd());
 }
 
+function deriveGatewayBaseUrl(feishuOAuthRedirectUri: string | undefined): string | undefined {
+  if (!feishuOAuthRedirectUri) {
+    return undefined;
+  }
+  try {
+    const url = new URL(feishuOAuthRedirectUri);
+    url.pathname = url.pathname.replace(/\/feishu\/oauth\/callback\/?$/, '') || '/';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return undefined;
+  }
+}
+
 function runInUserQueue(userId: string, task: () => Promise<void>): Promise<void> {
   const previous = userTaskQueue.get(userId) ?? Promise.resolve();
   const next = previous
@@ -405,6 +420,18 @@ const handleChatText = createChatHandler({
   feishuPersonalAuth: {
     isAvailable: () => Boolean(feishuOAuthService && feishuUserBindingStore),
     isBound: (gatewayUserId: string) => Boolean(feishuUserBindingStore.getByGatewayUserId(gatewayUserId)),
+    getAuthStartUrl: (gatewayUserId: string) => {
+      const baseUrl = deriveGatewayBaseUrl(config.feishuOAuthRedirectUri);
+      return baseUrl
+        ? `${baseUrl}/feishu/oauth/start?gateway_user_id=${encodeURIComponent(gatewayUserId)}`
+        : `/feishu/oauth/start?gateway_user_id=${encodeURIComponent(gatewayUserId)}`;
+    },
+    getAuthStatusUrl: (gatewayUserId: string) => {
+      const baseUrl = deriveGatewayBaseUrl(config.feishuOAuthRedirectUri);
+      return baseUrl
+        ? `${baseUrl}/feishu/auth/status?gateway_user_id=${encodeURIComponent(gatewayUserId)}`
+        : `/feishu/auth/status?gateway_user_id=${encodeURIComponent(gatewayUserId)}`;
+    },
   },
 });
 

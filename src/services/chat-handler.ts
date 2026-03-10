@@ -138,6 +138,8 @@ interface ChatHandlerDeps {
   feishuPersonalAuth?: {
     isAvailable: () => boolean;
     isBound: (gatewayUserId: string) => boolean;
+    getAuthStartUrl?: (gatewayUserId: string) => string;
+    getAuthStatusUrl?: (gatewayUserId: string) => string;
   };
 }
 
@@ -310,6 +312,19 @@ function buildAgentProgressText(agent: { name: string }, phase: 'received' | 're
   return formatAgentVisibleReply(agent, '✅ 已处理完成。');
 }
 
+function isCodexTimeoutError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /codex timeout after \d+ms/i.test(message) || /codex login timeout/i.test(message);
+}
+
+function buildAgentInterruptedText(agent: { name: string }): string {
+  return formatAgentVisibleReply(agent, '⚠️ 本次回复中断了，你可以直接回复“继续”让我接着处理。');
+}
+
+function buildAgentTimeoutText(agent: { name: string }): string {
+  return formatAgentVisibleReply(agent, '⏳ 这次处理时间有点长，已暂时中断。你可以直接回复“继续”，或把问题拆小一点再发一次。');
+}
+
 async function sendAgentProgress(
   deps: Pick<ChatHandlerDeps, 'sendText'>,
   channel: Channel,
@@ -451,6 +466,8 @@ async function maybeInterceptFeishuPersonalAuth(
   await deps.sendText('feishu', input.userId, buildFeishuUserAuthMessage({
     gatewayUserId: input.userId,
     reason: '继续使用飞书对话前，请先完成一次个人权限授权。完成后我会继续处理你的请求。',
+    authStartUrl: auth.getAuthStartUrl?.(input.userId),
+    authStatusUrl: auth.getAuthStatusUrl?.(input.userId),
   }));
   return true;
 }
@@ -1032,6 +1049,8 @@ ${clipMessage(text, 500)}
         }
         await deps.sendText(channel, userId, buildFeishuUserAuthMessage({
           gatewayUserId: userId,
+          authStartUrl: deps.feishuPersonalAuth?.getAuthStartUrl?.(userId),
+          authStatusUrl: deps.feishuPersonalAuth?.getAuthStatusUrl?.(userId),
         }));
         return;
       }
@@ -1314,15 +1333,16 @@ ${clipMessage(text, 500)}
       return;
     }
 
+    let sawAgentOutput = false;
+    let runtimeAgent = currentAgent;
     try {
       let lastStreamSend: Promise<void> = Promise.resolve();
       const streamId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       let streamedText = '';
       let lastFeishuStreamFlushAt = 0;
-      let sawAgentOutput = false;
       // 普通对话始终使用当前可见 agent，初始化引导仅通过显式引导流程触发，
       // 避免 memory-onboarding 线程长期劫持后续会话。
-      const runtimeAgent = currentAgent;
+      runtimeAgent = currentAgent;
       const initialRuntimeThreadId = existingThreadId;
       const identityBinding = await ensureIdentityBound({
         channel,
@@ -1447,6 +1467,8 @@ ${clipMessage(userVisibleOutput, 500)}
         await deps.sendText(channel, userId, buildFeishuUserAuthMessage({
           gatewayUserId: userId,
           reason: '当前账号尚未完成飞书个人授权，或授权已过期。',
+          authStartUrl: deps.feishuPersonalAuth?.getAuthStartUrl?.(userId),
+          authStatusUrl: deps.feishuPersonalAuth?.getAuthStatusUrl?.(userId),
         }));
         return;
       }
@@ -1456,8 +1478,13 @@ ${clipMessage(userVisibleOutput, 500)}
         }));
         return;
       }
-      if (error instanceof Error) {
-        await deps.sendText(channel, userId, error.message);
+      if (isCodexTimeoutError(error)) {
+        await deps.sendText(
+          channel,
+          userId,
+          sawAgentOutput ? buildAgentInterruptedText(runtimeAgent) : buildAgentTimeoutText(runtimeAgent),
+        );
+        return;
       }
       await deps.sendText(channel, userId, '❌ 请求执行失败，请稍后重试。');
     }
