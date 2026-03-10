@@ -1,26 +1,188 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# 确保脚本在遇到错误时停止执行
-set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SERVER_HOST="${SERVER_HOST:-115.190.233.134}"
+SERVER_USER="${SERVER_USER:-root}"
+SSH_KEY_PATH="${SSH_KEY_PATH:-$SCRIPT_DIR/br.pem}"
+SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$SSH_KEY_PATH")
+REMOTE_TMP_DIR="${REMOTE_TMP_DIR:-/tmp/codex-gateway-release}"
+BACKUP_DIR="${BACKUP_DIR:-/opt/deploy-backups}"
 
-echo "🚀 开始一键部署到远程服务器..."
+log() {
+  printf '==> %s\n' "$1"
+}
 
-# 通过 SSH 连接到服务器，执行拉取、安装依赖、编译、重启 PM2
-ssh -o StrictHostKeyChecking=no -i ./br.pem root@115.190.233.134 << 'EOF'
-  cd /opt/gateway
-  echo "📥 正在拉取最新的代码..."
-  git pull origin master
+require_local_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf 'missing required local command: %s\n' "$1" >&2
+    exit 1
+  fi
+}
 
-  echo "📦 正在安装依赖..."
-  npm install
+choose_target() {
+  local input="${1:-}"
+  if [ -n "$input" ]; then
+    printf '%s\n' "$input"
+    return
+  fi
 
-  echo "🔨 正在编译项目..."
-  npm run build
+  printf '可选实例:\n'
+  printf '  1) gateway\n'
+  printf '  2) gateway-copy\n'
+  printf '  3) all\n'
+  read -r -p "选择要部署的实例 [gateway/gateway-copy/all]: " input
+  printf '%s\n' "$input"
+}
 
-  echo "🔄 正在重启服务 (wecom-codex)..."
-  pm2 restart wecom-codex
+deploy_target() {
+  local target_dir="$1"
+  local pm2_app_name="$2"
+  local healthcheck_url="$3"
+  local remote_archive="$REMOTE_TMP_DIR/$(basename "$archive_path").$(basename "$target_dir")"
 
-  echo "✅ 部署及重启完成！"
+  log "Uploading archive for $target_dir"
+  scp "${SSH_OPTS[@]}" "$archive_path" "${SERVER_USER}@${SERVER_HOST}:$remote_archive"
+
+  log "Publishing release to $target_dir"
+  ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" \
+    TARGET_DIR="$target_dir" \
+    PM2_APP_NAME="$pm2_app_name" \
+    HEALTHCHECK_URL="$healthcheck_url" \
+    BACKUP_DIR="$BACKUP_DIR" \
+    REMOTE_TMP_DIR="$REMOTE_TMP_DIR" \
+    REMOTE_ARCHIVE="$remote_archive" \
+    'bash -s' <<'EOF'
+set -euo pipefail
+
+log() {
+  printf '==> %s\n' "$1"
+}
+
+require_remote_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf 'missing required remote command: %s\n' "$1" >&2
+    exit 1
+  fi
+}
+
+for cmd in tar rsync pm2 curl npm cmp mktemp; do
+  require_remote_cmd "$cmd"
+done
+
+if [ ! -d "$TARGET_DIR" ]; then
+  printf 'target dir does not exist: %s\n' "$TARGET_DIR" >&2
+  exit 1
+fi
+
+if [ ! -d "$TARGET_DIR/node_modules" ]; then
+  printf 'node_modules missing under %s; offline deploy cannot install dependencies\n' "$TARGET_DIR" >&2
+  exit 1
+fi
+
+staging_dir="$(mktemp -d "${REMOTE_TMP_DIR%/}/staging.XXXXXX")"
+timestamp="$(date +%Y%m%d-%H%M%S)"
+backup_file="$BACKUP_DIR/$(basename "$TARGET_DIR")-$timestamp.tgz"
+trap 'rm -rf "$staging_dir" "$REMOTE_ARCHIVE"' EXIT
+
+log "Backing up current release to $backup_file"
+tar -czf "$backup_file" \
+  -C "$TARGET_DIR" \
+  --exclude='./node_modules' \
+  --exclude='./dist' \
+  --exclude='./workspace' \
+  --exclude='./.data' \
+  .
+
+log "Extracting uploaded archive"
+tar -xzf "$REMOTE_ARCHIVE" -C "$staging_dir"
+
+if [ ! -f "$staging_dir/package-lock.json" ] || [ ! -f "$TARGET_DIR/package-lock.json" ]; then
+  printf 'package-lock.json missing in staging or target; refusing offline deploy\n' >&2
+  exit 1
+fi
+
+if ! cmp -s "$staging_dir/package-lock.json" "$TARGET_DIR/package-lock.json"; then
+  printf 'package-lock.json changed; offline deploy cannot refresh dependencies on the server\n' >&2
+  exit 1
+fi
+
+log "Syncing release into $TARGET_DIR while preserving .env and node_modules"
+rsync -a --delete \
+  --exclude '.env' \
+  --exclude '.data/' \
+  --exclude 'workspace/' \
+  --exclude 'node_modules/' \
+  --exclude 'dist/' \
+  "$staging_dir"/ "$TARGET_DIR"/
+
+cd "$TARGET_DIR"
+
+log "Building project"
+npm run build
+
+log "Restarting PM2 app $PM2_APP_NAME"
+pm2 restart "$PM2_APP_NAME" --update-env
+
+log "Checking health endpoint $HEALTHCHECK_URL"
+curl -fsS "$HEALTHCHECK_URL" >/dev/null
+
+log "Release published successfully for $TARGET_DIR"
 EOF
+}
 
-echo "🎉 远程代码已拉取，且服务已成功重启生效！"
+for cmd in ssh scp tar mktemp; do
+  require_local_cmd "$cmd"
+done
+
+if [ ! -f "$SSH_KEY_PATH" ]; then
+  printf 'ssh key not found: %s\n' "$SSH_KEY_PATH" >&2
+  exit 1
+fi
+
+archive_path="$(mktemp "${TMPDIR:-/tmp}/gateway-release.XXXXXX.tgz")"
+trap 'rm -f "$archive_path"' EXIT
+
+target_selector="$(choose_target "${1:-}")"
+
+case "$target_selector" in
+  gateway|'1')
+    deploy_specs=("/opt/gateway|wecom-codex|${PRIMARY_HEALTHCHECK_URL:-http://127.0.0.1:3000/healthz}")
+    ;;
+  gateway-copy|'2')
+    deploy_specs=("/opt/gateway-copy|gateway-copy|${SECONDARY_HEALTHCHECK_URL:-http://127.0.0.1:3001/healthz}")
+    ;;
+  all|'3')
+    deploy_specs=(
+      "/opt/gateway|wecom-codex|${PRIMARY_HEALTHCHECK_URL:-http://127.0.0.1:3000/healthz}"
+      "/opt/gateway-copy|gateway-copy|${SECONDARY_HEALTHCHECK_URL:-http://127.0.0.1:3001/healthz}"
+    )
+    ;;
+  *)
+    printf 'unknown deploy target: %s\n' "$target_selector" >&2
+    exit 1
+    ;;
+esac
+
+log "Creating local release archive"
+COPYFILE_DISABLE=1 tar --exclude='.env' \
+  --exclude='.git' \
+  --exclude='node_modules' \
+  --exclude='dist' \
+  --exclude='.data' \
+  --exclude='workspace' \
+  --exclude='.deploy-backups' \
+  --exclude='._*' \
+  --exclude='.DS_Store' \
+  -czf "$archive_path" \
+  -C "$SCRIPT_DIR" \
+  .
+
+ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" "mkdir -p '$REMOTE_TMP_DIR' '$BACKUP_DIR'"
+
+for spec in "${deploy_specs[@]}"; do
+  IFS='|' read -r target_dir pm2_app_name healthcheck_url <<<"$spec"
+  deploy_target "$target_dir" "$pm2_app_name" "$healthcheck_url"
+done
+
+log "Deployment completed"

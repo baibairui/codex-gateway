@@ -882,9 +882,7 @@ export function buildFeishuLoginChoiceMessage(): string {
           label: '设备授权登录',
           type: 'primary',
           value: {
-            gateway_cmd: '/login',
-            command: '/login',
-            text: '/login',
+            gateway_action: 'codex_login.start_device_auth',
           },
         },
         {

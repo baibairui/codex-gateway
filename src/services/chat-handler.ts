@@ -4,6 +4,7 @@ import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/sess
 import type { MemorySummarySnapshot } from './agent-workspace-manager.js';
 import { formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
+import { startCodexDeviceLogin } from './codex-login-flow.js';
 import { buildFeishuLoginChoiceMessage, buildFeishuUserAuthMessage, formatCommandOutboundMessage } from './feishu-command-cards.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
 import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
@@ -947,24 +948,25 @@ ${clipMessage(prompt, 500)}
           await deps.sendText(channel, userId, buildFeishuLoginChoiceMessage());
           return;
         }
-        await sendCommandText('⏳ 正在请求设备登录码，请稍候...');
         try {
-          let lastStreamSend: Promise<void> = Promise.resolve();
-          await deps.codexRunner.login({
-            onMessage: (text) => {
-              log.info(`
+          await startCodexDeviceLogin({
+            channel,
+            userId,
+            sendText: deps.sendText,
+            codexRunner: {
+              login: async (input) => deps.codexRunner.login({
+                onMessage: (text) => {
+                  log.info(`
 ════════════════════════════════════════════════════════════
 🔑 Codex 登录设备码  [${channel}:${userId}]
 ────────────────────────────────────────────────────────────
 ${clipMessage(text, 500)}
 ════════════════════════════════════════════════════════════`);
-              lastStreamSend = sendCommandText(`【登录授权】\n${text}`).catch((err) => {
-                log.error('handleText login onMessage 推送失败', err);
-              });
+                  input.onMessage?.(text);
+                },
+              }),
             },
           });
-          await lastStreamSend;
-          await sendCommandText('✅ 登录成功！Codex CLI 已获得授权。');
         } catch (error) {
           log.error('handleText /login 失败或超时', {
             userId,
