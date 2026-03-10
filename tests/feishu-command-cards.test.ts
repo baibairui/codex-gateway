@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildFeishuApiLoginFormMessage } from '../src/services/feishu-command-cards.js';
+import { buildFeishuApiLoginFormMessage, buildFeishuUserAuthMessage } from '../src/services/feishu-command-cards.js';
 
 describe('buildFeishuApiLoginFormMessage', () => {
   it('wraps login inputs inside a form card element', () => {
@@ -32,5 +32,34 @@ describe('buildFeishuApiLoginFormMessage', () => {
       | undefined;
     expect(submitButton?.action_type).toBe('form_submit');
     expect(submitButton?.name).toBe('submit_api_login');
+  });
+});
+
+describe('buildFeishuUserAuthMessage', () => {
+  it('renders a user auth card with relative auth and status links', () => {
+    const payload = buildFeishuUserAuthMessage({
+      gatewayUserId: 'ou_123',
+      reason: '当前账号尚未绑定飞书个人身份。',
+    });
+    const parsed = JSON.parse(payload) as {
+      __gateway_message__?: boolean;
+      msg_type?: string;
+      content?: {
+        header?: { title?: { content?: string } };
+        elements?: Array<Record<string, unknown>>;
+      };
+    };
+
+    expect(parsed.__gateway_message__).toBe(true);
+    expect(parsed.msg_type).toBe('interactive');
+    expect(parsed.content?.header?.title?.content).toBe('飞书个人授权');
+    const actions = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
+        text?: { content?: string };
+        multi_url?: { url?: string };
+      }>;
+    expect(actions.some((item) => item.text?.content === '去飞书授权' && item.multi_url?.url === '/feishu/oauth/start?gateway_user_id=ou_123')).toBe(true);
+    expect(actions.some((item) => item.text?.content === '查看授权状态' && item.multi_url?.url === '/feishu/auth/status?gateway_user_id=ou_123')).toBe(true);
   });
 });

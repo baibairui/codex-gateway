@@ -4,7 +4,7 @@ import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/sess
 import type { MemorySummarySnapshot } from './agent-workspace-manager.js';
 import { formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
-import { buildFeishuLoginChoiceMessage, formatCommandOutboundMessage } from './feishu-command-cards.js';
+import { buildFeishuLoginChoiceMessage, buildFeishuUserAuthMessage, formatCommandOutboundMessage } from './feishu-command-cards.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
 import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
 import { createLogger } from '../utils/logger.js';
@@ -48,6 +48,7 @@ interface CodexRunnerLike {
     model?: string;
     search?: boolean;
     workdir?: string;
+    gatewayUserId?: string;
     reminderToolContext?: {
       dbPath: string;
       channel: Channel;
@@ -108,6 +109,7 @@ interface ChatHandlerDeps {
   workspacePublisher?: WorkspacePublisherLike;
   runnerEnabled: boolean;
   defaultModel?: string;
+  resolveDefaultModel?: () => string | undefined;
   defaultSearch: boolean;
   reminderDbPath: string;
   sendText: (channel: Channel, userId: string, content: string) => Promise<void>;
@@ -247,9 +249,8 @@ function sanitizeOnboardingText(text: string): string {
 }
 
 function resolveUserKey(userId: string): string {
-  // 本项目按单人本地使用设计，所有渠道消息共享同一用户上下文。
-  void userId;
-  return 'local-owner';
+  const normalized = userId.trim();
+  return normalized || 'anonymous-user';
 }
 
 function formatAgentVisibleReply(agent: { name: string }, text: string): string {
@@ -403,6 +404,11 @@ function buildOutboundMessageProtocolPrompt(channel: Channel, userPrompt: string
   return buildWeComOutboundMessageProtocolPrompt(userPrompt);
 }
 
+function isFeishuUserAuthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /feishu binding required|reauthorization required|authorization expired/i.test(message);
+}
+
 function buildInboundNonTextAck(prompt: string): string | undefined {
   const patterns: Array<{ regex: RegExp; label: string }> = [
     { regex: /^\[飞书图片]/, label: '飞书图片' },
@@ -461,7 +467,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
   }
 
   function getCurrentModel(userKey: string, agentId: string): string | undefined {
-    return deps.sessionStore.getModelOverride?.(userKey, agentId) ?? deps.defaultModel;
+    return deps.sessionStore.getModelOverride?.(userKey, agentId)
+      ?? deps.resolveDefaultModel?.()
+      ?? deps.defaultModel;
   }
 
   function persistSession(
@@ -591,6 +599,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
         model: currentModel,
         search: false,
         workdir: resolveAgentWorkdir(runtimeAgent),
+        gatewayUserId: userId,
         reminderToolContext: {
           channel,
           userId,
@@ -965,6 +974,16 @@ ${clipMessage(text, 500)}
         }
         return;
       }
+      if (commandResult.initFeishuAuth) {
+        if (channel !== 'feishu') {
+          await sendCommandText('⚠️ /feishu-auth 仅支持在飞书渠道中触发。');
+          return;
+        }
+        await deps.sendText(channel, userId, buildFeishuUserAuthMessage({
+          gatewayUserId: userId,
+        }));
+        return;
+      }
       if (commandResult.useAgentTarget) {
         const resolved = deps.sessionStore.resolveAgentTarget(sessionUserKey, commandResult.useAgentTarget);
         if (!resolved) {
@@ -1279,7 +1298,8 @@ ${clipMessage(text, 500)}
         threadId: runtimeThreadId,
         model: currentModel,
         search: runtimeSearch,
-          workdir: resolveAgentWorkdir(runtimeAgent),
+        workdir: resolveAgentWorkdir(runtimeAgent),
+        gatewayUserId: userId,
         reminderToolContext: {
           channel,
           userId,
@@ -1372,6 +1392,15 @@ ${clipMessage(userVisibleOutput, 500)}
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       });
+      if (error instanceof Error) {
+        await deps.sendText(channel, userId, error.message);
+      }
+      if (channel === 'feishu' && isFeishuUserAuthError(error)) {
+        await deps.sendText(channel, userId, buildFeishuUserAuthMessage({
+          gatewayUserId: userId,
+          reason: '当前账号尚未完成飞书个人授权，或授权已过期。',
+        }));
+      }
       await deps.sendText(channel, userId, '❌ 请求执行失败，请稍后重试。');
     }
   };

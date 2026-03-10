@@ -16,6 +16,7 @@ export interface CodexRunInput {
   model?: string;
   search?: boolean;
   workdir?: string;
+  gatewayUserId?: string;
   reminderToolContext?: {
     dbPath: string;
     channel: 'wecom' | 'feishu';
@@ -60,6 +61,7 @@ interface CodexRunnerOptions {
   timeoutMaxMs?: number;
   timeoutPerCharMs?: number;
   browserApiBaseUrl?: string;
+  internalApiBaseUrl?: string;
   internalApiToken?: string;
   gatewayRootDir?: string;
   /** 'full-auto' (沙箱) 或 'none' (无沙箱) */
@@ -117,6 +119,7 @@ export class CodexRunner {
   private readonly timeoutMaxMs: number;
   private readonly timeoutPerCharMs: number;
   private readonly browserAutomation?: BrowserAutomationRuntimeConfig;
+  private readonly internalApiBaseUrl?: string;
   private readonly gatewayRootDir?: string;
   private readonly sandbox: 'full-auto' | 'none';
   private readonly workdirIsolation: CodexWorkdirIsolationMode;
@@ -137,6 +140,7 @@ export class CodexRunner {
           internalApiToken,
         }
       : undefined;
+    this.internalApiBaseUrl = options.internalApiBaseUrl?.trim() || undefined;
     this.gatewayRootDir = options.gatewayRootDir?.trim() || undefined;
     this.sandbox = options.sandbox ?? 'full-auto';
     this.workdirIsolation = options.workdirIsolation ?? 'off';
@@ -165,6 +169,8 @@ export class CodexRunner {
         reminderToolContext: input.reminderToolContext,
         browserAutomation: this.browserAutomation,
         gatewayRootDir: this.gatewayRootDir,
+        gatewayUserId: input.gatewayUserId,
+        internalApiBaseUrl: this.internalApiBaseUrl,
       }),
       workdir: input.workdir,
       onMessage: input.onMessage,
@@ -510,6 +516,8 @@ export function buildCodexChildEnv(
     reminderToolContext?: CodexRunInput['reminderToolContext'];
     browserAutomation?: BrowserAutomationRuntimeConfig;
     gatewayRootDir?: string;
+    gatewayUserId?: string;
+    internalApiBaseUrl?: string;
   },
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
@@ -531,6 +539,12 @@ export function buildCodexChildEnv(
   }
   if (input.gatewayRootDir?.trim()) {
     env.GATEWAY_ROOT_DIR = input.gatewayRootDir.trim();
+  }
+  if (input.gatewayUserId?.trim()) {
+    env.GATEWAY_USER_ID = input.gatewayUserId.trim();
+  }
+  if (input.internalApiBaseUrl?.trim()) {
+    env.GATEWAY_INTERNAL_API_BASE = input.internalApiBaseUrl.trim();
   }
 
   return env;

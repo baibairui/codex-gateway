@@ -31,6 +31,8 @@ describe('feishu-openapi doc target helpers', () => {
     expect(help).toContain('doc get-content --doc-token <token>');
     expect(help).toContain('bitable list-records --app-token <token> --table-id <id>');
     expect(help).toContain('calendar freebusy --time-min <time> --time-max <time>');
+    expect(help).toContain('calendar create-event-personal --summary <text> --start-time <time> --end-time <time>');
+    expect(help).toContain('task create-personal --summary <text>');
     expect(help).toContain('task create-subtask --task-guid <guid> --summary <text>');
   });
 
@@ -591,6 +593,68 @@ describe('feishu-openapi SDK-backed command groups', () => {
     });
   });
 
+  it('creates a personal calendar event through the protected gateway internal api', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+      expect(input).toBe('http://127.0.0.1:3000/internal/feishu/user-calendar-event');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toEqual({
+        'content-type': 'application/json; charset=utf-8',
+        'x-gateway-internal-token': 'token-123',
+      });
+      expect(JSON.parse(String(init?.body))).toEqual({
+        gatewayUserId: 'user-123',
+        summary: '评审会',
+        description: '项目评审',
+        startTime: '2026-03-10T09:00:00+08:00',
+        endTime: '2026-03-10T10:00:00+08:00',
+        timezone: 'Asia/Shanghai',
+      });
+
+      return new Response(JSON.stringify({
+        ok: true,
+        data: {
+          event_id: 'evt_1',
+          summary: '评审会',
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }));
+
+    const originalBase = process.env.GATEWAY_INTERNAL_API_BASE;
+    const originalToken = process.env.GATEWAY_INTERNAL_API_TOKEN;
+    const originalUserId = process.env.GATEWAY_USER_ID;
+    process.env.GATEWAY_INTERNAL_API_BASE = 'http://127.0.0.1:3000/internal';
+    process.env.GATEWAY_INTERNAL_API_TOKEN = 'token-123';
+    process.env.GATEWAY_USER_ID = 'user-123';
+
+    try {
+      await expect(runCommand({
+        resource: 'calendar',
+        action: 'create-event-personal',
+        args: {
+          summary: '评审会',
+          description: '项目评审',
+          'start-time': '2026-03-10T09:00:00+08:00',
+          'end-time': '2026-03-10T10:00:00+08:00',
+          timezone: 'Asia/Shanghai',
+        },
+      })).resolves.toEqual({
+        ok: true,
+        operation: 'calendar.create-event-personal',
+        event: {
+          event_id: 'evt_1',
+          summary: '评审会',
+        },
+      });
+    } finally {
+      process.env.GATEWAY_INTERNAL_API_BASE = originalBase;
+      process.env.GATEWAY_INTERNAL_API_TOKEN = originalToken;
+      process.env.GATEWAY_USER_ID = originalUserId;
+    }
+  });
+
   it('creates, lists, gets, updates, and creates subtasks for tasks', async () => {
     const sdkClient = {
       im: { message: { get: vi.fn(), list: vi.fn() } },
@@ -705,6 +769,62 @@ describe('feishu-openapi SDK-backed command groups', () => {
       task_guid: 'task_guid_1',
       task: { guid: 'sub_1', summary: '补齐风险项' },
     });
+  });
+
+  it('creates a personal task through the protected gateway internal api', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+      expect(input).toBe('http://127.0.0.1:3000/internal/feishu/user-task');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toEqual({
+        'content-type': 'application/json; charset=utf-8',
+        'x-gateway-internal-token': 'token-123',
+      });
+      expect(JSON.parse(String(init?.body))).toEqual({
+        gatewayUserId: 'user-123',
+        summary: '整理周报',
+        description: '补齐风险项',
+      });
+
+      return new Response(JSON.stringify({
+        ok: true,
+        data: {
+          id: 'task_1',
+          summary: '整理周报',
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }));
+
+    const originalBase = process.env.GATEWAY_INTERNAL_API_BASE;
+    const originalToken = process.env.GATEWAY_INTERNAL_API_TOKEN;
+    const originalUserId = process.env.GATEWAY_USER_ID;
+    process.env.GATEWAY_INTERNAL_API_BASE = 'http://127.0.0.1:3000/internal';
+    process.env.GATEWAY_INTERNAL_API_TOKEN = 'token-123';
+    process.env.GATEWAY_USER_ID = 'user-123';
+
+    try {
+      await expect(runCommand({
+        resource: 'task',
+        action: 'create-personal',
+        args: {
+          summary: '整理周报',
+          description: '补齐风险项',
+        },
+      })).resolves.toEqual({
+        ok: true,
+        operation: 'task.create-personal',
+        task: {
+          id: 'task_1',
+          summary: '整理周报',
+        },
+      });
+    } finally {
+      process.env.GATEWAY_INTERNAL_API_BASE = originalBase;
+      process.env.GATEWAY_INTERNAL_API_TOKEN = originalToken;
+      process.env.GATEWAY_USER_ID = originalUserId;
+    }
   });
 
   it('classifies common Feishu API errors into stable types', () => {

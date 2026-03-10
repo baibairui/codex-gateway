@@ -11,7 +11,9 @@ Use this skill when the user wants the agent to perform real Feishu operations t
 - Read DocX / cloud document content
 - Query Bitable tables or records
 - Read calendar lists, events, or freebusy windows
+- Create a personal calendar event for the current bound Feishu user
 - Create or inspect tasks / subtasks
+- Create a personal task for the current bound Feishu user
 - Create a DocX document
 - Create a Wiki node in a knowledge space
 - List Wiki spaces
@@ -32,6 +34,10 @@ The script reads these environment variables:
 - `FEISHU_APP_ID`
 - `FEISHU_APP_SECRET`
 - `FEISHU_DOC_BASE_URL` (optional)
+- `GATEWAY_INTERNAL_API_BASE` (required for `task create-personal`)
+- `GATEWAY_INTERNAL_API_TOKEN` (required for `task create-personal`)
+- `GATEWAY_USER_ID` (required for `task create-personal`)
+- The same internal gateway variables are also required for `calendar create-event-personal`
 
 If either credential is missing, stop and report the real blocker instead of inventing success.
 
@@ -99,10 +105,22 @@ Read calendar freebusy:
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar freebusy --time-min 2026-03-09T00:00:00Z --time-max 2026-03-10T00:00:00Z --user-id ou_xxx
 ```
 
+Create a personal calendar event for the currently bound Feishu user:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar create-event-personal --summary "评审会" --start-time 2026-03-10T09:00:00+08:00 --end-time 2026-03-10T10:00:00+08:00 --timezone Asia/Shanghai
+```
+
 Create a task:
 
 ```bash
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create --summary "整理周报"
+```
+
+Create a personal task for the currently bound Feishu user:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create-personal --summary "整理周报"
 ```
 
 Create a task subtask:

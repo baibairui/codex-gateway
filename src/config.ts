@@ -108,6 +108,7 @@ export const config = {
   feishuApiTimeoutMs: optionalNumber('FEISHU_API_TIMEOUT_MS', 15_000),
   feishuStartupHelpEnabled: process.env.FEISHU_STARTUP_HELP_ENABLED === 'true',
   feishuStartupHelpAdminOpenId: optionalStringUndefined('FEISHU_STARTUP_HELP_ADMIN_OPEN_ID'),
+  feishuOAuthRedirectUri: optionalStringUndefined('FEISHU_OAUTH_REDIRECT_URI'),
   dedupWindowSeconds: optionalNumber('DEDUP_WINDOW_SECONDS', 60),
   rateLimitMaxMessages: optionalNumber('RATE_LIMIT_MAX_MESSAGES', 20),
   rateLimitWindowSeconds: optionalNumber('RATE_LIMIT_WINDOW_SECONDS', 60),

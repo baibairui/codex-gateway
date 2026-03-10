@@ -38,6 +38,7 @@ const COMMAND_LABELS: Record<string, string> = {
   '/skillagent': '技能扩展助手',
   '/skill': '技能扩展助手',
   '/login': '登录授权',
+  '/feishu-auth': '飞书个人授权',
   '/rename': '会话重命名',
   '/switch': '会话切换',
   '/model': '模型管理',
@@ -61,6 +62,7 @@ const COMMAND_SUMMARIES: Record<string, string> = {
   '/search': '控制本会话的联网搜索开关，按需临时开启。',
   '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
   '/login': '重新触发登录授权流程，恢复 Codex 执行能力。',
+  '/feishu-auth': '打开飞书个人任务与个人日历的授权入口，并查看当前绑定状态。',
   '/repair-users': '批量清理并升级已部署用户工作区，修复内置 skill、规则注入与工作目录状态。',
 };
 
@@ -78,6 +80,7 @@ const COMMAND_TEMPLATES: Record<string, FeishuCardTemplate> = {
   '/search': 'wathet',
   '/review': 'orange',
   '/login': 'blue',
+  '/feishu-auth': 'blue',
   '/repair-users': 'orange',
 };
 
@@ -1030,6 +1033,63 @@ export function buildFeishuApiLoginResultMessage(input: {
               },
             },
           ]),
+    ],
+  });
+}
+
+export function buildFeishuUserAuthMessage(input: {
+  gatewayUserId: string;
+  reason?: string;
+}): string {
+  const gatewayUserId = input.gatewayUserId.trim();
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+    },
+    header: {
+      template: 'blue',
+      title: {
+        tag: 'plain_text',
+        content: '飞书个人授权',
+      },
+    },
+    elements: [
+      buildFeishuTitleBlock(
+        '授权个人任务与个人日历',
+        input.reason?.trim() || '完成一次飞书 OAuth 绑定后，agent 才能创建到你本人的任务和主日历事件。',
+      ),
+      buildFeishuFieldGrid([
+        { label: '授权入口', value: `/feishu/oauth/start?gateway_user_id=${gatewayUserId}` },
+        { label: '状态检查', value: `/feishu/auth/status?gateway_user_id=${gatewayUserId}` },
+      ]),
+      buildFeishuTipsNote('这是飞书个人身份授权，不是 Codex CLI 的 /login。'),
+      {
+        tag: 'action',
+        actions: [
+          {
+            tag: 'button',
+            type: 'primary',
+            text: {
+              tag: 'plain_text',
+              content: '去飞书授权',
+            },
+            multi_url: {
+              url: `/feishu/oauth/start?gateway_user_id=${gatewayUserId}`,
+            },
+          },
+          {
+            tag: 'button',
+            text: {
+              tag: 'plain_text',
+              content: '查看授权状态',
+            },
+            multi_url: {
+              url: `/feishu/auth/status?gateway_user_id=${gatewayUserId}`,
+            },
+          },
+        ],
+      },
     ],
   });
 }

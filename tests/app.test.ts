@@ -32,6 +32,62 @@ async function startTestServer(options?: {
     action: string;
     value: Record<string, unknown>;
   }) => Promise<void>;
+  feishuOAuthService?: {
+    buildAuthUrl: (input: { state: string }) => string;
+    exchangeCode: (code: string) => Promise<{
+      accessToken: string;
+      refreshToken: string;
+      expiresIn: number;
+    }>;
+    getAuthorizedUser: (accessToken: string) => Promise<{
+      openId: string;
+      userId: string;
+      name?: string;
+      enName?: string;
+    }>;
+  };
+  feishuUserBindingStore?: {
+    upsertBinding: (input: {
+      gatewayUserId: string;
+      feishuOpenId?: string;
+      feishuUserId?: string;
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      scopeSnapshot?: string;
+    }) => unknown;
+    getByGatewayUserId: (gatewayUserId: string) => {
+      gatewayUserId: string;
+      feishuOpenId?: string;
+      feishuUserId?: string;
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      scopeSnapshot?: string;
+    } | undefined;
+  };
+  feishuUserApi?: {
+    createPersonalTask: (input: {
+      gatewayUserId: string;
+      summary: string;
+      description?: string;
+    }) => Promise<Record<string, unknown>>;
+    createPersonalCalendarEvent?: (input: {
+      gatewayUserId: string;
+      summary: string;
+      description?: string;
+      startTime: string;
+      endTime: string;
+      timezone?: string;
+    }) => Promise<Record<string, unknown>>;
+  };
+  internalApiToken?: string;
+  browserAutomation?: {
+    execute: (command: string, args: Record<string, unknown>) => Promise<{
+      text: string;
+      data?: Record<string, unknown>;
+    }>;
+  };
 }) {
   const app = createApp({
     wecomEnabled: true,
@@ -47,9 +103,14 @@ async function startTestServer(options?: {
     feishuDocBaseUrlConfigured: options?.feishuDocBaseUrlConfigured,
     feishuStartupHelpEnabled: options?.feishuStartupHelpEnabled,
     feishuStartupHelpAdminConfigured: options?.feishuStartupHelpAdminConfigured,
+    internalApiToken: options?.internalApiToken,
+    browserAutomation: options?.browserAutomation,
     isDuplicateMessage: () => false,
     handleText: options?.handleText ?? (async () => undefined),
     handleFeishuCardAction: options?.handleFeishuCardAction,
+    feishuOAuthService: options?.feishuOAuthService as never,
+    feishuUserBindingStore: options?.feishuUserBindingStore as never,
+    feishuUserApi: options?.feishuUserApi as never,
   });
 
   const server = app.listen(0);
@@ -160,6 +221,212 @@ describe('createApp wecom toggle', () => {
     expect(payload.channels?.feishu?.docBaseUrlConfigured).toBe(true);
     expect(payload.channels?.feishu?.startupHelpEnabled).toBe(true);
     expect(payload.channels?.feishu?.startupHelpAdminConfigured).toBe(true);
+  });
+});
+
+describe('createApp feishu oauth routes', () => {
+  it('redirects to feishu oauth url with gateway user state', async () => {
+    const buildAuthUrl = vi.fn(({ state }: { state: string }) => `https://accounts.feishu.cn/mock?state=${encodeURIComponent(state)}`);
+    const baseUrl = await startTestServer({
+      feishuOAuthService: {
+        buildAuthUrl,
+        exchangeCode: vi.fn(),
+        getAuthorizedUser: vi.fn(),
+      },
+      feishuUserBindingStore: {
+        upsertBinding: vi.fn(),
+        getByGatewayUserId: vi.fn(),
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/feishu/oauth/start?gateway_user_id=u1`, {
+      redirect: 'manual',
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toContain('https://accounts.feishu.cn/mock?state=u1');
+    expect(buildAuthUrl).toHaveBeenCalledWith({ state: 'u1' });
+  });
+
+  it('exchanges oauth code and persists binding on callback', async () => {
+    const exchangeCode = vi.fn(async () => ({
+      accessToken: 'access_1',
+      refreshToken: 'refresh_1',
+      expiresIn: 7200,
+    }));
+    const getAuthorizedUser = vi.fn(async () => ({
+      openId: 'ou_1',
+      userId: 'user_1',
+      name: 'Alice',
+    }));
+    const upsertBinding = vi.fn();
+    const baseUrl = await startTestServer({
+      feishuOAuthService: {
+        buildAuthUrl: vi.fn(),
+        exchangeCode,
+        getAuthorizedUser,
+      },
+      feishuUserBindingStore: {
+        upsertBinding,
+        getByGatewayUserId: vi.fn(),
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/feishu/oauth/callback?code=code_1&state=u1`);
+    const payload = await response.json() as { ok?: boolean; gatewayUserId?: string; feishuOpenId?: string };
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      ok: true,
+      gatewayUserId: 'u1',
+      feishuOpenId: 'ou_1',
+    });
+    expect(exchangeCode).toHaveBeenCalledWith('code_1');
+    expect(getAuthorizedUser).toHaveBeenCalledWith('access_1');
+    expect(upsertBinding).toHaveBeenCalledWith(expect.objectContaining({
+      gatewayUserId: 'u1',
+      feishuOpenId: 'ou_1',
+      feishuUserId: 'user_1',
+      accessToken: 'access_1',
+      refreshToken: 'refresh_1',
+    }));
+  });
+
+  it('returns auth status for the requested gateway user', async () => {
+    const baseUrl = await startTestServer({
+      feishuOAuthService: {
+        buildAuthUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        getAuthorizedUser: vi.fn(),
+      },
+      feishuUserBindingStore: {
+        upsertBinding: vi.fn(),
+        getByGatewayUserId: vi.fn((gatewayUserId: string) => gatewayUserId === 'u1'
+          ? {
+              gatewayUserId: 'u1',
+              feishuOpenId: 'ou_1',
+              feishuUserId: 'user_1',
+              accessToken: 'access_1',
+              refreshToken: 'refresh_1',
+              expiresAt: 9999999999999,
+              scopeSnapshot: 'task:write',
+            }
+          : undefined),
+      },
+    });
+
+    const bound = await fetch(`${baseUrl}/feishu/auth/status?gateway_user_id=u1`);
+    const boundPayload = await bound.json() as { ok?: boolean; bound?: boolean; feishuOpenId?: string };
+    const unbound = await fetch(`${baseUrl}/feishu/auth/status?gateway_user_id=u2`);
+    const unboundPayload = await unbound.json() as { ok?: boolean; bound?: boolean };
+
+    expect(bound.status).toBe(200);
+    expect(boundPayload).toMatchObject({
+      ok: true,
+      bound: true,
+      feishuOpenId: 'ou_1',
+    });
+    expect(unbound.status).toBe(200);
+    expect(unboundPayload).toMatchObject({
+      ok: true,
+      bound: false,
+    });
+  });
+});
+
+describe('createApp internal feishu user ops', () => {
+  it('executes personal task creation through the protected internal endpoint', async () => {
+    const createPersonalTask = vi.fn(async () => ({
+      ok: true,
+      operation: 'task.create-personal',
+      task: { id: 'task_1', summary: '整理周报' },
+    }));
+    const baseUrl = await startTestServer({
+      internalApiToken: 'token-123',
+      browserAutomation: {
+        execute: vi.fn(async () => ({ text: 'ok' })),
+      },
+      feishuUserApi: {
+        createPersonalTask,
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/internal/feishu/user-task`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gateway-internal-token': 'token-123',
+      },
+      body: JSON.stringify({
+        gatewayUserId: 'u1',
+        summary: '整理周报',
+      }),
+    });
+    const payload = await response.json() as { ok?: boolean; data?: Record<string, unknown> };
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(payload.data).toMatchObject({
+      operation: 'task.create-personal',
+    });
+    expect(createPersonalTask).toHaveBeenCalledWith({
+      gatewayUserId: 'u1',
+      summary: '整理周报',
+      description: undefined,
+    });
+  });
+
+  it('executes personal calendar event creation through the protected internal endpoint', async () => {
+    const createPersonalCalendarEvent = vi.fn(async () => ({
+      ok: true,
+      operation: 'calendar.create-event-personal',
+      event: { event_id: 'evt_1', summary: '评审会' },
+    }));
+    const baseUrl = await startTestServer({
+      internalApiToken: 'token-123',
+      browserAutomation: {
+        execute: vi.fn(async () => ({ text: 'ok' })),
+      },
+      feishuUserApi: {
+        createPersonalTask: vi.fn(async () => ({
+          ok: true,
+          operation: 'task.create-personal',
+          task: { id: 'task_1' },
+        })),
+        createPersonalCalendarEvent,
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/internal/feishu/user-calendar-event`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gateway-internal-token': 'token-123',
+      },
+      body: JSON.stringify({
+        gatewayUserId: 'u1',
+        summary: '评审会',
+        description: '项目评审',
+        startTime: '2026-03-10T09:00:00+08:00',
+        endTime: '2026-03-10T10:00:00+08:00',
+        timezone: 'Asia/Shanghai',
+      }),
+    });
+    const payload = await response.json() as { ok?: boolean; data?: Record<string, unknown> };
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(payload.data).toMatchObject({
+      operation: 'calendar.create-event-personal',
+    });
+    expect(createPersonalCalendarEvent).toHaveBeenCalledWith({
+      gatewayUserId: 'u1',
+      summary: '评审会',
+      description: '项目评审',
+      startTime: '2026-03-10T09:00:00+08:00',
+      endTime: '2026-03-10T10:00:00+08:00',
+      timezone: 'Asia/Shanghai',
+    });
   });
 });
 

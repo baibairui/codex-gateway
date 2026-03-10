@@ -189,6 +189,8 @@ describe('buildCodexChildEnv', () => {
           internalApiToken: 'token-123',
         },
         gatewayRootDir: '/opt/gateway',
+        gatewayUserId: 'u1',
+        internalApiBaseUrl: 'http://127.0.0.1:3000/internal',
       },
     );
 
@@ -198,7 +200,9 @@ describe('buildCodexChildEnv', () => {
     expect(env.GATEWAY_REMINDER_AGENT_ID).toBe('assistant');
     expect(env.GATEWAY_BROWSER_API_BASE).toBe('http://127.0.0.1:3000/internal/browser');
     expect(env.GATEWAY_INTERNAL_API_TOKEN).toBe('token-123');
+    expect(env.GATEWAY_INTERNAL_API_BASE).toBe('http://127.0.0.1:3000/internal');
     expect(env.GATEWAY_ROOT_DIR).toBe('/opt/gateway');
+    expect(env.GATEWAY_USER_ID).toBe('u1');
   });
 });
 
@@ -451,5 +455,85 @@ describe('buildCodexSpawnSpec', () => {
     });
 
     expect(fs.existsSync(runtimeAuthFile)).toBe(false);
+  });
+
+  it('prefers codex-home config over OPENAI_BASE_URL env when config.toml exists', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-config-priority-'));
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(path.join(instanceHome, 'config.toml'), 'model = "gpt-5-codex"\n');
+
+    const directSpec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: '/root',
+        PATH: '/usr/bin:/bin',
+        OPENAI_BASE_URL: 'https://env.example/v1',
+      },
+      isolationMode: 'off',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(directSpec.env.OPENAI_BASE_URL).toBeUndefined();
+
+    const isolatedSpec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: '/root',
+        PATH: '/usr/bin:/bin',
+        OPENAI_BASE_URL: 'https://env.example/v1',
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(isolatedSpec.env.OPENAI_BASE_URL).toBeUndefined();
+  });
+
+  it('prefers codex-home auth over OPENAI_API_KEY env when auth.json exists', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-auth-priority-'));
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(path.join(instanceHome, 'auth.json'), '{"OPENAI_API_KEY":"from-file"}\n');
+
+    const directSpec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: '/root',
+        PATH: '/usr/bin:/bin',
+        OPENAI_API_KEY: 'from-env',
+      },
+      isolationMode: 'off',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(directSpec.env.OPENAI_API_KEY).toBeUndefined();
+
+    const isolatedSpec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: '/root',
+        PATH: '/usr/bin:/bin',
+        OPENAI_API_KEY: 'from-env',
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(isolatedSpec.env.OPENAI_API_KEY).toBeUndefined();
   });
 });

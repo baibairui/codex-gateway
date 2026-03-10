@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { hasCodexHomeAuth, hasCodexHomeConfig } from './codex-home-config.js';
 
 export type CodexWorkdirIsolationMode = 'off' | 'bwrap';
 
@@ -134,10 +135,19 @@ function buildHostCodexEnv(env: NodeJS.ProcessEnv, codexHomeDir?: string): NodeJ
   }
   const resolvedHome = path.resolve(codexHomeDir);
   fs.mkdirSync(resolvedHome, { recursive: true });
-  return {
+  const nextEnv: NodeJS.ProcessEnv = {
     ...env,
     CODEX_HOME: resolvedHome,
   };
+  if (hasCodexHomeConfig(resolvedHome)) {
+    delete nextEnv.OPENAI_BASE_URL;
+    delete nextEnv.CHATGPT_BASE_URL;
+  }
+  if (hasCodexHomeAuth(resolvedHome)) {
+    delete nextEnv.OPENAI_API_KEY;
+    delete nextEnv.CHATGPT_API_KEY;
+  }
+  return nextEnv;
 }
 
 function buildIsolatedEnv(env: NodeJS.ProcessEnv, runtimeHomeDir: string): NodeJS.ProcessEnv {

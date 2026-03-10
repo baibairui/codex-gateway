@@ -124,10 +124,76 @@ async function withMockModelsCache(
 }
 
 describe('createChatHandler', () => {
+  it('keeps sessions isolated per real user id', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const run = vi
+      .fn(async (input: { threadId?: string; onMessage?: (text: string) => void }) => {
+        input.onMessage?.('ok');
+        return {
+          threadId: input.threadId ?? `thread_${run.mock.calls.length}`,
+          rawOutput: '',
+        };
+      });
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+    await handler({ channel: 'wecom', userId: 'u2', content: 'hello' });
+
+    expect(sessionStore.getSession('u1', 'default')).toBe('thread_1');
+    expect(sessionStore.getSession('u2', 'default')).toBe('thread_2');
+  });
+
+  it('prefers resolved default model over service fallback when no session override exists', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const run = vi.fn(async () => ({ threadId: 'thread_1', rawOutput: '' }));
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'service-fallback-model',
+      resolveDefaultModel: () => 'user-config-model',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'user-config-model',
+    }));
+  });
+
   it('runs agent again when reminder trigger arrives', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.createAgent('local-owner', {
+    sessionStore.createAgent('u1', {
       agentId: 'test',
       name: '测试Agent',
       workspaceDir: '/tmp/test',
@@ -179,7 +245,7 @@ describe('createChatHandler', () => {
       }),
     }));
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[测试Agent] 提醒时间到了，我来继续跟进。');
-    expect(sessionStore.getSession('local-owner', 'test')).toBe('thread_reminder');
+    expect(sessionStore.getSession('u1', 'test')).toBe('thread_reminder');
   });
 
   it('sends a visible error message when codex run fails', async () => {
@@ -208,7 +274,7 @@ describe('createChatHandler', () => {
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '❌ 请求执行失败，请稍后重试。');
-    expect(sessionStore.getSession('local-owner', 'default')).toBeUndefined();
+    expect(sessionStore.getSession('u1', 'default')).toBeUndefined();
   });
 
   it('persists a new session as soon as thread.started is observed', async () => {
@@ -238,7 +304,7 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sessionStore.getSession('local-owner', 'default')).toBe('thread_started_1');
+    expect(sessionStore.getSession('u1', 'default')).toBe('thread_started_1');
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '❌ 请求执行失败，请稍后重试。');
   });
 
@@ -274,7 +340,7 @@ describe('createChatHandler', () => {
   it('prefixes plain agent replies with the current agent name', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.setSession('local-owner', 'default', 'thread_existing');
+    sessionStore.setSession('u1', 'default', 'thread_existing');
     const handler = createChatHandler({
       sessionStore,
       rateLimitStore: { allow: () => true },
@@ -305,7 +371,7 @@ describe('createChatHandler', () => {
   it('keeps gateway structured replies unchanged when labeling agent output', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.setSession('local-owner', 'default', 'thread_existing');
+    sessionStore.setSession('u1', 'default', 'thread_existing');
     const structured = '{"__gateway_message__":true,"msg_type":"post","content":"多段说明"}';
     const handler = createChatHandler({
       sessionStore,
@@ -337,12 +403,12 @@ describe('createChatHandler', () => {
   it('falls back to visible default agent when current agent is hidden onboarding agent', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.createAgent('local-owner', {
+    sessionStore.createAgent('u1', {
       agentId: 'memory-onboarding',
       name: '记忆初始化引导',
       workspaceDir: '/tmp/memory-onboarding',
     });
-    sessionStore.setCurrentAgent('local-owner', 'memory-onboarding');
+    sessionStore.setCurrentAgent('u1', 'memory-onboarding');
     const handler = createChatHandler({
       sessionStore,
       rateLimitStore: { allow: () => true },
@@ -426,7 +492,7 @@ describe('createChatHandler', () => {
   it('sends progress status before running a normal agent task', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.setSession('local-owner', 'default', 'thread_existing');
+    sessionStore.setSession('u1', 'default', 'thread_existing');
     const handler = createChatHandler({
       sessionStore,
       rateLimitStore: { allow: () => true },
@@ -537,7 +603,7 @@ describe('createChatHandler', () => {
       return { threadId: 't1', rawOutput: '' };
     });
     const sessionStore = createSessionStore();
-    sessionStore.setSession('local-owner', 'default', 'existing-thread');
+    sessionStore.setSession('u1', 'default', 'existing-thread');
     const handler = createChatHandler({
       sessionStore,
       rateLimitStore: { allow: () => true },
@@ -591,7 +657,7 @@ describe('createChatHandler', () => {
       'u1',
       expect.stringContaining('已创建并切换到 agent：前端工作区 (frontend)'),
     );
-    expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('frontend');
+    expect(sessionStore.getCurrentAgent('u1').agentId).toBe('frontend');
   });
 
   it('formats built-in command response as feishu interactive card', async () => {
@@ -755,6 +821,108 @@ describe('createChatHandler', () => {
     expect(buttons.some((button) => button.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
   });
 
+  it('returns a feishu auth card for /feishu-auth in feishu channel', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/feishu-auth' });
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as {
+      content?: {
+        header?: { title?: { content?: string } };
+        elements?: Array<{ tag?: string; actions?: Array<{ text?: { content?: string }; multi_url?: { url?: string } }> }>;
+      };
+    };
+    expect(parsed.content?.header?.title?.content).toBe('飞书个人授权');
+    const buttons = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => item.actions ?? []);
+    expect(buttons.some((button) => button.text?.content === '去飞书授权' && button.multi_url?.url === '/feishu/oauth/start?gateway_user_id=u1')).toBe(true);
+  });
+
+  it('returns a plain hint for /feishu-auth outside feishu channel', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/feishu-auth' });
+
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('仅支持在飞书渠道中触发'));
+  });
+
+  it('appends a feishu auth card when personal feishu command fails because binding is required', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => {
+          throw new Error('feishu binding required');
+        },
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '请创建 task create-personal 任务' });
+
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('feishu binding required'))).toBe(true);
+    const authPayload = sendText.mock.calls
+      .map((call) => String(call[2] ?? ''))
+      .find((payload) => payload.includes('"飞书个人授权"'));
+    expect(authPayload).toBeTruthy();
+    const payload = String(authPayload ?? '');
+    const parsed = JSON.parse(payload) as {
+      content?: { header?: { title?: { content?: string } } };
+    };
+    expect(parsed.content?.header?.title?.content).toBe('飞书个人授权');
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('❌ 请求执行失败'))).toBe(true);
+  });
+
   it('renders search toggle card with dynamic button emphasis', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
@@ -847,7 +1015,7 @@ describe('createChatHandler', () => {
   it('renders sessions command card with switch buttons', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.setSession('local-owner', 'default', 'thread_1');
+    sessionStore.setSession('u1', 'default', 'thread_1');
     sessionStore.listDetailed = () => ([
       { threadId: 'thread_1', name: '当前会话', lastPrompt: 'hello', updatedAt: Date.now() },
       { threadId: 'thread_2', name: '历史会话', lastPrompt: 'world', updatedAt: Date.now() - 1 },
@@ -901,7 +1069,7 @@ describe('createChatHandler', () => {
   it('renders agents command card with switch buttons', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.createAgent('local-owner', {
+    sessionStore.createAgent('u1', {
       agentId: 'frontend',
       name: '前端工作区',
       workspaceDir: '/repo/frontend',
@@ -1033,11 +1201,10 @@ describe('createChatHandler', () => {
         actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
       }>;
       const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
-      expect(cmds).toContain('/model');
-      expect(cmds).toContain('/model gpt-5');
+      expect(cmds.some((cmd) => typeof cmd === 'string' && cmd.startsWith('/model ') && cmd !== '/model gpt-5-codex')).toBe(true);
       const currentModelAction = actionElements
         .flatMap((item) => item.actions ?? [])
-        .find((action) => action.value?.gateway_cmd === '/model');
+        .find((action) => String(action.text?.content ?? '').includes('当前 ·'));
       expect(currentModelAction?.text?.content).toBe('当前 · gpt-5-codex');
       expect(currentModelAction?.type).toBe('primary');
     });
@@ -1093,13 +1260,13 @@ describe('createChatHandler', () => {
   it('reads persisted model selection per agent when switching agents', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.createAgent('local-owner', {
+    sessionStore.createAgent('u1', {
       agentId: 'frontend',
       name: '前端Agent',
       workspaceDir: '/tmp/frontend',
     });
-    sessionStore.setModelOverride('local-owner', 'default', 'gpt-5');
-    sessionStore.setModelOverride('local-owner', 'frontend', 'gpt-5-codex');
+    sessionStore.setModelOverride('u1', 'default', 'gpt-5');
+    sessionStore.setModelOverride('u1', 'frontend', 'gpt-5-codex');
 
     const handler = createChatHandler({
       sessionStore,
@@ -1372,8 +1539,8 @@ describe('createChatHandler', () => {
       search: false,
       prompt: expect.stringContaining('language style'),
     }));
-    expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
-    expect(sessionStore.getSession('local-owner', 'memory-onboarding')).toBe('thread_onboarding');
+    expect(sessionStore.getCurrentAgent('u1').agentId).toBe('default');
+    expect(sessionStore.getSession('u1', 'memory-onboarding')).toBe('thread_onboarding');
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('开始记忆初始化引导'));
   });
 
@@ -1408,20 +1575,20 @@ describe('createChatHandler', () => {
       workdir: '/tmp/skill-onboarding',
       search: false,
     }));
-    expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('skill-onboarding');
-    expect(sessionStore.getSession('local-owner', 'skill-onboarding')).toBe('thread_skill');
+    expect(sessionStore.getCurrentAgent('u1').agentId).toBe('skill-onboarding');
+    expect(sessionStore.getSession('u1', 'skill-onboarding')).toBe('thread_skill');
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('技能扩展助手'));
   });
 
   it('reuses existing skill onboarding session when already initialized', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.createAgent('local-owner', {
+    sessionStore.createAgent('u1', {
       agentId: 'skill-onboarding',
       name: '技能扩展助手',
       workspaceDir: '/tmp/skill-onboarding',
     });
-    sessionStore.setSession('local-owner', 'skill-onboarding', 'thread_skill');
+    sessionStore.setSession('u1', 'skill-onboarding', 'thread_skill');
     const createWorkspace = vi.fn(() => ({ agentId: 'skill-onboarding', workspaceDir: '/tmp/skill-onboarding' }));
     const run = vi.fn(async () => ({ threadId: 'thread_skill', rawOutput: '' }));
     const handler = createChatHandler({
@@ -1445,14 +1612,14 @@ describe('createChatHandler', () => {
 
     expect(createWorkspace).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
-    expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('skill-onboarding');
+    expect(sessionStore.getCurrentAgent('u1').agentId).toBe('skill-onboarding');
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('已有进行中的会话'));
   });
 
   it('reuses legacy named onboarding agent instead of creating duplicates', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
-    sessionStore.createAgent('local-owner', {
+    sessionStore.createAgent('u1', {
       agentId: 'agent-5',
       name: '记忆初始化引导',
       workspaceDir: '/tmp/agent-5',
@@ -1488,12 +1655,12 @@ describe('createChatHandler', () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
     const sessionStore = createSessionStore();
-    sessionStore.createAgent('local-owner', {
+    sessionStore.createAgent('u1', {
       agentId: 'frontend',
       name: '前端工作区',
       workspaceDir: '/tmp/frontend',
     });
-    sessionStore.setCurrentAgent('local-owner', 'frontend');
+    sessionStore.setCurrentAgent('u1', 'frontend');
 
     const handler = createChatHandler({
       sessionStore,
@@ -1517,7 +1684,7 @@ describe('createChatHandler', () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
       workdir: '/tmp/frontend',
     }));
-    expect(sessionStore.getSession('local-owner', 'frontend')).toBe('thread_new');
+    expect(sessionStore.getSession('u1', 'frontend')).toBe('thread_new');
   });
 
   it('uses channel-specific outbound prompt for wecom', async () => {
@@ -1653,7 +1820,7 @@ describe('createChatHandler', () => {
       search: false,
       prompt: expect.stringContaining('我们开始吧'),
     }));
-    expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
+    expect(sessionStore.getCurrentAgent('u1').agentId).toBe('default');
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('shared-memory 尚未初始化'));
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('/agent init-memory'));
   });
@@ -1702,12 +1869,12 @@ describe('createChatHandler', () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async () => ({ threadId: 'thread_onboarding', rawOutput: '' }));
     const sessionStore = createSessionStore();
-    sessionStore.createAgent('local-owner', {
+    sessionStore.createAgent('u1', {
       agentId: 'memory-onboarding',
       name: '记忆初始化引导',
       workspaceDir: '/tmp/memory-onboarding',
     });
-    sessionStore.setSession('local-owner', 'memory-onboarding', 'thread_onboarding');
+    sessionStore.setSession('u1', 'memory-onboarding', 'thread_onboarding');
 
     const handler = createChatHandler({
       sessionStore,
@@ -1735,14 +1902,14 @@ describe('createChatHandler', () => {
     expect(run).not.toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread_onboarding',
     }));
-    expect(sessionStore.getCurrentAgent('local-owner').agentId).toBe('default');
+    expect(sessionStore.getCurrentAgent('u1').agentId).toBe('default');
   });
 
   it('shows onboarding suggestion only on the first message of the current agent', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async () => ({ threadId: 'thread_default', rawOutput: '' }));
     const sessionStore = createSessionStore();
-    sessionStore.setSession('local-owner', 'default', 'thread_default');
+    sessionStore.setSession('u1', 'default', 'thread_default');
 
     const handler = createChatHandler({
       sessionStore,
