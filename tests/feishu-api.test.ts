@@ -73,7 +73,7 @@ describe('FeishuApi', () => {
     })).toBe(true);
   });
 
-  it('renders agent identity as the first line in a light interactive card for chat targets', async () => {
+  it('renders a light interactive card body without agent identity for chat targets', async () => {
     const createCalls: Array<{ receive_id_type: string; receive_id: string; msg_type?: string; content?: string }> = [];
     const sdkClient = {
       im: {
@@ -124,7 +124,7 @@ describe('FeishuApi', () => {
             elements: [
               {
                 tag: 'markdown',
-                content: '**默认助手**\n\nhello group',
+                content: 'hello group',
               },
             ],
           },

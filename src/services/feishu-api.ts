@@ -878,7 +878,7 @@ function buildAgentMarkdownCardContent(text: string): Record<string, unknown> | 
       elements: [
         {
           tag: 'markdown',
-          content: `**${headerTitle}**\n\n${body}`,
+          content: body,
         },
       ],
     },
