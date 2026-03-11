@@ -26,6 +26,7 @@ import { WeComApi } from './services/wecom-api.js';
 import { FeishuApi } from './services/feishu-api.js';
 import { WeComCrypto } from './utils/wecom-crypto.js';
 import { appendFeishuAttachmentMetadata, extractFeishuBinaryRef } from './utils/feishu-inbound.js';
+import { isFeishuUpdateMessageType, normalizeFeishuStructuredMessage } from './utils/feishu-outgoing.js';
 import { buildFeishuStatusSummary } from './utils/feishu-status.js';
 import { isGatewayMessageTypeSupported, parseGatewayStructuredMessage } from './utils/gateway-message.js';
 import { SessionStore } from './stores/session-store.js';
@@ -255,46 +256,6 @@ function extractFeishuReplyOptions(
   return {
     content: normalizedContent,
     replyInThread,
-  };
-}
-
-function normalizeFeishuStructuredMessage(
-  msgType: string,
-  content: Record<string, unknown> | string,
-): {
-  msgType: string;
-  content: Record<string, unknown> | string;
-} {
-  if (msgType !== 'markdown') {
-    return { msgType, content };
-  }
-  const markdownText = typeof content === 'string'
-    ? content
-    : (typeof content.content === 'string'
-      ? content.content
-      : (typeof content.text === 'string' ? content.text : ''));
-  const normalized = markdownText.trim();
-  return {
-    msgType: 'interactive',
-    content: {
-      config: {
-        wide_screen_mode: true,
-        enable_forward: true,
-      },
-      header: {
-        template: 'blue',
-        title: {
-          tag: 'plain_text',
-          content: 'Markdown',
-        },
-      },
-      elements: [
-        {
-          tag: 'markdown',
-          content: normalized || '(empty markdown)',
-        },
-      ],
-    },
   };
 }
 
@@ -570,10 +531,6 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
       replyToMessageId,
     });
   });
-}
-
-function isFeishuUpdateMessageType(msgType: string): msgType is 'text' | 'post' | 'interactive' {
-  return msgType === 'text' || msgType === 'post' || msgType === 'interactive';
 }
 
 async function enrichInboundContent(channel: 'wecom' | 'feishu', content: string): Promise<InboundEnrichResult> {

@@ -692,7 +692,7 @@ local_image_path=${sourcePath}`,
     };
     expect(providerParsed.__gateway_message__).toBe(true);
     expect(providerParsed.msg_type).toBe('interactive');
-    expect(providerParsed.content?.header?.title?.content).toBe('运行器切换');
+    expect(providerParsed.content?.header?.title?.content).toBe('模型通道切换');
     expect(helpParsed.__gateway_message__).toBe(true);
     expect(helpParsed.msg_type).toBe('interactive');
     expect(helpParsed.content?.header?.title?.content).toBe('命令帮助');
@@ -783,7 +783,7 @@ local_image_path=${sourcePath}`,
 
     await handler({ channel: 'wecom', userId: 'u1', content: '你好' });
 
-    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', expect.stringContaining('当前 agent 尚未显式选择运行器'));
+    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', expect.stringContaining('当前 agent 尚未显式选择模型通道'));
     expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', expect.stringContaining('可用命令（按功能分组，帮助页 1/2）：'));
     expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '[默认Agent] ⏳ 已接收请求，正在处理...');
     expect(sendText).toHaveBeenNthCalledWith(4, 'wecom', 'u1', '[默认Agent] 开始处理。');

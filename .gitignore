@@ -8,3 +8,5 @@ package.json.bak.*
 docs/
 deploy*.sh
 !deploy-env.sh
+
+.worktrees/
