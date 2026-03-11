@@ -8,21 +8,36 @@ export function normalizeFeishuStructuredMessage(
   if (msgType !== 'markdown') {
     return { msgType, content };
   }
-
-  if (typeof content === 'string') {
-    return { msgType, content };
-  }
-
-  const markdownText = typeof content.content === 'string'
-    ? content.content
-    : (typeof content.text === 'string' ? content.text : '');
-
+  const markdownText = typeof content === 'string'
+    ? content
+    : (typeof content.content === 'string'
+      ? content.content
+      : (typeof content.text === 'string' ? content.text : ''));
+  const normalized = markdownText.trim();
   return {
-    msgType,
-    content: markdownText,
+    msgType: 'interactive',
+    content: {
+      config: {
+        wide_screen_mode: true,
+        enable_forward: true,
+      },
+      header: {
+        template: 'blue',
+        title: {
+          tag: 'plain_text',
+          content: 'Markdown',
+        },
+      },
+      elements: [
+        {
+          tag: 'markdown',
+          content: normalized || '(empty markdown)',
+        },
+      ],
+    },
   };
 }
 
-export function isFeishuUpdateMessageType(msgType: string): msgType is 'text' | 'markdown' | 'post' | 'interactive' {
-  return msgType === 'text' || msgType === 'markdown' || msgType === 'post' || msgType === 'interactive';
+export function isFeishuUpdateMessageType(msgType: string): msgType is 'text' | 'post' | 'interactive' {
+  return msgType === 'text' || msgType === 'post' || msgType === 'interactive';
 }
