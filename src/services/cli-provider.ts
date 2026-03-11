@@ -70,9 +70,15 @@ export function resolveOpenCodeBin(explicitBin: string | undefined, homeDir = pr
     return explicit;
   }
   if (homeDir?.trim()) {
-    const localBin = path.join(path.resolve(homeDir.trim()), '.local', 'bin', 'opencode');
-    if (isExecutableFile(localBin)) {
-      return localBin;
+    const resolvedHome = path.resolve(homeDir.trim());
+    const candidateBins = [
+      path.join(resolvedHome, '.local', 'bin', 'opencode'),
+      path.join(resolvedHome, '.opencode', 'bin', 'opencode'),
+    ];
+    for (const candidate of candidateBins) {
+      if (isExecutableFile(candidate)) {
+        return candidate;
+      }
     }
   }
   return 'opencode';

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   readCliHomeDefaultModel,
+  resolveOpenCodeBin,
   resolveCliProvider,
   writeCliApiLoginConfig,
 } from '../src/services/cli-provider.js';
@@ -16,6 +17,17 @@ describe('resolveCliProvider', () => {
 
   it('infers opencode from bin name', () => {
     expect(resolveCliProvider(undefined, '/usr/local/bin/opencode')).toBe('opencode');
+  });
+});
+
+describe('resolveOpenCodeBin', () => {
+  it('prefers the official opencode install path under the user home', () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bin-home-'));
+    const opencodeBin = path.join(homeDir, '.opencode', 'bin', 'opencode');
+    fs.mkdirSync(path.dirname(opencodeBin), { recursive: true });
+    fs.writeFileSync(opencodeBin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    expect(resolveOpenCodeBin(undefined, homeDir)).toBe(opencodeBin);
   });
 });
 

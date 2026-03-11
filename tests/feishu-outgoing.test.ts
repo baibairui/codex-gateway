@@ -7,23 +7,18 @@ describe('normalizeFeishuStructuredMessage', () => {
     expect(normalizeFeishuStructuredMessage('markdown', '# 标题\n- 列表')).toEqual({
       msgType: 'interactive',
       content: {
+        schema: '2.0',
         config: {
           wide_screen_mode: true,
-          enable_forward: true,
         },
-        header: {
-          template: 'blue',
-          title: {
-            tag: 'plain_text',
-            content: 'Markdown',
-          },
+        body: {
+          elements: [
+            {
+              tag: 'markdown',
+              content: '# 标题\n- 列表',
+            },
+          ],
         },
-        elements: [
-          {
-            tag: 'markdown',
-            content: '# 标题\n- 列表',
-          },
-        ],
       },
     });
   });
