@@ -22,6 +22,12 @@ describe('offline deployment scripts', () => {
     expect(script).toContain('read -r -p "选择要部署的实例');
     expect(script).toContain('/opt/gateway|wecom-codex|');
     expect(script).toContain('/opt/gateway-copy|gateway-copy|');
+    expect(script).toContain('/opt/gateway-2|gateway-2|');
+    expect(script).toContain('/opt/gateway-3|gateway-3|');
+    expect(script).toContain('/opt/gateway-4|gateway-4|');
+    expect(script).toContain("HEALTHCHECK_RETRIES=\"${HEALTHCHECK_RETRIES:-20}\"");
+    expect(script).toContain("HEALTHCHECK_RETRY_DELAY=\"${HEALTHCHECK_RETRY_DELAY:-1}\"");
+    expect(script).toContain('Healthcheck attempt');
     expect(script).toContain("printf '可选实例:\\n' >&2");
   });
 

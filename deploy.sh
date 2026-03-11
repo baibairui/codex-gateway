@@ -8,6 +8,8 @@ SSH_KEY_PATH="${SSH_KEY_PATH:-$SCRIPT_DIR/br.pem}"
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$SSH_KEY_PATH")
 REMOTE_TMP_DIR="${REMOTE_TMP_DIR:-/tmp/codex-gateway-release}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/deploy-backups}"
+HEALTHCHECK_RETRIES="${HEALTHCHECK_RETRIES:-20}"
+HEALTHCHECK_RETRY_DELAY="${HEALTHCHECK_RETRY_DELAY:-1}"
 
 log() {
   printf '==> %s\n' "$1"
@@ -30,9 +32,45 @@ choose_target() {
   printf '可选实例:\n' >&2
   printf '  1) gateway\n' >&2
   printf '  2) gateway-copy\n' >&2
-  printf '  3) all\n' >&2
-  read -r -p "选择要部署的实例 [gateway/gateway-copy/all]: " input
+  printf '  3) gateway-2\n' >&2
+  printf '  4) gateway-3\n' >&2
+  printf '  5) gateway-4\n' >&2
+  printf '  6) all\n' >&2
+  read -r -p "选择要部署的实例 [gateway/gateway-copy/gateway-2/gateway-3/gateway-4/all]: " input
   printf '%s\n' "$input"
+}
+
+resolve_deploy_specs() {
+  local target_selector="$1"
+
+  case "$target_selector" in
+    gateway|'1')
+      printf '%s\n' "/opt/gateway|wecom-codex|${PRIMARY_HEALTHCHECK_URL:-http://127.0.0.1:3000/healthz}"
+      ;;
+    gateway-copy|'2')
+      printf '%s\n' "/opt/gateway-copy|gateway-copy|${SECONDARY_HEALTHCHECK_URL:-http://127.0.0.1:3001/healthz}"
+      ;;
+    gateway-2|'3')
+      printf '%s\n' "/opt/gateway-2|gateway-2|${GATEWAY_2_HEALTHCHECK_URL:-http://127.0.0.1:3002/healthz}"
+      ;;
+    gateway-3|'4')
+      printf '%s\n' "/opt/gateway-3|gateway-3|${GATEWAY_3_HEALTHCHECK_URL:-http://127.0.0.1:3003/healthz}"
+      ;;
+    gateway-4|'5')
+      printf '%s\n' "/opt/gateway-4|gateway-4|${GATEWAY_4_HEALTHCHECK_URL:-http://127.0.0.1:3004/healthz}"
+      ;;
+    all|'6')
+      printf '%s\n' "/opt/gateway|wecom-codex|${PRIMARY_HEALTHCHECK_URL:-http://127.0.0.1:3000/healthz}"
+      printf '%s\n' "/opt/gateway-copy|gateway-copy|${SECONDARY_HEALTHCHECK_URL:-http://127.0.0.1:3001/healthz}"
+      printf '%s\n' "/opt/gateway-2|gateway-2|${GATEWAY_2_HEALTHCHECK_URL:-http://127.0.0.1:3002/healthz}"
+      printf '%s\n' "/opt/gateway-3|gateway-3|${GATEWAY_3_HEALTHCHECK_URL:-http://127.0.0.1:3003/healthz}"
+      printf '%s\n' "/opt/gateway-4|gateway-4|${GATEWAY_4_HEALTHCHECK_URL:-http://127.0.0.1:3004/healthz}"
+      ;;
+    *)
+      printf 'unknown deploy target: %s\n' "$target_selector" >&2
+      return 1
+      ;;
+  esac
 }
 
 deploy_target() {
@@ -49,6 +87,8 @@ deploy_target() {
     TARGET_DIR="$target_dir" \
     PM2_APP_NAME="$pm2_app_name" \
     HEALTHCHECK_URL="$healthcheck_url" \
+    HEALTHCHECK_RETRIES="$HEALTHCHECK_RETRIES" \
+    HEALTHCHECK_RETRY_DELAY="$HEALTHCHECK_RETRY_DELAY" \
     BACKUP_DIR="$BACKUP_DIR" \
     REMOTE_TMP_DIR="$REMOTE_TMP_DIR" \
     REMOTE_ARCHIVE="$remote_archive" \
@@ -125,7 +165,21 @@ log "Restarting PM2 app $PM2_APP_NAME"
 pm2 restart "$PM2_APP_NAME" --update-env
 
 log "Checking health endpoint $HEALTHCHECK_URL"
-curl -fsS "$HEALTHCHECK_URL" >/dev/null
+healthcheck_ok=0
+for attempt in $(seq 1 "$HEALTHCHECK_RETRIES"); do
+  if curl -fsS "$HEALTHCHECK_URL" >/dev/null; then
+    healthcheck_ok=1
+    break
+  fi
+
+  printf 'Healthcheck attempt %s/%s failed for %s\n' "$attempt" "$HEALTHCHECK_RETRIES" "$HEALTHCHECK_URL" >&2
+  sleep "$HEALTHCHECK_RETRY_DELAY"
+done
+
+if [ "$healthcheck_ok" -ne 1 ]; then
+  printf 'healthcheck failed after %s attempts: %s\n' "$HEALTHCHECK_RETRIES" "$HEALTHCHECK_URL" >&2
+  exit 1
+fi
 
 log "Release published successfully for $TARGET_DIR"
 EOF
@@ -144,25 +198,10 @@ archive_path="$(mktemp "${TMPDIR:-/tmp}/gateway-release.XXXXXX.tgz")"
 trap 'rm -f "$archive_path"' EXIT
 
 target_selector="$(choose_target "${1:-}")"
-
-case "$target_selector" in
-  gateway|'1')
-    deploy_specs=("/opt/gateway|wecom-codex|${PRIMARY_HEALTHCHECK_URL:-http://127.0.0.1:3000/healthz}")
-    ;;
-  gateway-copy|'2')
-    deploy_specs=("/opt/gateway-copy|gateway-copy|${SECONDARY_HEALTHCHECK_URL:-http://127.0.0.1:3001/healthz}")
-    ;;
-  all|'3')
-    deploy_specs=(
-      "/opt/gateway|wecom-codex|${PRIMARY_HEALTHCHECK_URL:-http://127.0.0.1:3000/healthz}"
-      "/opt/gateway-copy|gateway-copy|${SECONDARY_HEALTHCHECK_URL:-http://127.0.0.1:3001/healthz}"
-    )
-    ;;
-  *)
-    printf 'unknown deploy target: %s\n' "$target_selector" >&2
-    exit 1
-    ;;
-esac
+deploy_specs=()
+while IFS= read -r spec; do
+  deploy_specs+=("$spec")
+done < <(resolve_deploy_specs "$target_selector")
 
 log "Creating local release archive"
 COPYFILE_DISABLE=1 tar --exclude='.env' \

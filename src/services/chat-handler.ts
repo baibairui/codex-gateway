@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { commandNeedsAgentList, commandNeedsDetailedSessions, handleUserCommand, maskThreadId } from '../features/user-command.js';
 import path from 'node:path';
 import type { AgentListItem, AgentRecord, SessionListItem } from '../stores/session-store.js';
@@ -14,6 +15,13 @@ import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('ChatHandler');
+const GATEWAY_LOCAL_PATH_KEYS = [
+  'local_image_path',
+  'local_file_path',
+  'local_audio_path',
+  'local_media_path',
+  'local_sticker_path',
+] as const;
 
 type Channel = 'wecom' | 'feishu';
 
@@ -307,16 +315,9 @@ function rewriteGatewayLocalPathContent(
   content: Record<string, unknown>,
   workspaceDir: string,
 ): Record<string, unknown> {
-  const keys = [
-    'local_image_path',
-    'local_file_path',
-    'local_audio_path',
-    'local_media_path',
-    'local_sticker_path',
-  ] as const;
   let changed = false;
   const next: Record<string, unknown> = { ...content };
-  for (const key of keys) {
+  for (const key of GATEWAY_LOCAL_PATH_KEYS) {
     const value = next[key];
     if (typeof value !== 'string') {
       continue;
@@ -340,6 +341,47 @@ function rewriteSandboxWorkspacePath(rawPath: string, workspaceDir: string): str
   }
   const relativePath = trimmed.slice('/workspace/'.length);
   return path.join(workspaceDir, relativePath);
+}
+
+async function stageInboundLocalPaths(prompt: string, workspaceDir: string): Promise<string> {
+  const matches = Array.from(prompt.matchAll(/\b(local_(?:image|file|audio|media|sticker)_path)=([^\s]+)/g));
+  if (matches.length === 0) {
+    return prompt;
+  }
+
+  let changed = false;
+  let nextPrompt = prompt;
+  for (const match of matches) {
+    const key = match[1];
+    const sourcePath = match[2];
+    if (!key || !sourcePath) {
+      continue;
+    }
+    const stagedPath = await stageLocalPathIntoWorkspace(sourcePath, workspaceDir);
+    if (!stagedPath || stagedPath === sourcePath) {
+      continue;
+    }
+    nextPrompt = nextPrompt.replace(`${key}=${sourcePath}`, `${key}=${stagedPath}`);
+    changed = true;
+  }
+  return changed ? nextPrompt : prompt;
+}
+
+async function stageLocalPathIntoWorkspace(sourcePath: string, workspaceDir: string): Promise<string | undefined> {
+  const normalizedSource = sourcePath.trim();
+  if (!normalizedSource || normalizedSource.startsWith(workspaceDir) || !fs.existsSync(normalizedSource)) {
+    return normalizedSource || undefined;
+  }
+
+  const stagedDir = path.join(workspaceDir, '.gateway-inbox');
+  await fs.promises.mkdir(stagedDir, { recursive: true });
+  const parsed = path.parse(normalizedSource);
+  const stagedPath = path.join(
+    stagedDir,
+    `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${parsed.ext || ''}`,
+  );
+  await fs.promises.copyFile(normalizedSource, stagedPath);
+  return stagedPath;
 }
 
 function formatMemorySummary(agent: AgentRecord, snapshot: MemorySummarySnapshot): string {
@@ -1364,7 +1406,8 @@ ${clipMessage(text, 500)}
       });
 
       const startTime = Date.now();
-      const runtimePrompt = buildOutboundMessageProtocolPrompt(channel, prompt);
+      const normalizedPrompt = await stageInboundLocalPaths(prompt, resolveAgentWorkdir(runtimeAgent));
+      const runtimePrompt = buildOutboundMessageProtocolPrompt(channel, normalizedPrompt);
       await sendAgentProgress(deps, channel, userId, runtimeAgent, 'received');
       const result = await deps.codexRunner.run({
         prompt: runtimePrompt,
