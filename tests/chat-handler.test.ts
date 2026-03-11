@@ -433,6 +433,42 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', structured);
   });
 
+  it('rewrites sandbox local file paths in structured replies back to host workspace paths', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.setSession('u1', 'default', 'thread_existing');
+    const structured = '{"__gateway_message__":true,"msg_type":"image","content":{"local_image_path":"/workspace/out/result.png","caption":"done"}}';
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async (input) => {
+          input.onMessage?.(structured);
+          return { threadId: 'thread_existing', rawOutput: '' };
+        },
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: 'hello' });
+
+    expect(sendText).toHaveBeenCalledWith(
+      'feishu',
+      'u1',
+      '{"__gateway_message__":true,"msg_type":"image","content":{"local_image_path":"/repo/default/out/result.png","caption":"done"}}',
+    );
+  });
+
   it('falls back to visible default agent when current agent is hidden onboarding agent', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
