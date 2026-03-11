@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
+import { isExecutableAvailable } from './cli-provider.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('OpenCodeAuthFlow');
@@ -45,6 +46,14 @@ export class OpenCodeAuthFlowManager {
     };
 
     const command = `${shellEscape(input.opencodeBin)} auth login ${shellEscape(input.provider)}`;
+    if (!isExecutableAvailable(input.opencodeBin, env.PATH)) {
+      await input.onExit({
+        ok: false,
+        provider: input.provider,
+        message: '当前实例尚未安装 OpenCode，暂时无法使用该登录方式。',
+      });
+      return;
+    }
     const child = spawn('script', ['-qfec', command, '/dev/null'], {
       cwd: input.cwd,
       env,
@@ -120,12 +129,15 @@ export class OpenCodeAuthFlowManager {
     });
     child.on('close', (code) => {
       this.sessions.delete(input.key);
+      const normalizedOutput = code === 127
+        ? '当前实例尚未安装 OpenCode，暂时无法使用该登录方式。'
+        : undefined;
       void input.onExit({
         ok: code === 0,
         provider: input.provider,
         message: code === 0
           ? `${toProviderLabel(input.provider)} 登录完成。`
-          : `${toProviderLabel(input.provider)} 登录失败，退出码：${code ?? 'unknown'}`,
+          : (normalizedOutput ?? `${toProviderLabel(input.provider)} 登录失败，请稍后重试。`),
       });
     });
   }
