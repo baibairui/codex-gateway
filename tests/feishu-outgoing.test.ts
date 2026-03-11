@@ -3,20 +3,19 @@ import { describe, expect, it } from 'vitest';
 import { isFeishuUpdateMessageType, normalizeFeishuStructuredMessage } from '../src/utils/feishu-outgoing.js';
 
 describe('normalizeFeishuStructuredMessage', () => {
-  it('rewrites markdown messages as interactive cards for Feishu rendering', () => {
+  it('rewrites markdown messages as post messages with md tags for Feishu rendering', () => {
     expect(normalizeFeishuStructuredMessage('markdown', '# 标题\n- 列表')).toEqual({
-      msgType: 'interactive',
+      msgType: 'post',
       content: {
-        schema: '2.0',
-        config: {
-          wide_screen_mode: true,
-        },
-        body: {
-          elements: [
-            {
-              tag: 'markdown',
-              content: '# 标题\n- 列表',
-            },
+        zh_cn: {
+          title: '',
+          content: [
+            [
+              {
+                tag: 'md',
+                text: '# 标题\n- 列表',
+              },
+            ],
           ],
         },
       },

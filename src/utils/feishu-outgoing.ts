@@ -15,18 +15,17 @@ export function normalizeFeishuStructuredMessage(
       : (typeof content.text === 'string' ? content.text : ''));
   const normalized = markdownText.trim();
   return {
-    msgType: 'interactive',
+    msgType: 'post',
     content: {
-      schema: '2.0',
-      config: {
-        wide_screen_mode: true,
-      },
-      body: {
-        elements: [
-          {
-            tag: 'markdown',
-            content: normalized || '(empty markdown)',
-          },
+      zh_cn: {
+        title: '',
+        content: [
+          [
+            {
+              tag: 'md',
+              text: normalized || '(empty markdown)',
+            },
+          ],
         ],
       },
     },
