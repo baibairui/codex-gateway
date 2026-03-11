@@ -91,62 +91,77 @@ function formatAgents(currentAgent: AgentRecord | undefined, agents: AgentListIt
   return ['Agent 列表：', ...lines, '使用 /agent use <编号|agentId> 切换 agent。'].join('\n');
 }
 
-const HELP_PAGES: Array<{ title: string; lines: string[] }> = [
-  {
-    title: '会话与 Agent',
-    lines: [
-      '/help - 查看帮助',
-      '/new - 清空当前 agent 的当前会话',
-      '/clear - 清空当前 agent 的当前会话',
-      '/session - 查看当前会话状态',
-      '/sessions - 查看当前 agent 的历史会话列表',
-      '/rename [编号|threadId] [名称] - 重命名会话',
-      '/switch [编号|threadId] - 切换会话',
-      '/agents - 查看 agent 列表',
-      '/agent - 查看当前 agent',
-      '/provider - 查看当前框架并切换',
-      '/provider codex|opencode - 切换当前 agent 框架',
-      '/memory - 查看当前 agent 与 shared-memory 摘要',
-      '/agent create [名称] - 创建独立 agent 工作区',
-      '/agent use [编号|agentId] - 切换 agent',
-      '/skill-agent - 启动技能扩展助手 agent',
-    ],
-  },
-  {
-    title: '模型、技能与执行',
-    lines: [
-      '/model - 查看当前模型与可选模型',
-      '/model page [页码] - 查看更多模型',
-      '/model [模型名] - 切换模型',
-      '/model reset - 重置为默认模型',
-      '/provider reset - 恢复为服务默认框架',
-      '/skills - 查看当前会话生效 skill 列表（全局 + 当前 agent）',
-      '/skills global - 查看全局 skill',
-      '/skills agent - 查看当前 agent skill',
-      '/skills disable global [skillName] - 禁用某个全局 skill（仅当前 agent）',
-      '/skills add global [skillName] - 重新启用某个全局 skill（仅当前 agent）',
-      '/skills disable agent [skillName] - 禁用某个当前 agent skill',
-      '/search - 查看联网搜索状态',
-      '/search on|off - 开启/关闭联网搜索',
-      '/review - 审查当前 agent 工作区变更',
-      '/review base [分支] - 审查相对分支的变更',
-      '/review commit [SHA] - 审查指定提交',
-      '/repair-users - 清理并修复已部署用户工作区（技能注入、规则升级、工作目录自愈）',
-      '/login - 使用设备码登录 Codex',
-      '提醒任务请直接用自然语言描述，由已安装的 reminder-tool skill 执行内置脚本创建提醒。',
-    ],
-  },
+const HELP_ENTRIES: Array<{ section: string; line: string }> = [
+  { section: '会话与 Agent', line: '/help - 查看帮助' },
+  { section: '会话与 Agent', line: '/new - 清空当前 agent 的当前会话' },
+  { section: '会话与 Agent', line: '/clear - 清空当前 agent 的当前会话' },
+  { section: '会话与 Agent', line: '/session - 查看当前会话状态' },
+  { section: '会话与 Agent', line: '/sessions - 查看当前 agent 的历史会话列表' },
+  { section: '会话与 Agent', line: '/rename [编号|threadId] [名称] - 重命名会话' },
+  { section: '会话与 Agent', line: '/switch [编号|threadId] - 切换会话' },
+  { section: '会话与 Agent', line: '/agents - 查看 agent 列表' },
+  { section: '会话与 Agent', line: '/agent - 查看当前 agent' },
+  { section: '会话与 Agent', line: '/agent create [名称] - 创建独立 agent 工作区' },
+  { section: '会话与 Agent', line: '/agent use [编号|agentId] - 切换 agent' },
+  { section: '会话与 Agent', line: '/skill-agent - 启动技能扩展助手 agent' },
+  { section: '模型、技能与执行', line: '/provider - 查看当前框架并切换' },
+  { section: '模型、技能与执行', line: '/provider codex|opencode - 切换当前 agent 框架' },
+  { section: '模型、技能与执行', line: '/provider reset - 恢复为服务默认框架' },
+  { section: '模型、技能与执行', line: '/model - 查看当前模型与可选模型' },
+  { section: '模型、技能与执行', line: '/model page [页码] - 查看更多模型' },
+  { section: '模型、技能与执行', line: '/model [模型名] - 切换模型' },
+  { section: '模型、技能与执行', line: '/model reset - 重置为默认模型' },
+  { section: '模型、技能与执行', line: '/models [页码] - 查看模型列表分页' },
+  { section: '模型、技能与执行', line: '/memory - 查看当前 agent 与 shared-memory 摘要' },
+  { section: '模型、技能与执行', line: '/skills - 查看当前会话生效 skill 列表（全局 + 当前 agent）' },
+  { section: '模型、技能与执行', line: '/skills global - 查看全局 skill' },
+  { section: '模型、技能与执行', line: '/skills agent - 查看当前 agent skill' },
+  { section: '模型、技能与执行', line: '/skills disable global [skillName] - 禁用某个全局 skill（仅当前 agent）' },
+  { section: '模型、技能与执行', line: '/skills add global [skillName] - 重新启用某个全局 skill（仅当前 agent）' },
+  { section: '模型、技能与执行', line: '/skills disable agent [skillName] - 禁用某个当前 agent skill' },
+  { section: '模型、技能与执行', line: '/search - 查看联网搜索状态' },
+  { section: '模型、技能与执行', line: '/search on|off - 开启/关闭联网搜索' },
+  { section: '工作区与运维', line: '/login - 使用设备码登录 Codex' },
+  { section: '工作区与运维', line: '/deploy-workspace - 发布当前 agent 工作区' },
+  { section: '工作区与运维', line: '/publish-workspace - 发布当前 agent 工作区' },
+  { section: '工作区与运维', line: '/repair-users - 清理并修复已部署用户工作区（技能注入、规则升级、工作目录自愈）' },
+  { section: '工作区与运维', line: '/review - 审查当前 agent 工作区变更' },
+  { section: '工作区与运维', line: '/review base [分支] - 审查相对分支的变更' },
+  { section: '工作区与运维', line: '/review commit [SHA] - 审查指定提交' },
+  { section: '工作区与运维', line: '提醒任务请直接用自然语言描述，由已安装的 reminder-tool skill 执行内置脚本创建提醒。' },
 ];
 
+const HELP_PAGE_SIZE = 14;
+
+function buildHelpPages(): Array<Array<{ section: string; line: string }>> {
+  const pages: Array<Array<{ section: string; line: string }>> = [];
+  for (let index = 0; index < HELP_ENTRIES.length; index += HELP_PAGE_SIZE) {
+    pages.push(HELP_ENTRIES.slice(index, index + HELP_PAGE_SIZE));
+  }
+  return pages;
+}
+
 function renderHelpMessage(page: number): string {
-  const total = HELP_PAGES.length;
+  const pages = buildHelpPages();
+  const total = pages.length;
   const safePage = Math.max(1, Math.min(page, total));
-  const current = HELP_PAGES[safePage - 1] ?? HELP_PAGES[0];
+  const current = pages[safePage - 1] ?? pages[0] ?? [];
+  const lines: string[] = [];
+  let section = '';
+  for (const entry of current) {
+    if (entry.section !== section) {
+      if (lines.length > 0) {
+        lines.push('');
+      }
+      section = entry.section;
+      lines.push(`【${section}】`);
+    }
+    lines.push(entry.line);
+  }
   return [
     `可用命令（按功能分组，帮助页 ${safePage}/${total}）：`,
     '',
-    `【${current.title}】`,
-    ...current.lines,
+    ...lines,
     '',
     `翻页：/help ${Math.max(1, safePage - 1)} | /help ${Math.min(total, safePage + 1)}`,
   ].join('\n');

@@ -794,7 +794,7 @@ local_image_path=${sourcePath}`,
     await handler({ channel: 'wecom', userId: 'u1', content: '你好' });
 
     expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', expect.stringContaining('当前 agent 尚未显式选择模型通道'));
-    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', expect.stringContaining('可用命令（按功能分组，帮助页 1/2）：'));
+    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', expect.stringContaining('可用命令（按功能分组，帮助页 1/3）：'));
     expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
     expect(sendText).toHaveBeenNthCalledWith(4, 'wecom', 'u1', '默认助手 ·\n开始处理。');
   });
@@ -909,7 +909,7 @@ local_image_path=${sourcePath}`,
     expect(card.header?.title?.content).toBe('命令帮助');
     const merged = (card.elements ?? []).map((item) => String(item.content ?? '')).join('\n');
     expect(merged).toContain('帮助目录');
-    expect(merged).toContain('会话与 Agent · 1/2');
+    expect(merged).toContain('会话与 Agent · 1/3');
     expect(merged).toContain('快捷操作');
     const noteContents = (card.elements ?? [])
       .filter((item) => (item as { tag?: string }).tag === 'note')

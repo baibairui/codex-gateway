@@ -47,7 +47,7 @@ describe('handleUserCommand', () => {
     const result = handleUserCommand('/help', context);
     expect(result.handled).toBe(true);
     expect(result.message).toContain('可用命令');
-    expect(result.message).toContain('帮助页 1/2');
+    expect(result.message).toContain('帮助页 1/3');
     expect(result.message).toContain('/agent create [名称]');
     expect(result.message).toContain('/skill-agent');
     expect(result.message).toContain('翻页：/help 1 | /help 2');
@@ -57,11 +57,19 @@ describe('handleUserCommand', () => {
   it('supports /help pagination', () => {
     const result = handleUserCommand('/help 2', context);
     expect(result.handled).toBe(true);
-    expect(result.message).toContain('帮助页 2/2');
-    expect(result.message).toContain('模型、技能与执行');
+    expect(result.message).toContain('帮助页 2/3');
+    expect(result.message).toContain('/provider reset - 恢复为服务默认框架');
     expect(result.message).toContain('/skills');
-    expect(result.message).toContain('/model page [页码]');
-    expect(result.message).toContain('翻页：/help 1 | /help 2');
+    expect(result.message).toContain('翻页：/help 1 | /help 3');
+  });
+
+  it('shows the third help page with remaining commands', () => {
+    const result = handleUserCommand('/help 3', context);
+    expect(result.handled).toBe(true);
+    expect(result.message).toContain('帮助页 3/3');
+    expect(result.message).toContain('/deploy-workspace - 发布当前 agent 工作区');
+    expect(result.message).toContain('/review commit [SHA] - 审查指定提交');
+    expect(result.message).toContain('翻页：/help 2 | /help 3');
   });
 
   it('supports /clear', () => {
