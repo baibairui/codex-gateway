@@ -3,10 +3,28 @@ import { describe, expect, it } from 'vitest';
 import { isFeishuUpdateMessageType, normalizeFeishuStructuredMessage } from '../src/utils/feishu-outgoing.js';
 
 describe('normalizeFeishuStructuredMessage', () => {
-  it('keeps native markdown messages instead of rewriting them as interactive cards', () => {
+  it('rewrites markdown messages as interactive cards for Feishu rendering', () => {
     expect(normalizeFeishuStructuredMessage('markdown', '# 标题\n- 列表')).toEqual({
-      msgType: 'markdown',
-      content: '# 标题\n- 列表',
+      msgType: 'interactive',
+      content: {
+        config: {
+          wide_screen_mode: true,
+          enable_forward: true,
+        },
+        header: {
+          template: 'blue',
+          title: {
+            tag: 'plain_text',
+            content: 'Markdown',
+          },
+        },
+        elements: [
+          {
+            tag: 'markdown',
+            content: '# 标题\n- 列表',
+          },
+        ],
+      },
     });
   });
 
@@ -19,8 +37,8 @@ describe('normalizeFeishuStructuredMessage', () => {
 });
 
 describe('isFeishuUpdateMessageType', () => {
-  it('allows markdown updates', () => {
-    expect(isFeishuUpdateMessageType('markdown')).toBe(true);
+  it('does not treat raw markdown as a direct update type', () => {
+    expect(isFeishuUpdateMessageType('markdown')).toBe(false);
   });
 
   it('still rejects unsupported update types', () => {
