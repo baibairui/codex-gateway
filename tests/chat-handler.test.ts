@@ -688,14 +688,24 @@ local_image_path=${sourcePath}`,
     const helpParsed = JSON.parse(helpPayload) as {
       __gateway_message__?: boolean;
       msg_type?: string;
-      content?: { header?: { title?: { content?: string } } };
+      content?: {
+        header?: { title?: { content?: string } };
+        elements?: Array<{ tag?: string; actions?: Array<{ text?: { content?: string } }> }>;
+      };
     };
     expect(providerParsed.__gateway_message__).toBe(true);
     expect(providerParsed.msg_type).toBe('interactive');
-    expect(providerParsed.content?.header?.title?.content).toBe('模型通道切换');
+    expect(providerParsed.content?.header?.title?.content).toBe('框架切换');
     expect(helpParsed.__gateway_message__).toBe(true);
     expect(helpParsed.msg_type).toBe('interactive');
     expect(helpParsed.content?.header?.title?.content).toBe('命令帮助');
+    const helpButtons = (helpParsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => item.actions ?? [])
+      .map((item) => item.text?.content ?? '');
+    expect(helpButtons).not.toContain('运行器切换');
+    expect(helpButtons).not.toContain('⬅️ 上一页');
+    expect(helpButtons).not.toContain('下一页 ➡️');
     expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n你好，我已开始处理。');
   });
 

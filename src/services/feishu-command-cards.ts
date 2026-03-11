@@ -42,7 +42,7 @@ const COMMAND_LABELS: Record<string, string> = {
   '/rename': '会话重命名',
   '/switch': '会话切换',
   '/model': '模型管理',
-  '/provider': '模型通道切换',
+  '/provider': '框架切换',
   '/models': '模型列表',
   '/skills': 'Skill 管理',
   '/search': '联网搜索',
@@ -59,7 +59,7 @@ const COMMAND_SUMMARIES: Record<string, string> = {
   '/agent': '查看当前 agent 状态，包括工作区和会话绑定情况。',
   '/skills': '查看当前会话生效的 skills，并快速切换不同范围。',
   '/model': '查看或切换当前模型，并在需要时恢复默认值。',
-  '/provider': '查看或切换当前 agent 的模型通道，并在 Codex 与 OpenCode 之间切换。',
+  '/provider': '查看或切换当前 agent 的执行框架，并在 Codex 与 OpenCode 之间切换。',
   '/models': '查看当前支持的模型集合，并回到当前模型设置。',
   '/search': '控制本会话的联网搜索开关，按需临时开启。',
   '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
@@ -232,9 +232,8 @@ function resolveCommandQuickActions(commandName: string, text: string): CommandQ
     const prev = Math.max(1, page - 1);
     const next = Math.min(total, page + 1);
     return [
-      { label: '⬅️ 上一页', cmd: `/help ${prev}`, type: page > 1 ? 'primary' : 'default' },
-      { label: '下一页 ➡️', cmd: `/help ${next}`, type: page < total ? 'primary' : 'default' },
-      { label: '运行器切换', cmd: '/provider', type: 'primary' },
+      { label: '上一页', cmd: `/help ${prev}`, type: page > 1 ? 'primary' : 'default' },
+      { label: '下一页', cmd: `/help ${next}`, type: page < total ? 'primary' : 'default' },
     ];
   }
   const staticActions = STATIC_QUICK_ACTIONS[normalized];

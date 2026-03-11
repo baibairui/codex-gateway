@@ -45,7 +45,7 @@ export class OpenCodeAuthFlowManager {
       FORCE_COLOR: '0',
     };
 
-    const command = `${shellEscape(input.opencodeBin)} auth login ${shellEscape(input.provider)}`;
+    const command = buildOpenCodeAuthCommand(input.opencodeBin, input.provider);
     if (!isExecutableAvailable(input.opencodeBin, env.PATH)) {
       await input.onExit({
         ok: false,
@@ -167,6 +167,10 @@ export class OpenCodeAuthFlowManager {
 
 export function buildOpenCodeAuthSessionKey(channel: Channel, userId: string, agentId: string): string {
   return `${channel}:${userId}:${agentId}`;
+}
+
+export function buildOpenCodeAuthCommand(opencodeBin: string, provider: string): string {
+  return `${shellEscape(opencodeBin)} auth login --provider ${shellEscape(provider)}`;
 }
 
 function sanitizeTerminalText(text: string): string {
