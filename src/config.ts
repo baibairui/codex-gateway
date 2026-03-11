@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { resolveCliProvider } from './services/cli-provider.js';
+import { resolveCliProvider, resolveOpenCodeBin } from './services/cli-provider.js';
 
 dotenv.config();
 
@@ -126,7 +126,7 @@ export const config = {
   allowFrom: optionalString('ALLOW_FROM', '*'),
   codexProvider: resolveCliProvider(process.env.CODEX_PROVIDER, process.env.CODEX_BIN),
   codexBin: process.env.CODEX_BIN ?? 'codex',
-  opencodeBin: process.env.OPENCODE_BIN ?? 'opencode',
+  opencodeBin: resolveOpenCodeBin(process.env.OPENCODE_BIN),
   codexModel: optionalStringUndefined('CODEX_MODEL'),
   codexSearch: process.env.CODEX_SEARCH === 'true',
   codexWorkdir: process.env.CODEX_WORKDIR ?? process.cwd(),
