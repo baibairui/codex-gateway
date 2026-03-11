@@ -146,4 +146,27 @@ describe('SessionStore', () => {
     expect(reopenedAgain.getModelOverride('u1', 'default')).toBe('gpt-5');
     expect(reopenedAgain.getModelOverride('u1', 'frontend')).toBeUndefined();
   });
+
+  it('persists provider overrides per agent across restarts', () => {
+    const pair = makeStorePair();
+    const store = pair.createStore();
+    store.createAgent('u1', {
+      agentId: 'frontend',
+      name: '前端Agent',
+      workspaceDir: '/tmp/frontend',
+    });
+
+    store.setProviderOverride('u1', 'default', 'codex');
+    store.setProviderOverride('u1', 'frontend', 'opencode');
+
+    const reopened = pair.createStore();
+    expect(reopened.getProviderOverride('u1', 'default')).toBe('codex');
+    expect(reopened.getProviderOverride('u1', 'frontend')).toBe('opencode');
+
+    reopened.clearProviderOverride('u1', 'frontend');
+
+    const reopenedAgain = pair.createStore();
+    expect(reopenedAgain.getProviderOverride('u1', 'default')).toBe('codex');
+    expect(reopenedAgain.getProviderOverride('u1', 'frontend')).toBeUndefined();
+  });
 });

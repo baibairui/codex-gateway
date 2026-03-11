@@ -11,8 +11,7 @@ import { BrowserManager } from './services/browser-manager.js';
 import { createBrowserAutomationBackend } from './services/browser-service.js';
 import { CodexRunner } from './services/codex-runner.js';
 import { createChatHandler } from './services/chat-handler.js';
-import { readCodexHomeDefaultModel } from './services/codex-home-config.js';
-import { writeCodexApiLoginConfig } from './services/codex-config-writer.js';
+import { getCliProviderSpec, readCliHomeDefaultModel, runnerHomeDirName, writeCliApiLoginConfig } from './services/cli-provider.js';
 import { startCodexDeviceLogin } from './services/codex-login-flow.js';
 import { buildFeishuApiLoginFormMessage, buildFeishuApiLoginResultMessage } from './services/feishu-command-cards.js';
 import { MemorySteward } from './services/memory-steward.js';
@@ -21,6 +20,7 @@ import { ReminderDispatcher } from './services/reminder-dispatcher.js';
 import { installReminderToolSkill } from './services/reminder-tool-skill.js';
 import { installFeishuOfficialOpsSkill } from './services/feishu-official-ops-skill.js';
 import { installGatewayBrowserSkill, syncManagedGlobalSkills } from './services/gateway-browser-skill.js';
+import { OpenCodeAuthFlowManager, buildOpenCodeAuthSessionKey } from './services/opencode-auth-flow.js';
 import { pushFeishuStartupHelp } from './services/startup-help.js';
 import { WeComApi } from './services/wecom-api.js';
 import { FeishuApi } from './services/feishu-api.js';
@@ -42,7 +42,9 @@ const agentsDir = resolveAgentsDir({
   dataDir,
 });
 const codexWorkdir = resolveCodexWorkdir(config.codexWorkdir, agentsDir);
-const codexHomeDir = path.join(dataDir, 'codex-home');
+const codexHomeDir = path.join(dataDir, runnerHomeDirName('codex'));
+const opencodeHomeDir = path.join(dataDir, runnerHomeDirName('opencode'));
+const cliProviderSpec = getCliProviderSpec(config.codexProvider);
 const feishuStatusSummary = buildFeishuStatusSummary({
   enabled: config.feishuEnabled,
   longConnection: config.feishuLongConnection,
@@ -54,7 +56,9 @@ const feishuStatusSummary = buildFeishuStatusSummary({
 
 log.info('服务启动初始化...', {
   port: config.port,
+  codexProvider: config.codexProvider,
   codexBin: config.codexBin,
+  opencodeBin: config.opencodeBin,
   codexModel: config.codexModel ?? '(codex cli default)',
   codexSearch: config.codexSearch,
   codexWorkdir,
@@ -68,7 +72,7 @@ log.info('服务启动初始化...', {
   browserApiBaseUrl: '(gateway-owned local only)',
   browserProfileDir: config.browserProfileDir ?? '(default)',
   codexWorkdirIsolation: config.codexWorkdirIsolation,
-  codexHomeDir,
+  codexHomeDir: config.codexProvider === 'opencode' ? opencodeHomeDir : codexHomeDir,
   runnerEnabled: config.runnerEnabled,
   memoryStewardEnabled: config.memoryStewardEnabled,
   memoryStewardIntervalHours: config.memoryStewardIntervalHours,
@@ -99,10 +103,12 @@ const activeBrowserApiBaseUrl = config.browserAutomationEnabled
 const internalApiBaseUrl = `http://127.0.0.1:${config.port}/internal`;
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
 fs.mkdirSync(codexHomeDir, { recursive: true });
+fs.mkdirSync(opencodeHomeDir, { recursive: true });
 fs.mkdirSync(feishuImageCacheDir, { recursive: true });
 
 log.debug('Agent 工作区目录已就绪', { agentsDir });
 const reminderDbPath = path.join(dataDir, 'reminders.db');
+const openCodeAuthFlowManager = new OpenCodeAuthFlowManager();
 
 const sessionStore = new SessionStore(path.join(dataDir, 'sessions.db'), {
   defaultWorkspaceDir: agentsDir,
@@ -120,6 +126,7 @@ log.debug('RateLimitStore 已初始化', {
 });
 
 const codexRunner = new CodexRunner({
+  provider: 'codex',
   codexBin: config.codexBin,
   workdir: codexWorkdir,
   timeoutMs: config.commandTimeoutMs,
@@ -134,10 +141,35 @@ const codexRunner = new CodexRunner({
   workdirIsolation: config.codexWorkdirIsolation,
   codexHomeDir,
 });
-log.debug('CodexRunner 已初始化');
+const opencodeRunner = new CodexRunner({
+  provider: 'opencode',
+  codexBin: config.opencodeBin,
+  workdir: codexWorkdir,
+  timeoutMs: config.commandTimeoutMs,
+  timeoutMinMs: config.commandTimeoutMinMs,
+  timeoutMaxMs: config.commandTimeoutMaxMs,
+  timeoutPerCharMs: config.commandTimeoutPerCharMs,
+  browserApiBaseUrl: activeBrowserApiBaseUrl,
+  internalApiBaseUrl,
+  internalApiToken,
+  gatewayRootDir,
+  sandbox: config.codexSandbox,
+  workdirIsolation: config.codexWorkdirIsolation,
+  codexHomeDir: opencodeHomeDir,
+});
+log.debug('Runners 已初始化');
 
-function resolveChatDefaultModel(): string | undefined {
-  return readCodexHomeDefaultModel(codexHomeDir) ?? config.codexModel;
+function resolveRunnerHomeDir(provider: 'codex' | 'opencode'): string {
+  return provider === 'opencode' ? opencodeHomeDir : codexHomeDir;
+}
+
+function resolveRunner(provider: 'codex' | 'opencode'): CodexRunner {
+  return provider === 'opencode' ? opencodeRunner : codexRunner;
+}
+
+function resolveChatDefaultModel(provider: 'codex' | 'opencode'): string | undefined {
+  return readCliHomeDefaultModel(provider, resolveRunnerHomeDir(provider))
+    ?? (provider === config.codexProvider ? config.codexModel : undefined);
 }
 
 const workspacePublisher = new WorkspacePublisher({
@@ -375,14 +407,17 @@ const handleChatText = createChatHandler({
   sessionStore,
   rateLimitStore,
   codexRunner,
-  codexHomeDir,
+  codexHomeDir: resolveRunnerHomeDir(config.codexProvider),
   agentWorkspaceManager,
   workspacePublisher,
   runnerEnabled: config.runnerEnabled,
+  defaultProvider: config.codexProvider,
   resolveDefaultModel: resolveChatDefaultModel,
+  resolveRunner,
   defaultSearch: config.codexSearch,
   reminderDbPath,
   sendText,
+  openCodeAuthFlowManager,
 });
 
 const reminderStore = new ReminderStore(reminderDbPath);
@@ -735,14 +770,20 @@ async function appDepsHandleFeishuCardAction(input: {
   action: string;
   value: Record<string, unknown>;
 }): Promise<void> {
+  const currentAgent = sessionStore.getCurrentAgent(resolveUserKey(input.userId));
+  const runtimeProvider = sessionStore.getProviderOverride?.(resolveUserKey(input.userId), currentAgent.agentId) ?? config.codexProvider;
+  const runtimeProviderSpec = getCliProviderSpec(runtimeProvider);
+  const runtimeRunner = resolveRunner(runtimeProvider);
+  const runtimeHomeDir = resolveRunnerHomeDir(runtimeProvider);
   if (input.action === 'codex_login.start_device_auth') {
     try {
       await startCodexDeviceLogin({
+        provider: runtimeProvider,
         channel: 'feishu',
         userId: input.userId,
         sendText,
-        codexHomeDir,
-        codexRunner,
+        codexHomeDir: runtimeHomeDir,
+        codexRunner: runtimeRunner,
       });
     } catch (error) {
       log.error('飞书设备授权登录失败', {
@@ -754,8 +795,33 @@ async function appDepsHandleFeishuCardAction(input: {
     return;
   }
 
+  if (input.action === 'opencode_login.start_provider_auth') {
+    const providerId = extractCardField(input.value, 'provider_id') ?? '';
+    if (!providerId) {
+      await sendText('feishu', input.userId, '❌ 缺少 OpenCode provider，无法启动登录。');
+      return;
+    }
+    const authSessionKey = buildOpenCodeAuthSessionKey('feishu', input.userId, currentAgent.agentId);
+    await openCodeAuthFlowManager.start({
+      key: authSessionKey,
+      provider: providerId,
+      opencodeBin: config.opencodeBin,
+      cliHomeDir: opencodeHomeDir,
+      cwd: currentAgent.workspaceDir,
+      baseEnv: process.env,
+      onOutput: async (text) => {
+        await sendText('feishu', input.userId, text);
+      },
+      onExit: async (result) => {
+        await sendText('feishu', input.userId, result.ok ? `✅ ${result.message}` : `❌ ${result.message}`);
+      },
+    });
+    return;
+  }
+
   if (input.action === 'codex_login.open_api_form') {
     await sendText('feishu', input.userId, buildFeishuApiLoginFormMessage({
+      provider: runtimeProvider,
       baseUrl: extractCardField(input.value, 'base_url'),
       model: extractCardField(input.value, 'model'),
     }));
@@ -764,25 +830,28 @@ async function appDepsHandleFeishuCardAction(input: {
 
   if (input.action === 'codex_login.submit_api_credentials') {
     try {
-      const result = await writeCodexApiLoginConfig({
-        codexHomeDir,
+      const result = await writeCliApiLoginConfig({
+        provider: runtimeProvider,
+        cliHomeDir: runtimeHomeDir,
         baseUrl: extractCardField(input.value, 'base_url') ?? '',
         apiKey: extractCardField(input.value, 'api_key') ?? '',
-        model: extractCardField(input.value, 'model') ?? 'gpt-5.3-codex',
+        model: extractCardField(input.value, 'model') ?? runtimeProviderSpec.defaultModel,
       });
       await sendText('feishu', input.userId, buildFeishuApiLoginResultMessage({
+        provider: runtimeProvider,
         ok: true,
-        message: '项目内 Codex API 配置已更新。',
+        message: `项目内 ${runtimeProviderSpec.label} API 配置已更新。`,
         baseUrl: result.baseUrl,
         model: result.model,
         maskedApiKey: result.maskedApiKey,
       }));
     } catch (error) {
       await sendText('feishu', input.userId, buildFeishuApiLoginResultMessage({
+        provider: runtimeProvider,
         ok: false,
         message: error instanceof Error ? error.message : String(error),
         baseUrl: extractCardField(input.value, 'base_url') ?? '',
-        model: extractCardField(input.value, 'model') ?? 'gpt-5.3-codex',
+        model: extractCardField(input.value, 'model') ?? runtimeProviderSpec.defaultModel,
       }));
     }
     return;

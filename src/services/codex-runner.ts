@@ -1,9 +1,13 @@
+import fs from 'node:fs';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createLogger } from '../utils/logger.js';
 import { buildCodexSpawnSpec, type CodexWorkdirIsolationMode } from './codex-bwrap.js';
+import { getCliProviderSpec, type CliProvider } from './cli-provider.js';
 
 const log = createLogger('CodexRunner');
+const execFileAsync = promisify(execFile);
 
 export interface BrowserAutomationRuntimeConfig {
   apiBaseUrl: string;
@@ -54,6 +58,7 @@ export interface ParsedCodexOutput {
 }
 
 interface CodexRunnerOptions {
+  provider?: CliProvider;
   codexBin?: string;
   workdir?: string;
   timeoutMs?: number;
@@ -113,6 +118,7 @@ function* iterateCodexEvents(raw: string): Generator<Record<string, unknown>> {
 
 export class CodexRunner {
   private readonly codexBin: string;
+  private readonly provider: CliProvider;
   private readonly workdir: string;
   private readonly timeoutMs?: number;
   private readonly timeoutMinMs: number;
@@ -126,6 +132,7 @@ export class CodexRunner {
   private readonly codexHomeDir?: string;
 
   constructor(options: CodexRunnerOptions = {}) {
+    this.provider = options.provider ?? 'codex';
     this.codexBin = options.codexBin ?? 'codex';
     this.workdir = options.workdir ?? process.cwd();
     this.timeoutMs = options.timeoutMs;
@@ -147,6 +154,7 @@ export class CodexRunner {
     this.codexHomeDir = options.codexHomeDir?.trim() || undefined;
     log.debug('CodexRunner 构造完成', {
       codexBin: this.codexBin,
+      provider: this.provider,
       workdir: this.workdir,
       timeoutMs: this.timeoutMs ?? '(adaptive)',
       timeoutMinMs: this.timeoutMinMs,
@@ -161,7 +169,7 @@ export class CodexRunner {
   }
 
   run(input: CodexRunInput): Promise<CodexRunResult> {
-    const args = buildCodexArgs(input, this.sandbox);
+    const args = buildCodexArgs(input, this.sandbox, this.provider);
     return this.runJsonl({
       args,
       prompt: input.prompt,
@@ -194,7 +202,7 @@ export class CodexRunner {
   }
 
   review(input: CodexReviewInput): Promise<{ rawOutput: string }> {
-    const args = buildCodexReviewArgs(input, this.sandbox);
+    const args = buildCodexReviewArgs(input, this.sandbox, this.provider);
     const timeoutHint = input.prompt ?? input.target ?? input.mode;
     return this.runJsonl({
       args,
@@ -215,11 +223,15 @@ export class CodexRunner {
   }
 
   login(input: CodexLoginInput): Promise<void> {
+    if (!getCliProviderSpec(this.provider).supportsDeviceAuth) {
+      return Promise.reject(new Error(`${getCliProviderSpec(this.provider).label} does not support gateway device auth login`));
+    }
     return new Promise((resolve, reject) => {
       const args = ['login', '--device-auth'];
       log.info('Codex 登录进程启动', { bin: this.codexBin, args });
 
       const spawnSpec = buildCodexSpawnSpec({
+        provider: this.provider,
         codexBin: this.codexBin,
         args,
         cwd: this.workdir,
@@ -231,6 +243,7 @@ export class CodexRunner {
       const child = spawn(spawnSpec.command, spawnSpec.args, {
         cwd: spawnSpec.cwd,
         env: spawnSpec.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
 
       // 登录阶段最长等待 15 分钟
@@ -270,6 +283,17 @@ export class CodexRunner {
     });
   }
 
+  async listModels(): Promise<{ fetchedAt?: string; models: Array<{ slug: string; visibility: 'list' | 'hide' | string; supportedInApi: boolean }> }> {
+    if (this.provider === 'opencode') {
+      return this.listOpenCodeModels();
+    }
+    return loadCodexModelsFromHome(this.codexHomeDir);
+  }
+
+  getProvider(): CliProvider {
+    return this.provider;
+  }
+
   private runJsonl(options: {
     args: string[];
     prompt: string;
@@ -297,6 +321,7 @@ export class CodexRunner {
 
     return new Promise<{ rawOutput: string; threadId?: string }>((resolve, reject) => {
       const spawnSpec = buildCodexSpawnSpec({
+        provider: this.provider,
         codexBin: this.codexBin,
         args: options.args,
         cwd: options.workdir ?? this.workdir,
@@ -308,6 +333,7 @@ export class CodexRunner {
       const child = spawn(spawnSpec.command, spawnSpec.args, {
         cwd: spawnSpec.cwd,
         env: spawnSpec.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
 
       log.debug('Codex 子进程已 spawn', { pid: child.pid });
@@ -340,7 +366,7 @@ export class CodexRunner {
             stderrLength: stderr.length,
             eventCount,
           });
-          reject(new Error(`codex timeout after ${effectiveTimeoutMs}ms`));
+          reject(new Error(`${this.provider} timeout after ${effectiveTimeoutMs}ms`));
         }, effectiveTimeoutMs);
       };
       refreshIdleTimeout();
@@ -413,7 +439,7 @@ export class CodexRunner {
             stderr: stderr.substring(0, 500),
             stdout: stdout.substring(0, 200),
           });
-          reject(new Error(`codex exited with code ${code}: ${stderr || stdout}`));
+          reject(new Error(`${this.provider} exited with code ${code}: ${stderr || stdout}`));
           return;
         }
 
@@ -434,7 +460,7 @@ export class CodexRunner {
 
         let threadId = observedThreadId;
         if (!threadId) {
-          threadId = parseCodexJsonl(stdout).threadId;
+          threadId = parseProviderJsonl(this.provider, stdout).threadId;
         }
         if (options.requireThreadId && !threadId) {
           log.error('Codex 输出中未找到 threadId', {
@@ -466,12 +492,48 @@ export class CodexRunner {
     const byPrompt = min + Math.max(0, prompt.length) * Math.max(0, this.timeoutPerCharMs);
     return Math.min(max, byPrompt);
   }
+
+  private async listOpenCodeModels(): Promise<{ fetchedAt?: string; models: Array<{ slug: string; visibility: 'list' | 'hide' | string; supportedInApi: boolean }> }> {
+    try {
+      const env = buildCodexChildEnv(process.env, {});
+      if (this.codexHomeDir?.trim()) {
+        const resolvedHome = this.codexHomeDir.trim();
+        env.HOME = resolvedHome;
+        env.XDG_CONFIG_HOME = `${resolvedHome}/.config`;
+        env.XDG_CACHE_HOME = `${resolvedHome}/.cache`;
+        env.XDG_DATA_HOME = `${resolvedHome}/.local/share`;
+      }
+      const { stdout } = await execFileAsync(this.codexBin, ['models', '--format', 'json'], {
+        cwd: this.workdir,
+        env,
+        maxBuffer: 1024 * 1024,
+      });
+      return parseOpenCodeModels(stdout);
+    } catch (error) {
+      log.warn('OpenCode models 查询失败，回退为空模型列表', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { models: [] };
+    }
+  }
 }
 
 export function buildCodexArgs(
   input: Pick<CodexRunInput, 'prompt' | 'threadId' | 'model' | 'search' | 'workdir' | 'reminderToolContext'>,
   sandbox: 'full-auto' | 'none',
+  provider: CliProvider = 'codex',
 ): string[] {
+  if (provider === 'opencode') {
+    const args: string[] = ['run', '--print', '--format', 'json'];
+    if (input.threadId?.trim()) {
+      args.push('--session', input.threadId.trim());
+    }
+    if (input.model?.trim()) {
+      args.push('--model', input.model.trim());
+    }
+    args.push(input.prompt);
+    return args;
+  }
   const sandboxFlag = sandbox === 'none'
     ? '--dangerously-bypass-approvals-and-sandbox'
     : '--full-auto';
@@ -497,7 +559,16 @@ export function buildCodexArgs(
 export function buildCodexReviewArgs(
   input: Pick<CodexReviewInput, 'mode' | 'target' | 'prompt' | 'model' | 'search' | 'workdir'>,
   sandbox: 'full-auto' | 'none',
+  provider: CliProvider = 'codex',
 ): string[] {
+  if (provider === 'opencode') {
+    const args: string[] = ['run', '--print', '--format', 'json'];
+    if (input.model?.trim()) {
+      args.push('--model', input.model.trim());
+    }
+    args.push(buildOpenCodeReviewPrompt(input));
+    return args;
+  }
   const sandboxFlag = sandbox === 'none'
     ? '--dangerously-bypass-approvals-and-sandbox'
     : '--full-auto';
@@ -610,6 +681,11 @@ function handleCodexLine(
       log.info('Codex thread.started', { threadId: event.thread_id });
     }
 
+    if (typeof event.sessionID === 'string') {
+      onThreadStarted?.(event.sessionID);
+      log.info('OpenCode session event', { threadId: event.sessionID, type: event.type });
+    }
+
     if ((event.type === 'item.started' || event.type === 'item.completed') && item?.type === 'mcp_tool_call') {
       log.info(`Codex ${String(event.type)} mcp_tool_call`, summarizeCodexItem(item));
     }
@@ -623,8 +699,142 @@ function handleCodexLine(
         onMessage(item.text);
       }
     }
+
+    if (event.type === 'text' && onMessage) {
+      if (typeof event.text === 'string' && event.text) {
+        onMessage(event.text);
+        return;
+      }
+      const part = event.part as Record<string, unknown> | undefined;
+      if (typeof part?.text === 'string' && part.text) {
+        onMessage(part.text);
+      }
+    }
   } catch {
     log.debug('Codex stdout 非 JSON 行', { line: line.substring(0, 100) });
+  }
+}
+
+function buildOpenCodeReviewPrompt(
+  input: Pick<CodexReviewInput, 'mode' | 'target' | 'prompt'>,
+): string {
+  const lines = ['Review this code carefully. Focus on bugs, regressions, risks, and missing tests.'];
+  if (input.mode === 'uncommitted') {
+    lines.push('Review the current uncommitted changes in the repository.');
+  } else if (input.mode === 'base' && input.target) {
+    lines.push(`Review the current branch against base branch ${input.target}.`);
+  } else if (input.mode === 'commit' && input.target) {
+    lines.push(`Review commit ${input.target}.`);
+  }
+  if (input.prompt?.trim()) {
+    lines.push(input.prompt.trim());
+  }
+  return lines.join('\n');
+}
+
+function parseProviderJsonl(provider: CliProvider, raw: string): ParsedCodexOutput {
+  if (provider === 'opencode') {
+    return parseOpenCodeJsonl(raw);
+  }
+  return parseCodexJsonl(raw);
+}
+
+function parseOpenCodeJsonl(raw: string): ParsedCodexOutput {
+  let threadId: string | undefined;
+  let answer = '';
+  for (const event of iterateCodexEvents(raw)) {
+    if (typeof event.sessionID === 'string') {
+      threadId = event.sessionID;
+    }
+    if (event.type === 'text') {
+      if (typeof event.text === 'string') {
+        answer += event.text;
+        continue;
+      }
+      const part = event.part as Record<string, unknown> | undefined;
+      if (typeof part?.text === 'string') {
+        answer += part.text;
+      }
+    }
+  }
+  return {
+    threadId,
+    answer: answer || '（OpenCode 未返回可解析内容）',
+  };
+}
+
+function parseOpenCodeModels(raw: string): { fetchedAt?: string; models: Array<{ slug: string; visibility: 'list' | 'hide' | string; supportedInApi: boolean }> } {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const values = Array.isArray(parsed)
+      ? parsed
+      : (parsed && typeof parsed === 'object'
+        ? (Array.isArray((parsed as Record<string, unknown>).models) ? (parsed as Record<string, unknown>).models as unknown[] : [])
+        : []);
+    const models = values
+      .map((item) => normalizeOpenCodeModelEntry(item))
+      .filter((item): item is { slug: string; visibility: 'list'; supportedInApi: true } => !!item);
+    return {
+      fetchedAt: new Date().toISOString(),
+      models,
+    };
+  } catch {
+    return { models: [] };
+  }
+}
+
+function normalizeOpenCodeModelEntry(input: unknown): { slug: string; visibility: 'list'; supportedInApi: true } | undefined {
+  if (typeof input === 'string' && input.trim()) {
+    return { slug: input.trim(), visibility: 'list', supportedInApi: true };
+  }
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+  const data = input as Record<string, unknown>;
+  const providerId = typeof data.providerID === 'string' ? data.providerID.trim() : '';
+  const id = typeof data.id === 'string' ? data.id.trim() : '';
+  const name = typeof data.name === 'string' ? data.name.trim() : '';
+  const slug = id || name;
+  if (!slug) {
+    return undefined;
+  }
+  return {
+    slug: providerId && !slug.includes('/') ? `${providerId}/${slug}` : slug,
+    visibility: 'list',
+    supportedInApi: true,
+  };
+}
+
+function loadCodexModelsFromHome(codexHomeDir: string | undefined): { fetchedAt?: string; models: Array<{ slug: string; visibility: 'list' | 'hide' | string; supportedInApi: boolean }> } {
+  const cachePath = codexHomeDir?.trim() ? `${codexHomeDir.trim()}/models_cache.json` : undefined;
+  if (!cachePath) {
+    return { models: [] };
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(cachePath, 'utf8')) as { fetched_at?: string; models?: unknown[] };
+    const models = (raw.models ?? [])
+      .map((item) => {
+        if (!item || typeof item !== 'object') {
+          return undefined;
+        }
+        const data = item as Record<string, unknown>;
+        const slug = typeof data.slug === 'string' ? data.slug : '';
+        if (!slug) {
+          return undefined;
+        }
+        return {
+          slug,
+          visibility: typeof data.visibility === 'string' ? data.visibility : 'list',
+          supportedInApi: data.supported_in_api !== false,
+        };
+      })
+      .filter((item): item is { slug: string; visibility: 'list' | 'hide' | string; supportedInApi: boolean } => !!item);
+    return {
+      fetchedAt: raw.fetched_at,
+      models,
+    };
+  } catch {
+    return { models: [] };
   }
 }
 

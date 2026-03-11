@@ -28,7 +28,9 @@ const CONFIG_ENV_KEYS = [
   'RATE_LIMIT_MAX_MESSAGES',
   'RATE_LIMIT_WINDOW_SECONDS',
   'ALLOW_FROM',
+  'CODEX_PROVIDER',
   'CODEX_BIN',
+  'OPENCODE_BIN',
   'CODEX_MODEL',
   'CODEX_SEARCH',
   'CODEX_WORKDIR',
@@ -142,6 +144,28 @@ describe('config browser automation defaults', () => {
     });
 
     expect(config.browserAutomationEnabled).toBe(false);
+  });
+});
+
+describe('config cli provider', () => {
+  it('defaults to codex', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'false',
+      CODEX_BIN: 'codex',
+    });
+
+    expect(config.codexProvider).toBe('codex');
+  });
+
+  it('infers opencode from the configured binary', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'false',
+      CODEX_BIN: '/usr/local/bin/opencode',
+    });
+
+    expect(config.codexProvider).toBe('opencode');
   });
 });
 

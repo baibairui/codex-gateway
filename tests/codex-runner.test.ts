@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
+  execFile: vi.fn(),
 }));
 
 import { spawn } from 'node:child_process';
@@ -150,6 +151,26 @@ describe('buildCodexArgs', () => {
       'remind me later',
     ]);
   });
+
+  it('builds opencode run args with session and model', () => {
+    const args = buildCodexArgs(
+      { prompt: 'hello', threadId: 'sess_123', model: 'openai/gpt-5' },
+      'full-auto',
+      'opencode',
+    );
+
+    expect(args).toEqual([
+      'run',
+      '--print',
+      '--format',
+      'json',
+      '--session',
+      'sess_123',
+      '--model',
+      'openai/gpt-5',
+      'hello',
+    ]);
+  });
 });
 
 describe('buildCodexReviewArgs', () => {
@@ -190,6 +211,24 @@ describe('buildCodexReviewArgs', () => {
       'main',
       'focus on regressions',
     ]);
+  });
+
+  it('builds opencode review as a run prompt', () => {
+    const args = buildCodexReviewArgs(
+      { mode: 'base', target: 'master', prompt: 'focus on auth regressions', model: 'openai/gpt-5' },
+      'none',
+      'opencode',
+    );
+    expect(args.slice(0, 6)).toEqual([
+      'run',
+      '--print',
+      '--format',
+      'json',
+      '--model',
+      'openai/gpt-5',
+    ]);
+    expect(args.at(-1)).toContain('base branch master');
+    expect(args.at(-1)).toContain('focus on auth regressions');
   });
 
 });
