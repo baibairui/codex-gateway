@@ -874,18 +874,11 @@ function buildAgentMarkdownCardContent(text: string): Record<string, unknown> | 
     config: {
       wide_screen_mode: true,
     },
-    header: {
-      template: 'blue',
-      title: {
-        tag: 'plain_text',
-        content: headerTitle,
-      },
-    },
     body: {
       elements: [
         {
           tag: 'markdown',
-          content: body,
+          content: `**${headerTitle}**\n\n${body}`,
         },
       ],
     },
