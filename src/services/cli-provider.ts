@@ -64,6 +64,40 @@ export function runnerHomeDirName(provider: CliProvider): string {
   return provider === 'opencode' ? 'opencode-home' : 'codex-home';
 }
 
+export function resolveOpenCodeBin(explicitBin: string | undefined, homeDir = process.env.HOME): string {
+  const explicit = explicitBin?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  if (homeDir?.trim()) {
+    const localBin = path.join(path.resolve(homeDir.trim()), '.local', 'bin', 'opencode');
+    if (isExecutableFile(localBin)) {
+      return localBin;
+    }
+  }
+  return 'opencode';
+}
+
+export function isExecutableAvailable(bin: string, envPath = process.env.PATH): boolean {
+  const trimmed = bin.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed.includes('/')) {
+    return isExecutableFile(trimmed);
+  }
+  for (const dir of (envPath ?? '').split(path.delimiter)) {
+    const candidateDir = dir.trim();
+    if (!candidateDir) {
+      continue;
+    }
+    if (isExecutableFile(path.join(candidateDir, trimmed))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function readCliHomeDefaultModel(provider: CliProvider, cliHomeDir: string | undefined): string | undefined {
   if (!cliHomeDir) {
     return undefined;
@@ -221,6 +255,15 @@ function normalizeOpenCodeModel(input: string): string {
     return trimmed;
   }
   return `gateway/${trimmed}`;
+}
+
+function isExecutableFile(filePath: string): boolean {
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function maskApiKey(value: string): string {
