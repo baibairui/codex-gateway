@@ -24,6 +24,9 @@ export interface UserCommandResult {
   disableAgentSkillName?: string;
   setModel?: string;
   clearModel?: boolean;
+  queryProvider?: boolean;
+  setProvider?: 'codex' | 'opencode';
+  clearProvider?: boolean;
   querySearch?: boolean;
   setSearchEnabled?: boolean;
   reviewMode?: 'uncommitted' | 'base' | 'commit';
@@ -114,6 +117,9 @@ const HELP_PAGES: Array<{ title: string; lines: string[] }> = [
       '/model page [页码] - 查看更多模型',
       '/model [模型名] - 切换模型',
       '/model reset - 重置为默认模型',
+      '/provider - 查看当前运行器并切换',
+      '/provider codex|opencode - 切换当前 agent 运行器',
+      '/provider reset - 重置为服务默认运行器',
       '/skills - 查看当前会话生效 skill 列表（全局 + 当前 agent）',
       '/skills global - 查看全局 skill',
       '/skills agent - 查看当前 agent skill',
@@ -316,6 +322,32 @@ export function handleUserCommand(content: string, context: UserCommandContext =
       return {
         handled: true,
         setModel: model,
+      };
+    }
+    case '/provider':
+    case '/runtime': {
+      const value = (parts[1] ?? '').trim().toLowerCase();
+      if (!value) {
+        return {
+          handled: true,
+          queryProvider: true,
+        };
+      }
+      if (value === 'reset' || value === 'default' || value === 'clear') {
+        return {
+          handled: true,
+          clearProvider: true,
+        };
+      }
+      if (value === 'codex' || value === 'opencode') {
+        return {
+          handled: true,
+          setProvider: value,
+        };
+      }
+      return {
+        handled: true,
+        message: '用法：/provider | /provider codex | /provider opencode | /provider reset',
       };
     }
     case '/models':

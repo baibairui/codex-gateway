@@ -145,6 +145,13 @@ describe('handleUserCommand', () => {
     expect(handleUserCommand('/model gpt-5-codex', context).setModel).toBe('gpt-5-codex');
   });
 
+  it('supports /provider query and switch', () => {
+    expect(handleUserCommand('/provider', context).queryProvider).toBe(true);
+    expect(handleUserCommand('/provider codex', context).setProvider).toBe('codex');
+    expect(handleUserCommand('/provider opencode', context).setProvider).toBe('opencode');
+    expect(handleUserCommand('/provider reset', context).clearProvider).toBe(true);
+  });
+
   it('supports model paging aliases and /search', () => {
     expect(handleUserCommand('/model page 2', context).queryModel).toBe(true);
     expect(handleUserCommand('/model page 2', context).queryModelsPage).toBe(2);

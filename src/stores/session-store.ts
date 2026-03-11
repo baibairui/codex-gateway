@@ -235,22 +235,64 @@ export class SessionStore {
     return typeof row?.modelOverride === 'string' && row.modelOverride ? row.modelOverride : undefined;
   }
 
+  getProviderOverride(userId: string, agentId: string): 'codex' | 'opencode' | undefined {
+    const row = this.db
+      .prepare(`
+        SELECT provider_override AS providerOverride
+        FROM user_agent_settings
+        WHERE user_id = ? AND agent_id = ?
+      `)
+      .get(userId, agentId) as { providerOverride?: string | null } | undefined;
+    return row?.providerOverride === 'codex' || row?.providerOverride === 'opencode'
+      ? row.providerOverride
+      : undefined;
+  }
+
   setModelOverride(userId: string, agentId: string, model: string): void {
     this.db
       .prepare(`
-        INSERT INTO user_agent_settings(user_id, agent_id, model_override, updated_at)
-        VALUES(?, ?, ?, ?)
+        INSERT INTO user_agent_settings(user_id, agent_id, model_override, provider_override, updated_at)
+        VALUES(?, ?, ?, COALESCE((SELECT provider_override FROM user_agent_settings WHERE user_id = ? AND agent_id = ?), NULL), ?)
         ON CONFLICT(user_id, agent_id) DO UPDATE SET
           model_override = excluded.model_override,
           updated_at = excluded.updated_at
       `)
-      .run(userId, agentId, model.trim(), this.nextTimestamp());
+      .run(userId, agentId, model.trim(), userId, agentId, this.nextTimestamp());
+  }
+
+  setProviderOverride(userId: string, agentId: string, provider: 'codex' | 'opencode'): void {
+    this.db
+      .prepare(`
+        INSERT INTO user_agent_settings(user_id, agent_id, model_override, provider_override, updated_at)
+        VALUES(?, ?, COALESCE((SELECT model_override FROM user_agent_settings WHERE user_id = ? AND agent_id = ?), NULL), ?, ?)
+        ON CONFLICT(user_id, agent_id) DO UPDATE SET
+          provider_override = excluded.provider_override,
+          updated_at = excluded.updated_at
+      `)
+      .run(userId, agentId, userId, agentId, provider, this.nextTimestamp());
   }
 
   clearModelOverride(userId: string, agentId: string): boolean {
     const result = this.db
-      .prepare('DELETE FROM user_agent_settings WHERE user_id = ? AND agent_id = ?')
-      .run(userId, agentId) as { changes?: number };
+      .prepare(`
+        UPDATE user_agent_settings
+        SET model_override = NULL, updated_at = ?
+        WHERE user_id = ? AND agent_id = ?
+      `)
+      .run(this.nextTimestamp(), userId, agentId) as { changes?: number };
+    this.cleanupEmptySettings(userId, agentId);
+    return (result.changes ?? 0) > 0;
+  }
+
+  clearProviderOverride(userId: string, agentId: string): boolean {
+    const result = this.db
+      .prepare(`
+        UPDATE user_agent_settings
+        SET provider_override = NULL, updated_at = ?
+        WHERE user_id = ? AND agent_id = ?
+      `)
+      .run(this.nextTimestamp(), userId, agentId) as { changes?: number };
+    this.cleanupEmptySettings(userId, agentId);
     return (result.changes ?? 0) > 0;
   }
 
@@ -444,6 +486,7 @@ export class SessionStore {
         user_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
         model_override TEXT,
+        provider_override TEXT,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY(user_id, agent_id)
       );
@@ -451,6 +494,7 @@ export class SessionStore {
 
     this.ensureColumn('user_session', 'bound_identity_version', 'TEXT');
     this.ensureColumn('user_agent_session', 'bound_identity_version', 'TEXT');
+    this.ensureColumn('user_agent_settings', 'provider_override', 'TEXT');
   }
 
   private getCustomAgent(userId: string, agentId: string): AgentRecord | undefined {
@@ -603,6 +647,18 @@ export class SessionStore {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  private cleanupEmptySettings(userId: string, agentId: string): void {
+    this.db
+      .prepare(`
+        DELETE FROM user_agent_settings
+        WHERE user_id = ?
+          AND agent_id = ?
+          AND model_override IS NULL
+          AND provider_override IS NULL
+      `)
+      .run(userId, agentId);
   }
 
   private ensureColumn(table: string, column: string, definition: string): void {

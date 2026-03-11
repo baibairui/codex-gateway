@@ -29,6 +29,26 @@ describe('buildFeishuLoginChoiceMessage', () => {
     expect(actions.some((item) => item.text?.content === '设备授权登录' && item.value?.gateway_action === 'codex_login.start_device_auth')).toBe(true);
     expect(actions.some((item) => item.text?.content === 'API URL / Key 登录' && item.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
   });
+
+  it('hides device auth when provider does not support it', () => {
+    const payload = buildFeishuLoginChoiceMessage({
+      provider: 'opencode',
+      providerLabel: 'OpenCode',
+      supportsDeviceAuth: false,
+    });
+    const parsed = JSON.parse(payload) as {
+      content?: {
+        elements?: Array<Record<string, unknown>>;
+      };
+    };
+    const actions = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
+        text?: { content?: string };
+      }>;
+    expect(actions.some((item) => item.text?.content === '设备授权登录')).toBe(false);
+    expect(actions.some((item) => item.text?.content === 'API URL / Key 登录')).toBe(true);
+  });
 });
 
 describe('buildFeishuApiLoginFormMessage', () => {

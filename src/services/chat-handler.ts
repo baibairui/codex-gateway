@@ -9,6 +9,7 @@ import {
   buildFeishuLoginChoiceMessage,
   formatCommandOutboundMessage,
 } from './feishu-command-cards.js';
+import { buildOpenCodeAuthSessionKey, type OpenCodeAuthFlowManager } from './opencode-auth-flow.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
 import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
 import { createLogger } from '../utils/logger.js';
@@ -36,6 +37,9 @@ interface SessionStoreLike {
   getModelOverride?(userId: string, agentId: string): string | undefined;
   setModelOverride?(userId: string, agentId: string, model: string): void;
   clearModelOverride?(userId: string, agentId: string): boolean;
+  getProviderOverride?(userId: string, agentId: string): 'codex' | 'opencode' | undefined;
+  setProviderOverride?(userId: string, agentId: string, provider: 'codex' | 'opencode'): void;
+  clearProviderOverride?(userId: string, agentId: string): boolean;
   listDetailed(userId: string, agentId: string): SessionListItem[];
   resolveSwitchTarget(userId: string, agentId: string, target: string): string | undefined;
   renameSession(targetThreadId: string, name: string): boolean;
@@ -74,6 +78,15 @@ interface CodexRunnerLike {
   login(input: {
     onMessage?: (text: string) => void;
   }): Promise<void>;
+  listModels?(): Promise<{
+    fetchedAt?: string;
+    models: Array<{
+      slug: string;
+      visibility: 'list' | 'hide' | string;
+      supportedInApi: boolean;
+    }>;
+  }>;
+  getProvider?(): 'codex' | 'opencode';
 }
 
 interface WorkspacePublisherLike {
@@ -114,7 +127,9 @@ interface ChatHandlerDeps {
   workspacePublisher?: WorkspacePublisherLike;
   runnerEnabled: boolean;
   defaultModel?: string;
-  resolveDefaultModel?: () => string | undefined;
+  defaultProvider?: 'codex' | 'opencode';
+  resolveDefaultModel?: (provider: 'codex' | 'opencode') => string | undefined;
+  resolveRunner?: (provider: 'codex' | 'opencode') => CodexRunnerLike;
   defaultSearch: boolean;
   reminderDbPath: string;
   sendText: (channel: Channel, userId: string, content: string) => Promise<void>;
@@ -133,6 +148,7 @@ interface ChatHandlerDeps {
     enableGlobalSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
     disableAgentSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
   };
+  openCodeAuthFlowManager?: OpenCodeAuthFlowManager;
 }
 
 interface ReminderTriggerInput {
@@ -539,6 +555,33 @@ export function createChatHandler(deps: ChatHandlerDeps) {
   const onboardingKickoffInFlight = new Set<string>();
   const skillManager = deps.skillManager ?? new AgentSkillManager();
 
+  function getCurrentProvider(userKey: string, agentId: string): 'codex' | 'opencode' {
+    return deps.sessionStore.getProviderOverride?.(userKey, agentId)
+      ?? deps.defaultProvider
+      ?? deps.codexRunner.getProvider?.()
+      ?? 'codex';
+  }
+
+  function getRunner(provider: 'codex' | 'opencode'): CodexRunnerLike {
+    return deps.resolveRunner?.(provider) ?? deps.codexRunner;
+  }
+
+  function getRunnerLabel(provider: 'codex' | 'opencode'): string {
+    return provider === 'opencode' ? 'OpenCode' : 'Codex';
+  }
+
+  function hasExplicitProviderSelection(userKey: string, agentId: string): boolean {
+    return !!deps.sessionStore.getProviderOverride?.(userKey, agentId);
+  }
+
+  async function resolveModelsSnapshot(provider: 'codex' | 'opencode') {
+    const runner = getRunner(provider);
+    if (runner.listModels) {
+      return runner.listModels();
+    }
+    return loadCodexModels();
+  }
+
   function getSessionState(userKey: string, agentId: string): { threadId?: string; boundIdentityVersion?: string } {
     if (deps.sessionStore.getSessionState) {
       return deps.sessionStore.getSessionState(userKey, agentId);
@@ -548,7 +591,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
 
   function getCurrentModel(userKey: string, agentId: string): string | undefined {
     return deps.sessionStore.getModelOverride?.(userKey, agentId)
-      ?? deps.resolveDefaultModel?.()
+      ?? deps.resolveDefaultModel?.(getCurrentProvider(userKey, agentId))
       ?? deps.defaultModel;
   }
 
@@ -573,6 +616,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     threadId?: string;
   }): Promise<{ threadId?: string; boundIdentityVersion?: string }> {
     const { channel, userId, sessionUserKey, agent, model } = input;
+    const runner = getRunner(getCurrentProvider(sessionUserKey, agent.agentId));
     const snapshot = deps.agentWorkspaceManager.getIdentitySnapshot
       ? deps.agentWorkspaceManager.getIdentitySnapshot(sessionUserKey, agent.workspaceDir)
       : deps.agentWorkspaceManager.getSharedMemorySnapshot?.(sessionUserKey);
@@ -589,7 +633,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     const currentVersion = state.boundIdentityVersion;
 
     if (!threadId) {
-      const bootstrapResult = await deps.codexRunner.run({
+      const bootstrapResult = await runner.run({
         prompt: buildIdentityBootstrapPrompt(snapshot.identityContent),
         model,
         search: false,
@@ -610,7 +654,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     }
 
     if (currentVersion !== targetVersion) {
-      const patchResult = await deps.codexRunner.run({
+      const patchResult = await runner.run({
         prompt: buildIdentityPatchPrompt(snapshot.identityContent),
         threadId,
         model,
@@ -647,6 +691,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
       : undefined;
     const runtimeAgent = targetAgent ?? deps.sessionStore.getCurrentAgent(sessionUserKey);
     const currentModel = getCurrentModel(sessionUserKey, runtimeAgent.agentId);
+    const runner = getRunner(getCurrentProvider(sessionUserKey, runtimeAgent.agentId));
 
     if (!deps.runnerEnabled) {
       await deps.sendText(channel, userId, `⏰ 定时提醒：${reminder.message}`);
@@ -673,7 +718,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     let sawAgentOutput = false;
     try {
       await sendAgentProgress(deps, channel, userId, runtimeAgent, 'reminder');
-      const result = await deps.codexRunner.run({
+      const result = await runner.run({
         prompt: triggerPrompt,
         threadId: runtimeThreadId,
         model: currentModel,
@@ -763,6 +808,19 @@ ${clipMessage(prompt, 500)}
 ════════════════════════════════════════════════════════════`);
 
     const currentAgent = normalizeVisibleCurrentAgent(sessionUserKey);
+    const openCodeAuthSessionKey = buildOpenCodeAuthSessionKey(channel, userId, currentAgent.agentId);
+    if (deps.openCodeAuthFlowManager?.has(openCodeAuthSessionKey)) {
+      if (prompt === '/cancel') {
+        deps.openCodeAuthFlowManager.stop(openCodeAuthSessionKey, '用户手动取消');
+        await deps.sendText(channel, userId, '已取消当前 OpenCode 登录流程。');
+        return;
+      }
+      const accepted = await deps.openCodeAuthFlowManager.sendInput(openCodeAuthSessionKey, prompt);
+      if (accepted) {
+        await deps.sendText(channel, userId, '已转发到当前 OpenCode 登录流程。');
+        return;
+      }
+    }
     const existingSessionState = getSessionState(sessionUserKey, currentAgent.agentId);
     const existingThreadId = existingSessionState.threadId;
     const currentModel = getCurrentModel(sessionUserKey, currentAgent.agentId);
@@ -802,7 +860,8 @@ ${clipMessage(prompt, 500)}
       let lastStreamSend: Promise<void> = Promise.resolve();
       const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, onboardingAgent.agentId);
       try {
-        const result = await deps.codexRunner.run({
+        const onboardingRunner = getRunner(getCurrentProvider(sessionUserKey, onboardingAgent.agentId));
+        const result = await onboardingRunner.run({
           prompt: buildMemoryOnboardingKickoffPrompt(options),
           threadId: onboardingThreadId,
           model,
@@ -985,7 +1044,8 @@ ${clipMessage(prompt, 500)}
         await sendCommandText(renderSkillOnboardingStartMessage(agent));
         try {
           let lastStreamSend: Promise<void> = Promise.resolve();
-          const result = await deps.codexRunner.run({
+          const skillRunner = getRunner(getCurrentProvider(sessionUserKey, agent.agentId));
+          const result = await skillRunner.run({
             prompt: SKILL_ONBOARDING_KICKOFF_PROMPT,
             model: currentModel,
             search: false,
@@ -1019,22 +1079,39 @@ ${clipMessage(prompt, 500)}
         return;
       }
       if (commandResult.initLogin) {
+        const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
+        const loginRunner = getRunner(runtimeProvider);
+        const loginRunnerLabel = getRunnerLabel(runtimeProvider);
+        const supportsDeviceAuth = runtimeProvider === 'codex';
         if (!deps.runnerEnabled) {
           await sendCommandText('⚠️ 当前服务已禁用命令执行，无法进行登录。');
           return;
         }
         if (channel === 'feishu') {
-          await deps.sendText(channel, userId, buildFeishuLoginChoiceMessage());
+          await deps.sendText(channel, userId, buildFeishuLoginChoiceMessage({
+            provider: runtimeProvider,
+            providerLabel: loginRunnerLabel,
+            supportsDeviceAuth,
+          }));
+          return;
+        }
+        if (runtimeProvider === 'opencode') {
+          await sendCommandText('当前运行器是 OpenCode。请在飞书里发送 /login，通过卡片先选择 provider，再按提示继续登录。');
+          return;
+        }
+        if (!supportsDeviceAuth) {
+          await sendCommandText(`⚠️ 当前运行器 ${loginRunnerLabel} 不支持通过网关代理设备授权，请改用飞书中的 API URL / Key 登录。`);
           return;
         }
         try {
           await startCodexDeviceLogin({
+            provider: runtimeProvider,
             channel,
             userId,
             sendText: deps.sendText,
             codexHomeDir: deps.codexHomeDir,
             codexRunner: {
-              login: async (input) => deps.codexRunner.login({
+              login: async (input) => loginRunner.login({
                 onMessage: (text) => {
                   log.info(`
 ════════════════════════════════════════════════════════════
@@ -1054,6 +1131,40 @@ ${clipMessage(text, 500)}
           });
           await sendCommandText('❌ 登录超时或遇到错误。请重试 /login 命令。');
         }
+        return;
+      }
+      if (commandResult.queryProvider) {
+        const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
+        const explicitlySelected = hasExplicitProviderSelection(sessionUserKey, currentAgent.agentId);
+        await sendCommandText([
+          `当前运行器：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
+          `当前 agent：${currentAgent.name} (${currentAgent.agentId})`,
+          explicitlySelected
+            ? '当前 agent 已显式选择运行器。'
+            : `当前 agent 尚未显式选择运行器，当前先使用默认值：${getRunnerLabel(runtimeProvider)}。建议首轮先完成选择。`,
+          '切换命令：/provider codex | /provider opencode | /provider reset',
+        ].join('\n'));
+        return;
+      }
+      if (commandResult.clearProvider) {
+        deps.sessionStore.clearProviderOverride?.(sessionUserKey, currentAgent.agentId);
+        deps.sessionStore.clearSession(sessionUserKey, currentAgent.agentId);
+        deps.sessionStore.clearModelOverride?.(sessionUserKey, currentAgent.agentId);
+        const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
+        await sendCommandText([
+          `✅ 已重置为默认运行器：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
+          '已同步清空当前 agent 的会话与模型覆盖，避免跨运行器复用旧上下文。',
+        ].join('\n'));
+        return;
+      }
+      if (commandResult.setProvider) {
+        deps.sessionStore.setProviderOverride?.(sessionUserKey, currentAgent.agentId, commandResult.setProvider);
+        deps.sessionStore.clearSession(sessionUserKey, currentAgent.agentId);
+        deps.sessionStore.clearModelOverride?.(sessionUserKey, currentAgent.agentId);
+        await sendCommandText([
+          `✅ 已切换当前 agent 运行器为：${getRunnerLabel(commandResult.setProvider)} (${commandResult.setProvider})`,
+          '已同步清空当前 agent 的会话与模型覆盖，避免跨运行器复用旧上下文。',
+        ].join('\n'));
         return;
       }
       if (commandResult.useAgentTarget) {
@@ -1100,8 +1211,12 @@ ${clipMessage(text, 500)}
         return;
       }
       if (commandResult.queryModel) {
-        const snapshot = loadCodexModels();
-        const lines = [`当前模型：${currentModel ?? '(codex cli 默认模型)'}`];
+        const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
+        const snapshot = await resolveModelsSnapshot(runtimeProvider);
+        const lines = [
+          `当前运行器：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
+          `当前模型：${currentModel ?? `(${getRunnerLabel(runtimeProvider)} 默认模型)`}`,
+        ];
         if (snapshot.models.length > 0) {
           lines.push(formatPaginatedCodexModelsText(snapshot, commandResult.queryModelsPage ?? 1));
         }
@@ -1109,7 +1224,8 @@ ${clipMessage(text, 500)}
         return;
       }
       if (commandResult.queryModels) {
-        await sendCommandText(formatPaginatedCodexModelsText(loadCodexModels(), commandResult.queryModelsPage ?? 1));
+        const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
+        await sendCommandText(formatPaginatedCodexModelsText(await resolveModelsSnapshot(runtimeProvider), commandResult.queryModelsPage ?? 1));
         return;
       }
       if (commandResult.querySkills) {
@@ -1163,16 +1279,18 @@ ${clipMessage(text, 500)}
         return;
       }
       if (commandResult.clearModel) {
+        const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
         deps.sessionStore.clearModelOverride?.(sessionUserKey, currentAgent.agentId);
-        const snapshot = loadCodexModels();
+        const snapshot = await resolveModelsSnapshot(runtimeProvider);
         await sendCommandText([
-          `✅ 已重置模型：${deps.defaultModel ?? '(codex cli 默认模型)'}`,
+          `✅ 已重置模型：${deps.resolveDefaultModel?.(runtimeProvider) ?? deps.defaultModel ?? `(${getRunnerLabel(runtimeProvider)} 默认模型)`}`,
           ...(snapshot.models.length > 0 ? [formatPaginatedCodexModelsText(snapshot, 1)] : []),
         ].join('\n'));
         return;
       }
       if (commandResult.setModel) {
-        const snapshot = loadCodexModels();
+        const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
+        const snapshot = await resolveModelsSnapshot(runtimeProvider);
         const resolved = resolveModelFromSnapshot(commandResult.setModel, snapshot);
         if (!resolved.ok || !resolved.model) {
           await sendCommandText(`❌ ${resolved.reason ?? '模型校验失败'}`);
@@ -1253,7 +1371,8 @@ ${clipMessage(text, 500)}
         try {
           let lastStreamSend: Promise<void> = Promise.resolve();
           const startTime = Date.now();
-          const reviewResult = await deps.codexRunner.review({
+          const reviewRunner = getRunner(getCurrentProvider(sessionUserKey, currentAgent.agentId));
+          const reviewResult = await reviewRunner.review({
             mode: commandResult.reviewMode,
             target: commandResult.reviewTarget,
             prompt: commandResult.reviewPrompt,
@@ -1311,12 +1430,26 @@ ${clipMessage(text, 500)}
     const shouldPushStartupHelp = !existingThreadId
       && !shouldStartMemoryOnboarding
       && !isSystemAgentRecord(currentAgent);
+    const shouldRecommendProviderSelection = !existingThreadId
+      && !isSystemAgentRecord(currentAgent)
+      && !hasExplicitProviderSelection(sessionUserKey, currentAgent.agentId);
 
     if (shouldStartMemoryOnboarding && !existingThreadId) {
       await deps.sendText(channel, userId, renderMemoryOnboardingSuggestion(onboardingReason));
     }
 
     if (shouldPushStartupHelp) {
+      if (shouldRecommendProviderSelection) {
+        const providerHelp = handleUserCommand('/provider').queryProvider
+          ? [
+              `当前 agent 尚未显式选择运行器，当前先使用默认值：${getRunnerLabel(getCurrentProvider(sessionUserKey, currentAgent.agentId))}。`,
+              '建议首轮先发送 `/provider codex` 或 `/provider opencode` 完成选择。',
+            ].join('\n')
+          : undefined;
+        if (providerHelp) {
+          await deps.sendText(channel, userId, formatCommandOutboundMessage(channel, '/provider', providerHelp));
+        }
+      }
       const helpText = handleUserCommand('/help').message;
       if (helpText) {
         await deps.sendText(channel, userId, formatCommandOutboundMessage(channel, '/help', helpText));
@@ -1366,7 +1499,9 @@ ${clipMessage(text, 500)}
       const startTime = Date.now();
       const runtimePrompt = buildOutboundMessageProtocolPrompt(channel, prompt);
       await sendAgentProgress(deps, channel, userId, runtimeAgent, 'received');
-      const result = await deps.codexRunner.run({
+      const runtimeProvider = getCurrentProvider(sessionUserKey, runtimeAgent.agentId);
+      const activeRunner = getRunner(runtimeProvider);
+      const result = await activeRunner.run({
         prompt: runtimePrompt,
         threadId: runtimeThreadId,
         model: currentModel,

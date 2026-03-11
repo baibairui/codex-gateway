@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { formatCommandOutboundMessage } from './feishu-command-cards.js';
+import { getCliProviderSpec, type CliProvider } from './cli-provider.js';
 
 type Channel = 'wecom' | 'feishu';
 
 interface StartCodexDeviceLoginInput {
+  provider?: CliProvider;
   channel: Channel;
   userId: string;
   sendText: (channel: Channel, userId: string, content: string) => Promise<void>;
@@ -18,12 +20,19 @@ interface StartCodexDeviceLoginInput {
 
 export async function startCodexDeviceLogin(input: StartCodexDeviceLoginInput): Promise<void> {
   const { channel, userId, sendText, codexHomeDir, codexRunner } = input;
+  const provider = input.provider ?? 'codex';
+  const providerSpec = getCliProviderSpec(provider);
+  if (!providerSpec.supportsDeviceAuth) {
+    throw new Error(`${providerSpec.label} does not support gateway device auth login`);
+  }
 
   const sendCommandText = async (text: string): Promise<void> => {
     await sendText(channel, userId, formatCommandOutboundMessage(channel, '/login', text));
   };
 
-  await sendCommandText('⏳ 正在请求设备登录码，请稍候...');
+  await sendCommandText(provider === 'codex'
+    ? '⏳ 正在请求设备登录码，请稍候...'
+    : `⏳ 正在请求 ${providerSpec.label} 设备登录码，请稍候...`);
 
   const suspendedConfig = suspendCodexApiConfig(codexHomeDir);
 
@@ -36,7 +45,7 @@ export async function startCodexDeviceLogin(input: StartCodexDeviceLoginInput): 
     });
     await lastStreamSend;
     suspendedConfig.commit();
-    await sendCommandText('✅ 登录成功！Codex CLI 已获得授权。');
+    await sendCommandText(`✅ 登录成功！${providerSpec.label} CLI 已获得授权。`);
   } catch (error) {
     suspendedConfig.restore();
     throw error;

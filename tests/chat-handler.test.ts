@@ -9,6 +9,7 @@ function createSessionStore() {
   const currentAgent = new Map<string, string>();
   const threads = new Map<string, string>();
   const modelOverrides = new Map<string, string>();
+  const providerOverrides = new Map<string, 'codex' | 'opencode'>();
   const agents = new Map<string, Array<{
     agentId: string;
     name: string;
@@ -89,6 +90,15 @@ function createSessionStore() {
     },
     clearModelOverride(userId: string, agentId: string) {
       return modelOverrides.delete(`${userId}:${agentId}`);
+    },
+    getProviderOverride(userId: string, agentId: string) {
+      return providerOverrides.get(`${userId}:${agentId}`);
+    },
+    setProviderOverride(userId: string, agentId: string, provider: 'codex' | 'opencode') {
+      providerOverrides.set(`${userId}:${agentId}`, provider);
+    },
+    clearProviderOverride(userId: string, agentId: string) {
+      return providerOverrides.delete(`${userId}:${agentId}`);
     },
     listDetailed() {
       return [];
@@ -624,6 +634,36 @@ describe('createChatHandler', () => {
     expect(parsed.msg_type).toBe('interactive');
     expect(parsed.content?.header?.title?.content).toBe('命令帮助');
     expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '[默认Agent] 你好，我已开始处理。');
+  });
+
+  it('recommends provider selection on the first message when current agent has no explicit provider choice', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+        getProvider: () => 'codex',
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultProvider: 'codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '你好' });
+
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('建议首轮先发送'))).toBe(true);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('/provider opencode'))).toBe(true);
   });
 
   it('intercepts the first ordinary feishu message and sends auth card before running codex when personal auth is unbound', async () => {

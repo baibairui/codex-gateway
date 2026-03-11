@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { resolveCliProvider } from './services/cli-provider.js';
 
 dotenv.config();
 
@@ -123,7 +124,9 @@ export const config = {
   rateLimitMaxMessages: optionalNumber('RATE_LIMIT_MAX_MESSAGES', 20),
   rateLimitWindowSeconds: optionalNumber('RATE_LIMIT_WINDOW_SECONDS', 60),
   allowFrom: optionalString('ALLOW_FROM', '*'),
+  codexProvider: resolveCliProvider(process.env.CODEX_PROVIDER, process.env.CODEX_BIN),
   codexBin: process.env.CODEX_BIN ?? 'codex',
+  opencodeBin: process.env.OPENCODE_BIN ?? 'opencode',
   codexModel: optionalStringUndefined('CODEX_MODEL'),
   codexSearch: process.env.CODEX_SEARCH === 'true',
   codexWorkdir: process.env.CODEX_WORKDIR ?? process.cwd(),

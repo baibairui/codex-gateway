@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { hasCodexHomeAuth, hasCodexHomeConfig } from './codex-home-config.js';
+import { hasCliHomeAuth, hasCliHomeConfig, type CliProvider } from './cli-provider.js';
 
 export type CodexWorkdirIsolationMode = 'off' | 'bwrap';
 
@@ -12,6 +12,7 @@ export interface CodexSpawnSpec {
 }
 
 interface BuildCodexSpawnSpecInput {
+  provider?: CliProvider;
   codexBin: string;
   args: string[];
   cwd: string;
@@ -25,13 +26,17 @@ const RUNTIME_HOME_DIR = '.codex-runtime/home';
 const RUNTIME_HOME_MOUNT_DIR = '/workspace/.codex-runtime/home';
 const RUNTIME_GATEWAY_ROOT_MOUNT_DIR = '/workspace/.codex-runtime/gateway-root';
 const CODEx_SYNC_FILES = ['auth.json', 'config.toml', 'models_cache.json'] as const;
+const OPENCODE_SYNC_PATHS = [
+  ['.config', 'opencode', 'opencode.json'],
+  ['.local', 'share', 'opencode', 'auth.json'],
+] as const;
 const DEFAULT_HOME_READONLY_PATHS = ['.gitconfig', '.ssh/config', '.ssh/known_hosts'] as const;
 const SSH_CONFIG_RELATIVE_PATH = '.ssh/config';
 const EXTRA_READS_ENV_NAME = 'CODEX_WORKDIR_ISOLATION_EXTRA_READS';
 
 export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawnSpec {
   const hostHomeDir = resolveHostHomeDir(input.env);
-  const hostEnv = buildHostCodexEnv(input.env, input.codexHomeDir);
+  const hostEnv = buildHostCodexEnv(input.env, input.provider ?? 'codex', input.codexHomeDir);
   const gatewayRootDir = resolveGatewayRootDir(hostEnv);
   if (input.isolationMode === 'off') {
     return {
@@ -134,7 +139,11 @@ function buildBubblewrapArgs(
   return result;
 }
 
-function buildHostCodexEnv(env: NodeJS.ProcessEnv, codexHomeDir?: string): NodeJS.ProcessEnv {
+function buildHostCodexEnv(
+  env: NodeJS.ProcessEnv,
+  provider: CliProvider,
+  codexHomeDir?: string,
+): NodeJS.ProcessEnv {
   if (!codexHomeDir) {
     return { ...env };
   }
@@ -144,11 +153,11 @@ function buildHostCodexEnv(env: NodeJS.ProcessEnv, codexHomeDir?: string): NodeJ
     ...env,
     CODEX_HOME: resolvedHome,
   };
-  if (hasCodexHomeConfig(resolvedHome)) {
+  if (hasCliHomeConfig(provider, resolvedHome)) {
     delete nextEnv.OPENAI_BASE_URL;
     delete nextEnv.CHATGPT_BASE_URL;
   }
-  if (hasCodexHomeAuth(resolvedHome)) {
+  if (hasCliHomeAuth(provider, resolvedHome)) {
     delete nextEnv.OPENAI_API_KEY;
     delete nextEnv.CHATGPT_API_KEY;
   }
@@ -259,6 +268,17 @@ function syncCodexRuntimeHome(sourceDir: string | undefined, targetDir: string):
       fs.rmSync(targetFile, { force: true });
       continue;
     }
+    fs.copyFileSync(sourceFile, targetFile);
+  }
+
+  for (const relativeParts of OPENCODE_SYNC_PATHS) {
+    const sourceFile = path.join(sourceDir, ...relativeParts);
+    const targetFile = path.join(targetDir, ...relativeParts);
+    if (!fs.existsSync(sourceFile) || !fs.statSync(sourceFile).isFile()) {
+      fs.rmSync(targetFile, { force: true });
+      continue;
+    }
+    fs.mkdirSync(path.dirname(targetFile), { recursive: true });
     fs.copyFileSync(sourceFile, targetFile);
   }
 }

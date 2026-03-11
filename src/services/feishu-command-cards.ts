@@ -1,4 +1,5 @@
 type Channel = 'wecom' | 'feishu';
+type CliProvider = 'codex' | 'opencode';
 
 type FeishuCardTemplate = 'blue' | 'wathet' | 'turquoise' | 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'grey';
 
@@ -41,6 +42,7 @@ const COMMAND_LABELS: Record<string, string> = {
   '/rename': '会话重命名',
   '/switch': '会话切换',
   '/model': '模型管理',
+  '/provider': '运行器切换',
   '/models': '模型列表',
   '/skills': 'Skill 管理',
   '/search': '联网搜索',
@@ -57,6 +59,7 @@ const COMMAND_SUMMARIES: Record<string, string> = {
   '/agent': '查看当前 agent 状态，包括工作区和会话绑定情况。',
   '/skills': '查看当前会话生效的 skills，并快速切换不同范围。',
   '/model': '查看或切换当前模型，并在需要时恢复默认值。',
+  '/provider': '查看或切换当前 agent 的运行器，并在 Codex 与 OpenCode 之间切换。',
   '/models': '查看当前支持的模型集合，并回到当前模型设置。',
   '/search': '控制本会话的联网搜索开关，按需临时开启。',
   '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
@@ -74,6 +77,7 @@ const COMMAND_TEMPLATES: Record<string, FeishuCardTemplate> = {
   '/agent': 'green',
   '/skills': 'turquoise',
   '/model': 'blue',
+  '/provider': 'blue',
   '/models': 'blue',
   '/search': 'wathet',
   '/review': 'orange',
@@ -143,6 +147,11 @@ const STATIC_QUICK_ACTIONS: Record<string, CommandQuickAction[]> = {
   '/login': [
     { label: '重新登录', cmd: '/login', type: 'primary' },
     { label: '查看帮助', cmd: '/help' },
+  ],
+  '/provider': [
+    { label: '查看当前', cmd: '/provider', type: 'primary' },
+    { label: '切到 Codex', cmd: '/provider codex' },
+    { label: '切到 OpenCode', cmd: '/provider opencode' },
   ],
   '/repair-users': [
     { label: '执行修复', cmd: '/repair-users', type: 'primary' },
@@ -225,6 +234,7 @@ function resolveCommandQuickActions(commandName: string, text: string): CommandQ
     return [
       { label: '⬅️ 上一页', cmd: `/help ${prev}`, type: page > 1 ? 'primary' : 'default' },
       { label: '下一页 ➡️', cmd: `/help ${next}`, type: page < total ? 'primary' : 'default' },
+      { label: '运行器切换', cmd: '/provider', type: page >= 2 ? 'primary' : 'default' },
     ];
   }
   const staticActions = STATIC_QUICK_ACTIONS[normalized];
@@ -854,7 +864,19 @@ export function formatCommandOutboundMessage(channel: Channel, commandName: stri
   return buildGatewayStructuredMessage('interactive', buildFeishuInteractiveCommandCard(commandName, normalized));
 }
 
-export function buildFeishuLoginChoiceMessage(): string {
+export function buildFeishuLoginChoiceMessage(input: {
+  provider?: CliProvider;
+  providerLabel?: string;
+  supportsDeviceAuth?: boolean;
+} = {}): string {
+  const provider = input.provider ?? 'codex';
+  if (provider === 'opencode') {
+    return buildFeishuOpenCodeLoginChoiceMessage();
+  }
+  const providerLabel = input.providerLabel ?? 'Codex';
+  const supportsDeviceAuth = input.supportsDeviceAuth ?? true;
+  const writeLocation = 'config.toml';
+  const authLocation = 'auth.json';
   return buildFeishuInteractiveMessage({
     config: {
       wide_screen_mode: true,
@@ -868,34 +890,95 @@ export function buildFeishuLoginChoiceMessage(): string {
       },
     },
     elements: [
-      buildFeishuTitleBlock('选择登录方式', '飞书下可以使用设备授权，或直接写入项目内的 API 配置。'),
+      buildFeishuTitleBlock(
+        '选择登录方式',
+        supportsDeviceAuth
+          ? `飞书下可以使用设备授权，或直接写入项目内的 ${providerLabel} API 配置。`
+          : `当前运行器是 ${providerLabel}，请直接写入项目内 API 配置。`,
+      ),
       buildFeishuFieldGrid([
-        { label: '写入位置', value: '.codex/config.toml' },
-        { label: '认证文件', value: '.codex/auth.json' },
+        { label: '写入位置', value: writeLocation },
+        { label: '认证文件', value: authLocation },
       ]),
-      buildFeishuTipsNote('API Key 不会通过普通聊天文本转发给 Codex。'),
+      buildFeishuTipsNote(`API Key 不会通过普通聊天文本转发给 ${providerLabel}。`),
       ...buildValueButtonRows([
         {
-          label: '设备授权登录',
-          type: 'primary',
-          value: {
-            gateway_action: 'codex_login.start_device_auth',
-          },
-        },
-        {
           label: 'API URL / Key 登录',
+          type: supportsDeviceAuth ? 'default' : 'primary',
           value: {
             gateway_action: 'codex_login.open_api_form',
           },
         },
+        ...(supportsDeviceAuth
+          ? [{
+              label: '设备授权登录',
+              type: 'primary' as const,
+              value: {
+                gateway_action: 'codex_login.start_device_auth',
+              },
+            }]
+          : []),
       ], 2),
     ],
   });
 }
 
-export function buildFeishuApiLoginFormMessage(defaults?: { baseUrl?: string; model?: string }): string {
-  const baseUrl = defaults?.baseUrl?.trim() || 'https://codex.ai02.cn';
-  const model = defaults?.model?.trim() || 'gpt-5.3-codex';
+export function buildFeishuOpenCodeLoginChoiceMessage(): string {
+  const providers = [
+    ['anthropic', 'Anthropic'],
+    ['openai', 'OpenAI'],
+    ['openrouter', 'OpenRouter'],
+    ['google', 'Google'],
+    ['groq', 'Groq'],
+    ['xai', 'xAI'],
+  ] as const;
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+    },
+    header: {
+      template: 'blue',
+      title: {
+        tag: 'plain_text',
+        content: 'OpenCode 登录授权',
+      },
+    },
+    elements: [
+      buildFeishuTitleBlock('选择 OpenCode 登录渠道', '优先使用 OpenCode 内置 auth login。点击 provider 后，后续请直接在聊天里按提示继续；中止可发送 /cancel。'),
+      buildFeishuFieldGrid([
+        { label: '写入位置', value: '.config/opencode/opencode.json' },
+        { label: '认证文件', value: '.local/share/opencode/auth.json' },
+      ]),
+      ...buildValueButtonRows(providers.map(([providerId, label]) => ({
+        label,
+        value: {
+          gateway_action: 'opencode_login.start_provider_auth',
+          provider_id: providerId,
+        },
+      })), 2),
+      ...buildValueButtonRows([
+        {
+          label: 'API URL / Key 登录',
+          type: 'primary',
+          value: {
+            gateway_action: 'codex_login.open_api_form',
+          },
+        },
+      ], 1),
+    ],
+  });
+}
+
+export function buildFeishuApiLoginFormMessage(defaults?: {
+  provider?: CliProvider;
+  baseUrl?: string;
+  model?: string;
+}): string {
+  const provider = defaults?.provider ?? 'codex';
+  const providerLabel = provider === 'opencode' ? 'OpenCode' : 'Codex';
+  const baseUrl = defaults?.baseUrl?.trim() || (provider === 'opencode' ? 'https://api.openai.com/v1' : 'https://codex.ai02.cn');
+  const model = defaults?.model?.trim() || (provider === 'opencode' ? 'gpt-5' : 'gpt-5.3-codex');
   return buildFeishuInteractiveMessage({
     config: {
       wide_screen_mode: true,
@@ -909,7 +992,7 @@ export function buildFeishuApiLoginFormMessage(defaults?: { baseUrl?: string; mo
       },
     },
     elements: [
-      buildFeishuTitleBlock('写入 Codex API 配置', '提交后会覆盖当前项目 `.codex/` 下的登录配置。'),
+      buildFeishuTitleBlock(`写入 ${providerLabel} API 配置`, '提交后会覆盖当前项目内的登录配置。'),
       buildFeishuTipsNote(`建议填写：base_url=${baseUrl}，model=${model}`),
       {
         tag: 'form',
@@ -980,12 +1063,14 @@ export function buildFeishuApiLoginFormMessage(defaults?: { baseUrl?: string; mo
 }
 
 export function buildFeishuApiLoginResultMessage(input: {
+  provider?: CliProvider;
   ok: boolean;
   baseUrl?: string;
   model?: string;
   maskedApiKey?: string;
   message: string;
 }): string {
+  const providerLabel = input.provider === 'opencode' ? 'OpenCode' : 'Codex';
   return buildFeishuInteractiveMessage({
     config: {
       wide_screen_mode: true,
@@ -999,7 +1084,7 @@ export function buildFeishuApiLoginResultMessage(input: {
       },
     },
     elements: [
-      buildFeishuTitleBlock(input.ok ? '配置写入成功' : '配置写入失败', input.message),
+      buildFeishuTitleBlock(input.ok ? `${providerLabel} 配置写入成功` : `${providerLabel} 配置写入失败`, input.message),
       buildFeishuFieldGrid([
         { label: 'API URL', value: input.baseUrl ?? '' },
         { label: 'Model', value: input.model ?? '' },
