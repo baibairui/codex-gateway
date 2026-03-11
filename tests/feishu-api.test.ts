@@ -24,7 +24,7 @@ describe('FeishuApi', () => {
     vi.restoreAllMocks();
   });
 
-  it('sends text via sdk create and preserves chunking', async () => {
+  it('sends plain text via post+md and preserves chunking', async () => {
     const createCalls: Array<{
       receive_id_type: string;
       receive_id: string;
@@ -64,21 +64,29 @@ describe('FeishuApi', () => {
     expect(createCalls.length).toBeGreaterThan(1);
     expect(createCalls.every((call) => call.receive_id_type === 'open_id')).toBe(true);
     expect(createCalls.every((call) => call.receive_id === 'ou_a')).toBe(true);
-    expect(createCalls.every((call) => call.msg_type === 'text')).toBe(true);
+    expect(createCalls.every((call) => call.msg_type === 'post')).toBe(true);
+    expect(createCalls.every((call) => {
+      const payload = JSON.parse(call.content) as {
+        zh_cn?: { content?: Array<Array<{ tag?: string; text?: string }>> };
+      };
+      return payload.zh_cn?.content?.[0]?.[0]?.tag === 'md';
+    })).toBe(true);
   });
 
   it('supports chat_id as receive target', async () => {
-    const createCalls: Array<{ receive_id_type: string; receive_id: string }> = [];
+    const createCalls: Array<{ receive_id_type: string; receive_id: string; msg_type?: string; content?: string }> = [];
     const sdkClient = {
       im: {
         message: {
           create: vi.fn(async (payload: {
             params: { receive_id_type: string };
-            data: { receive_id: string };
+            data: { receive_id: string; msg_type?: string; content?: string };
           }) => {
             createCalls.push({
               receive_id_type: payload.params.receive_id_type,
               receive_id: payload.data.receive_id,
+              msg_type: payload.data.msg_type,
+              content: payload.data.content,
             });
             return { code: 0, msg: 'ok' };
           }),
@@ -106,6 +114,13 @@ describe('FeishuApi', () => {
       {
         receive_id_type: 'chat_id',
         receive_id: 'oc_group_1',
+        msg_type: 'post',
+        content: JSON.stringify({
+          zh_cn: {
+            title: '',
+            content: [[{ tag: 'md', text: 'hello group' }]],
+          },
+        }),
       },
     ]);
   });
