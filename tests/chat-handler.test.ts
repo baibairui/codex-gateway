@@ -254,7 +254,7 @@ describe('createChatHandler', () => {
         agentId: 'test',
       }),
     }));
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[测试Agent] 提醒时间到了，我来继续跟进。');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '测试Agent ·\n提醒时间到了，我来继续跟进。');
     expect(sessionStore.getSession('u1', 'test')).toBe('thread_reminder');
   });
 
@@ -314,8 +314,8 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[默认Agent] 先给你一个阶段性结论。');
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[默认Agent] ⚠️ 本次回复中断了，你可以直接回复“继续”让我接着处理。');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '默认助手 ·\n先给你一个阶段性结论。');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '默认助手 ·\n⚠️ 本次回复中断了，你可以直接回复“继续”让我接着处理。');
     expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('codex timeout after'))).toBe(false);
     expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('❌ 请求执行失败'))).toBe(false);
   });
@@ -408,7 +408,7 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[默认Agent] 你好，我来处理。');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '默认助手 ·\n你好，我来处理。');
   });
 
   it('keeps gateway structured replies unchanged when labeling agent output', async () => {
@@ -566,7 +566,7 @@ local_image_path=${sourcePath}`,
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '[默认Agent] 继续回答问题');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '默认助手 ·\n继续回答问题');
     const systemPrefixed = sendText.mock.calls.some((call) => String(call[2] ?? '').includes('[记忆初始化引导]'));
     expect(systemPrefixed).toBe(false);
   });
@@ -647,8 +647,8 @@ local_image_path=${sourcePath}`,
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '[默认Agent] ⏳ 已接收请求，正在处理...');
-    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '[默认Agent] ✅ 已处理完成。');
+    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
+    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '默认助手 ·\n✅ 已处理完成。');
   });
 
   it('pushes help card automatically when a new feishu session starts', async () => {
@@ -696,7 +696,7 @@ local_image_path=${sourcePath}`,
     expect(helpParsed.__gateway_message__).toBe(true);
     expect(helpParsed.msg_type).toBe('interactive');
     expect(helpParsed.content?.header?.title?.content).toBe('命令帮助');
-    expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '[默认Agent] 你好，我已开始处理。');
+    expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n你好，我已开始处理。');
   });
 
   it('recommends provider selection on the first message when current agent has no explicit provider choice', async () => {
@@ -785,8 +785,8 @@ local_image_path=${sourcePath}`,
 
     expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', expect.stringContaining('当前 agent 尚未显式选择模型通道'));
     expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', expect.stringContaining('可用命令（按功能分组，帮助页 1/2）：'));
-    expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '[默认Agent] ⏳ 已接收请求，正在处理...');
-    expect(sendText).toHaveBeenNthCalledWith(4, 'wecom', 'u1', '[默认Agent] 开始处理。');
+    expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
+    expect(sendText).toHaveBeenNthCalledWith(4, 'wecom', 'u1', '默认助手 ·\n开始处理。');
   });
 
   it('keeps running when the progress status push fails', async () => {
@@ -824,8 +824,8 @@ local_image_path=${sourcePath}`,
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '[默认Agent] ⏳ 已接收请求，正在处理...');
-    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '[默认Agent] 第一条回复');
+    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
+    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '默认助手 ·\n第一条回复');
   });
 
   it('creates and switches agent by command', async () => {

@@ -73,7 +73,7 @@ describe('FeishuApi', () => {
     })).toBe(true);
   });
 
-  it('supports chat_id as receive target', async () => {
+  it('lifts agent identity into interactive card header for chat targets', async () => {
     const createCalls: Array<{ receive_id_type: string; receive_id: string; msg_type?: string; content?: string }> = [];
     const sdkClient = {
       im: {
@@ -108,17 +108,32 @@ describe('FeishuApi', () => {
     await api.sendText({
       receiveId: 'oc_group_1',
       receiveIdType: 'chat_id',
-    }, 'hello group');
+    }, '默认助手 ·\nhello group');
 
     expect(createCalls).toEqual([
       {
         receive_id_type: 'chat_id',
         receive_id: 'oc_group_1',
-        msg_type: 'post',
+        msg_type: 'interactive',
         content: JSON.stringify({
-          zh_cn: {
-            title: '',
-            content: [[{ tag: 'md', text: 'hello group' }]],
+          schema: '2.0',
+          config: {
+            wide_screen_mode: true,
+          },
+          header: {
+            template: 'blue',
+            title: {
+              tag: 'plain_text',
+              content: '默认助手',
+            },
+          },
+          body: {
+            elements: [
+              {
+                tag: 'markdown',
+                content: 'hello group',
+              },
+            ],
           },
         }),
       },

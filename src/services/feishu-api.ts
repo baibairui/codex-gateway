@@ -193,6 +193,15 @@ export class FeishuApi {
   ): Promise<string | undefined> {
     const receiveTarget = resolveFeishuReceiveTarget(target);
     const textContent = requireNonEmptyText(content, 'feishu send failed: text content is required');
+    const cardPayload = buildAgentMarkdownCardContent(textContent);
+    if (cardPayload) {
+      return this.sendSingleMessage(receiveTarget, {
+        msgType: 'interactive',
+        content: cardPayload,
+        replyToMessageId: options?.replyToMessageId,
+        replyInThread: options?.replyInThread,
+      });
+    }
     const chunks = splitFeishuTextByUtf8Bytes(textContent);
     let lastMessageId: string | undefined;
     for (const chunk of chunks) {
@@ -846,6 +855,39 @@ function buildMarkdownPostContent(text: string): Record<string, unknown> {
     zh_cn: {
       title: '',
       content: [[{ tag: 'md', text }]],
+    },
+  };
+}
+
+function buildAgentMarkdownCardContent(text: string): Record<string, unknown> | undefined {
+  const match = text.match(/^(.+?) ·\n([\s\S]+)$/);
+  if (!match) {
+    return undefined;
+  }
+  const headerTitle = match[1]?.trim();
+  const body = match[2]?.trim();
+  if (!headerTitle || !body) {
+    return undefined;
+  }
+  return {
+    schema: '2.0',
+    config: {
+      wide_screen_mode: true,
+    },
+    header: {
+      template: 'blue',
+      title: {
+        tag: 'plain_text',
+        content: headerTitle,
+      },
+    },
+    body: {
+      elements: [
+        {
+          tag: 'markdown',
+          content: body,
+        },
+      ],
     },
   };
 }

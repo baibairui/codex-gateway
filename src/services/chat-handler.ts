@@ -292,7 +292,8 @@ function formatAgentVisibleReply(agent: { name: string }, text: string): string 
   if (isSystemAgentRecord({ agentId: '', name: agent.name })) {
     return text;
   }
-  const prefix = `[${agent.name}] `;
+  const visibleName = agent.name.trim() === '默认Agent' ? '默认助手' : agent.name.trim();
+  const prefix = `${visibleName} ·\n`;
   if (text.startsWith(prefix)) {
     return text;
   }
