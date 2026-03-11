@@ -197,8 +197,8 @@ export class FeishuApi {
     let lastMessageId: string | undefined;
     for (const chunk of chunks) {
       lastMessageId = await this.sendSingleMessage(receiveTarget, {
-        msgType: 'text',
-        content: { text: chunk },
+        msgType: 'post',
+        content: buildMarkdownPostContent(chunk),
         replyToMessageId: options?.replyToMessageId,
         replyInThread: options?.replyInThread,
       });
@@ -837,6 +837,15 @@ function buildSimplePostContent(text: string): Record<string, unknown> {
     zh_cn: {
       title: '',
       content: [[{ tag: 'text', text }]],
+    },
+  };
+}
+
+function buildMarkdownPostContent(text: string): Record<string, unknown> {
+  return {
+    zh_cn: {
+      title: '',
+      content: [[{ tag: 'md', text }]],
     },
   };
 }
