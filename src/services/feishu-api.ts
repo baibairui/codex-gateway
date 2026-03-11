@@ -35,7 +35,7 @@ export interface FeishuOutgoingMessage {
 
 export interface FeishuMessageUpdateInput {
   messageId: string;
-  msgType: 'text' | 'post' | 'interactive';
+  msgType: 'text' | 'markdown' | 'post' | 'interactive';
   content: Record<string, unknown> | string;
 }
 
