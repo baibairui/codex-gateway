@@ -275,6 +275,73 @@ function formatAgentVisibleReply(agent: { name: string }, text: string): string 
   return `${prefix}${text}`;
 }
 
+function rewriteGatewayStructuredLocalPaths(rawText: string, workspaceDir: string): string {
+  const structured = parseGatewayStructuredMessage(rawText);
+  if (!structured || structured.op === 'recall' || typeof structured.content === 'string') {
+    return rawText;
+  }
+
+  const rewrittenContent = rewriteGatewayLocalPathContent(structured.content, workspaceDir);
+  if (rewrittenContent === structured.content) {
+    return rawText;
+  }
+
+  if (structured.op === 'update') {
+    return JSON.stringify({
+      __gateway_message__: true,
+      op: 'update',
+      message_id: structured.message_id,
+      msg_type: structured.msg_type,
+      content: rewrittenContent,
+    });
+  }
+
+  return JSON.stringify({
+    __gateway_message__: true,
+    msg_type: structured.msg_type,
+    content: rewrittenContent,
+  });
+}
+
+function rewriteGatewayLocalPathContent(
+  content: Record<string, unknown>,
+  workspaceDir: string,
+): Record<string, unknown> {
+  const keys = [
+    'local_image_path',
+    'local_file_path',
+    'local_audio_path',
+    'local_media_path',
+    'local_sticker_path',
+  ] as const;
+  let changed = false;
+  const next: Record<string, unknown> = { ...content };
+  for (const key of keys) {
+    const value = next[key];
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const rewritten = rewriteSandboxWorkspacePath(value, workspaceDir);
+    if (rewritten !== value) {
+      next[key] = rewritten;
+      changed = true;
+    }
+  }
+  return changed ? next : content;
+}
+
+function rewriteSandboxWorkspacePath(rawPath: string, workspaceDir: string): string {
+  const trimmed = rawPath.trim();
+  if (trimmed === '/workspace') {
+    return workspaceDir;
+  }
+  if (!trimmed.startsWith('/workspace/')) {
+    return rawPath;
+  }
+  const relativePath = trimmed.slice('/workspace/'.length);
+  return path.join(workspaceDir, relativePath);
+}
+
 function formatMemorySummary(agent: AgentRecord, snapshot: MemorySummarySnapshot): string {
   const sharedLines = snapshot.shared.length > 0
     ? snapshot.shared.map((entry, index) => `${index + 1}. ${entry.fileName}: ${entry.summary}`)
@@ -1322,7 +1389,8 @@ ${clipMessage(text, 500)}
           );
         },
         onMessage: (text) => {
-          const rawVisibleOutput = isSystemAgentId(runtimeAgent.agentId) ? sanitizeOnboardingText(text) : text;
+          const normalizedOutput = rewriteGatewayStructuredLocalPaths(text, resolveAgentWorkdir(runtimeAgent));
+          const rawVisibleOutput = isSystemAgentId(runtimeAgent.agentId) ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
           const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, rawVisibleOutput);
           log.info(`
 ════════════════════════════════════════════════════════════
