@@ -853,12 +853,12 @@ ${clipMessage(prompt, 500)}
     if (deps.openCodeAuthFlowManager?.has(openCodeAuthSessionKey)) {
       if (prompt === '/cancel') {
         deps.openCodeAuthFlowManager.stop(openCodeAuthSessionKey, '用户手动取消');
-        await deps.sendText(channel, userId, '已取消当前 OpenCode 登录流程。');
+        await deps.sendText(channel, userId, '已取消当前登录流程。');
         return;
       }
       const accepted = await deps.openCodeAuthFlowManager.sendInput(openCodeAuthSessionKey, prompt);
       if (accepted) {
-        await deps.sendText(channel, userId, '已转发到当前 OpenCode 登录流程。');
+        await deps.sendText(channel, userId, '已收到，正在继续处理授权流程。');
         return;
       }
     }
@@ -1137,11 +1137,11 @@ ${clipMessage(prompt, 500)}
           return;
         }
         if (runtimeProvider === 'opencode') {
-          await sendCommandText('当前运行器是 OpenCode。请在飞书里发送 /login，通过卡片先选择 provider，再按提示继续登录。');
+          await sendCommandText('当前模型通道是 OpenCode。请在飞书里发送 /login，通过卡片选择登录方式。系统会优先返回授权链接，引导你在浏览器完成登录。');
           return;
         }
         if (!supportsDeviceAuth) {
-          await sendCommandText(`⚠️ 当前运行器 ${loginRunnerLabel} 不支持通过网关代理设备授权，请改用飞书中的 API URL / Key 登录。`);
+          await sendCommandText(`⚠️ 当前模型通道 ${loginRunnerLabel} 不支持通过网关代理设备授权，请改用飞书中的 API URL / Key 登录。`);
           return;
         }
         try {
@@ -1178,11 +1178,11 @@ ${clipMessage(text, 500)}
         const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
         const explicitlySelected = hasExplicitProviderSelection(sessionUserKey, currentAgent.agentId);
         await sendCommandText([
-          `当前运行器：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
+          `当前模型通道：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
           `当前 agent：${currentAgent.name} (${currentAgent.agentId})`,
           explicitlySelected
-            ? '当前 agent 已显式选择运行器。'
-            : `当前 agent 尚未显式选择运行器，当前先使用默认值：${getRunnerLabel(runtimeProvider)}。建议首轮先完成选择。`,
+            ? '当前 agent 已显式选择模型通道。'
+            : `当前 agent 尚未显式选择模型通道，当前先使用默认值：${getRunnerLabel(runtimeProvider)}。建议首轮先完成选择。`,
           '切换命令：/provider codex | /provider opencode | /provider reset',
         ].join('\n'));
         return;
@@ -1193,8 +1193,8 @@ ${clipMessage(text, 500)}
         deps.sessionStore.clearModelOverride?.(sessionUserKey, currentAgent.agentId);
         const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
         await sendCommandText([
-          `✅ 已重置为默认运行器：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
-          '已同步清空当前 agent 的会话与模型覆盖，避免跨运行器复用旧上下文。',
+          `✅ 已恢复默认模型通道：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
+          '已同步清空当前 agent 的会话与模型覆盖，避免跨通道复用旧上下文。',
         ].join('\n'));
         return;
       }
@@ -1203,8 +1203,8 @@ ${clipMessage(text, 500)}
         deps.sessionStore.clearSession(sessionUserKey, currentAgent.agentId);
         deps.sessionStore.clearModelOverride?.(sessionUserKey, currentAgent.agentId);
         await sendCommandText([
-          `✅ 已切换当前 agent 运行器为：${getRunnerLabel(commandResult.setProvider)} (${commandResult.setProvider})`,
-          '已同步清空当前 agent 的会话与模型覆盖，避免跨运行器复用旧上下文。',
+          `✅ 已切换当前 agent 模型通道为：${getRunnerLabel(commandResult.setProvider)} (${commandResult.setProvider})`,
+          '已同步清空当前 agent 的会话与模型覆盖，避免跨通道复用旧上下文。',
         ].join('\n'));
         return;
       }
@@ -1255,7 +1255,7 @@ ${clipMessage(text, 500)}
         const runtimeProvider = getCurrentProvider(sessionUserKey, currentAgent.agentId);
         const snapshot = await resolveModelsSnapshot(runtimeProvider);
         const lines = [
-          `当前运行器：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
+          `当前模型通道：${getRunnerLabel(runtimeProvider)} (${runtimeProvider})`,
           `当前模型：${currentModel ?? `(${getRunnerLabel(runtimeProvider)} 默认模型)`}`,
         ];
         if (snapshot.models.length > 0) {
@@ -1483,7 +1483,7 @@ ${clipMessage(text, 500)}
       if (shouldRecommendProviderSelection) {
         const providerHelp = handleUserCommand('/provider').queryProvider
           ? [
-              `当前 agent 尚未显式选择运行器，当前先使用默认值：${getRunnerLabel(getCurrentProvider(sessionUserKey, currentAgent.agentId))}。`,
+              `当前 agent 尚未显式选择模型通道，当前先使用默认值：${getRunnerLabel(getCurrentProvider(sessionUserKey, currentAgent.agentId))}。`,
               '建议首轮先发送 `/provider codex` 或 `/provider opencode` 完成选择。',
             ].join('\n')
           : undefined;
