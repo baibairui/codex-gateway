@@ -590,7 +590,7 @@ describe('createChatHandler', () => {
     expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '[默认Agent] 你好，我已开始处理。');
   });
 
-  it('intercepts the first ordinary feishu message and sends auth card before running codex when personal auth is unbound', async () => {
+  it('allows ordinary feishu messages through', async () => {
     const sendText = vi.fn(async () => undefined);
     const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
     const sessionStore = createSessionStore();
@@ -610,107 +610,6 @@ describe('createChatHandler', () => {
       defaultSearch: false,
       reminderDbPath: '/tmp/reminders.db',
       sendText,
-      feishuPersonalAuth: {
-        isAvailable: () => true,
-        isBound: () => false,
-        getAuthStartUrl: () => 'https://gateway.example.com/feishu/oauth/start?gateway_user_id=u1',
-        getAuthStatusUrl: () => 'https://gateway.example.com/feishu/auth/status?gateway_user_id=u1',
-      },
-    });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '你好' });
-
-    expect(run).not.toHaveBeenCalled();
-    expect(sendText).toHaveBeenCalledTimes(1);
-    expect(String(sendText.mock.calls[0]?.[2] ?? '')).toContain('"飞书个人授权"');
-  });
-
-  it('falls back to unavailable card when auth is nominally enabled but no login url can be generated', async () => {
-    const sendText = vi.fn(async () => undefined);
-    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run,
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-        isWorkspaceIdentityEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
-      feishuPersonalAuth: {
-        isAvailable: () => true,
-        isBound: () => false,
-        getAuthStartUrl: () => '',
-        getAuthStatusUrl: () => '',
-      },
-    });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '你好' });
-
-    expect(run).not.toHaveBeenCalled();
-    expect(sendText).toHaveBeenCalledTimes(1);
-    expect(String(sendText.mock.calls[0]?.[2] ?? '')).toContain('"飞书个人权限连接"');
-  });
-
-  it('allows ordinary feishu messages through when personal auth integration is not configured', async () => {
-    const sendText = vi.fn(async () => undefined);
-    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run,
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-        isWorkspaceIdentityEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
-    });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '你好' });
-
-    expect(run).toHaveBeenCalledTimes(1);
-  });
-
-  it('allows ordinary feishu messages through after personal auth is already bound', async () => {
-    const sendText = vi.fn(async () => undefined);
-    const run = vi.fn(async () => ({ threadId: 'thread_new', rawOutput: '' }));
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run,
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-        isWorkspaceIdentityEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
-      feishuPersonalAuth: {
-        isAvailable: () => true,
-        isBound: () => true,
-      },
     });
 
     await handler({ channel: 'feishu', userId: 'u1', content: '你好' });
@@ -982,51 +881,7 @@ describe('createChatHandler', () => {
     expect(buttons.some((button) => button.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
   });
 
-  it('returns a feishu auth card for /feishu-auth in feishu channel', async () => {
-    const sendText = vi.fn(async () => undefined);
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultModel: 'gpt-5-codex',
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
-      feishuPersonalAuth: {
-        isAvailable: () => true,
-        isBound: () => false,
-        getAuthStartUrl: () => 'https://gateway.example.com/feishu/oauth/start?gateway_user_id=u1',
-        getAuthStatusUrl: () => 'https://gateway.example.com/feishu/auth/status?gateway_user_id=u1',
-      },
-    });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '/feishu-auth' });
-
-    expect(sendText).toHaveBeenCalledTimes(1);
-    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as {
-      content?: {
-        header?: { title?: { content?: string } };
-        elements?: Array<{ tag?: string; actions?: Array<{ text?: { content?: string }; multi_url?: { url?: string } }> }>;
-      };
-    };
-    expect(parsed.content?.header?.title?.content).toBe('飞书个人授权');
-    const buttons = (parsed.content?.elements ?? [])
-      .filter((item) => item.tag === 'action')
-      .flatMap((item) => item.actions ?? []);
-    expect(buttons.some((button) => button.text?.content === '去飞书授权' && button.multi_url?.url === 'https://gateway.example.com/feishu/oauth/start?gateway_user_id=u1')).toBe(true);
-  });
-
-  it('returns an unavailable card for /feishu-auth when personal auth integration is disabled', async () => {
+  it('treats /feishu-auth as an unknown command in feishu channel', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
     const handler = createChatHandler({
@@ -1050,10 +905,10 @@ describe('createChatHandler', () => {
     await handler({ channel: 'feishu', userId: 'u1', content: '/feishu-auth' });
 
     expect(sendText).toHaveBeenCalledTimes(1);
-    expect(String(sendText.mock.calls[0]?.[2] ?? '')).toContain('"飞书个人权限连接"');
+    expect(String(sendText.mock.calls[0]?.[2] ?? '')).toContain('未识别命令');
   });
 
-  it('returns a plain hint for /feishu-auth outside feishu channel', async () => {
+  it('treats /feishu-auth as an unknown command outside feishu channel', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
     const handler = createChatHandler({
@@ -1076,84 +931,7 @@ describe('createChatHandler', () => {
 
     await handler({ channel: 'wecom', userId: 'u1', content: '/feishu-auth' });
 
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('仅支持在飞书渠道中触发'));
-  });
-
-  it('appends a feishu auth card when personal feishu command fails because binding is required', async () => {
-    const sendText = vi.fn(async () => undefined);
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run: async () => {
-          throw new Error('feishu binding required');
-        },
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultModel: 'gpt-5-codex',
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
-      feishuPersonalAuth: {
-        isAvailable: () => true,
-        isBound: () => false,
-        getAuthStartUrl: () => 'https://gateway.example.com/feishu/oauth/start?gateway_user_id=u1',
-        getAuthStatusUrl: () => 'https://gateway.example.com/feishu/auth/status?gateway_user_id=u1',
-      },
-    });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '请创建 task create-personal 任务' });
-
-    const authPayload = sendText.mock.calls
-      .map((call) => String(call[2] ?? ''))
-      .find((payload) => payload.includes('"飞书个人授权"'));
-    expect(authPayload).toBeTruthy();
-    const payload = String(authPayload ?? '');
-    const parsed = JSON.parse(payload) as {
-      content?: { header?: { title?: { content?: string } } };
-    };
-    expect(parsed.content?.header?.title?.content).toBe('飞书个人授权');
-    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('feishu binding required'))).toBe(false);
-    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('❌ 请求执行失败'))).toBe(false);
-  });
-
-  it('auto-sends a personal auth unavailable card instead of raw gateway errors', async () => {
-    const sendText = vi.fn(async () => undefined);
-    const sessionStore = createSessionStore();
-    const handler = createChatHandler({
-      sessionStore,
-      rateLimitStore: { allow: () => true },
-      codexRunner: {
-        run: async () => {
-          throw new Error('feishu personal auth unavailable');
-        },
-        review: async () => ({ rawOutput: '' }),
-      },
-      agentWorkspaceManager: {
-        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
-        isSharedMemoryEmpty: () => false,
-      },
-      runnerEnabled: true,
-      defaultModel: 'gpt-5-codex',
-      defaultSearch: false,
-      reminderDbPath: '/tmp/reminders.db',
-      sendText,
-    });
-
-    await handler({ channel: 'feishu', userId: 'u1', content: '帮我创建今天下午的个人飞书日程' });
-
-    const authPayload = sendText.mock.calls
-      .map((call) => String(call[2] ?? ''))
-      .find((payload) => payload.includes('"飞书个人权限连接"'));
-    expect(authPayload).toBeTruthy();
-    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('feishu personal auth unavailable'))).toBe(false);
-    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('❌ 请求执行失败'))).toBe(false);
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('未识别命令'));
   });
 
   it('renders search toggle card with dynamic button emphasis', async () => {
