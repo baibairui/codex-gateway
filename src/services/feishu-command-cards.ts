@@ -42,7 +42,7 @@ const COMMAND_LABELS: Record<string, string> = {
   '/rename': '会话重命名',
   '/switch': '会话切换',
   '/model': '模型管理',
-  '/provider': '运行器切换',
+  '/provider': '模型通道切换',
   '/models': '模型列表',
   '/skills': 'Skill 管理',
   '/search': '联网搜索',
@@ -59,7 +59,7 @@ const COMMAND_SUMMARIES: Record<string, string> = {
   '/agent': '查看当前 agent 状态，包括工作区和会话绑定情况。',
   '/skills': '查看当前会话生效的 skills，并快速切换不同范围。',
   '/model': '查看或切换当前模型，并在需要时恢复默认值。',
-  '/provider': '查看或切换当前 agent 的运行器，并在 Codex 与 OpenCode 之间切换。',
+  '/provider': '查看或切换当前 agent 的模型通道，并在 Codex 与 OpenCode 之间切换。',
   '/models': '查看当前支持的模型集合，并回到当前模型设置。',
   '/search': '控制本会话的联网搜索开关，按需临时开启。',
   '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
@@ -150,8 +150,8 @@ const STATIC_QUICK_ACTIONS: Record<string, CommandQuickAction[]> = {
   ],
   '/provider': [
     { label: '查看当前', cmd: '/provider', type: 'primary' },
-    { label: '切到 Codex', cmd: '/provider codex' },
-    { label: '切到 OpenCode', cmd: '/provider opencode' },
+    { label: '使用 Codex', cmd: '/provider codex' },
+    { label: '使用 OpenCode', cmd: '/provider opencode' },
   ],
   '/repair-users': [
     { label: '执行修复', cmd: '/repair-users', type: 'primary' },
@@ -234,7 +234,7 @@ function resolveCommandQuickActions(commandName: string, text: string): CommandQ
     return [
       { label: '⬅️ 上一页', cmd: `/help ${prev}`, type: page > 1 ? 'primary' : 'default' },
       { label: '下一页 ➡️', cmd: `/help ${next}`, type: page < total ? 'primary' : 'default' },
-      { label: '运行器切换', cmd: '/provider', type: page >= 2 ? 'primary' : 'default' },
+      { label: '运行器切换', cmd: '/provider', type: 'primary' },
     ];
   }
   const staticActions = STATIC_QUICK_ACTIONS[normalized];
@@ -894,7 +894,7 @@ export function buildFeishuLoginChoiceMessage(input: {
         '选择登录方式',
         supportsDeviceAuth
           ? `飞书下可以使用设备授权，或直接写入项目内的 ${providerLabel} API 配置。`
-          : `当前运行器是 ${providerLabel}，请直接写入项目内 API 配置。`,
+          : `当前模型通道是 ${providerLabel}，请直接写入项目内 API 配置。`,
       ),
       buildFeishuFieldGrid([
         { label: '写入位置', value: writeLocation },
@@ -945,7 +945,7 @@ export function buildFeishuOpenCodeLoginChoiceMessage(): string {
       },
     },
     elements: [
-      buildFeishuTitleBlock('选择 OpenCode 登录渠道', '优先使用 OpenCode 内置 auth login。点击 provider 后，后续请直接在聊天里按提示继续；中止可发送 /cancel。'),
+      buildFeishuTitleBlock('选择 OpenCode 登录方式', '点击登录渠道后，系统会优先返回授权链接并引导你在浏览器完成登录；只有授权流程仍需补充信息时，才需要回到聊天里继续。'),
       buildFeishuFieldGrid([
         { label: '写入位置', value: '.config/opencode/opencode.json' },
         { label: '认证文件', value: '.local/share/opencode/auth.json' },

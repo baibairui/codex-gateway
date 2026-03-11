@@ -10,6 +10,8 @@ interface OpenCodeAuthSession {
   key: string;
   provider: string;
   child: ChildProcessWithoutNullStreams;
+  announcedUrl: boolean;
+  announcedInputFallback: boolean;
 }
 
 interface StartOpenCodeAuthInput {
@@ -53,17 +55,46 @@ export class OpenCodeAuthFlowManager {
       key: input.key,
       provider: input.provider,
       child,
+      announcedUrl: false,
+      announcedInputFallback: false,
     });
 
-    await input.onOutput([
-      `已启动 OpenCode 内置登录：${input.provider}`,
-      '接下来请直接在聊天里按提示回复内容；如需中止，发送 /cancel。',
-    ].join('\n'));
-
     const forward = (raw: string) => {
+      const session = this.sessions.get(input.key);
       const text = sanitizeTerminalText(raw);
       if (!text.trim()) {
         return;
+      }
+      if (session) {
+        const urls = extractUrls(text);
+        if (urls.length > 0 && !session.announcedUrl) {
+          session.announcedUrl = true;
+          const providerLabel = input.provider === 'opencode' ? 'OpenCode' : input.provider;
+          const guidance = [
+            `已启动 OpenCode ${providerLabel} 登录。`,
+            '请先打开下面的链接，在浏览器中完成 OAuth 授权：',
+            ...urls.map((url) => `- ${url}`),
+            '完成后如果授权流程还在等待，可回到当前聊天继续按提示操作；如需中止，发送 /cancel。',
+          ].join('\n');
+          void input.onOutput(guidance).catch((error) => {
+            log.warn('OpenCode OAuth 引导消息发送失败', {
+              provider: input.provider,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+          return;
+        } else if (!session.announcedUrl && needsChatInput(text) && !session.announcedInputFallback) {
+          session.announcedInputFallback = true;
+          void input.onOutput([
+            '授权流程还需要补充一步确认。',
+            '请根据接下来显示的提示，在当前聊天里回复所需内容；如需中止，发送 /cancel。',
+          ].join('\n')).catch((error) => {
+            log.warn('OpenCode 输入引导消息发送失败', {
+              provider: input.provider,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+        }
       }
       void input.onOutput(text).catch((error) => {
         log.warn('OpenCode 登录输出转发失败', {
@@ -84,7 +115,7 @@ export class OpenCodeAuthFlowManager {
       void input.onExit({
         ok: false,
         provider: input.provider,
-        message: `OpenCode 登录进程启动失败：${error.message}`,
+        message: `登录流程启动失败：${error.message}`,
       });
     });
     child.on('close', (code) => {
@@ -93,8 +124,8 @@ export class OpenCodeAuthFlowManager {
         ok: code === 0,
         provider: input.provider,
         message: code === 0
-          ? `OpenCode ${input.provider} 登录完成。`
-          : `OpenCode ${input.provider} 登录失败，退出码：${code ?? 'unknown'}`,
+          ? `${toProviderLabel(input.provider)} 登录完成。`
+          : `${toProviderLabel(input.provider)} 登录失败，退出码：${code ?? 'unknown'}`,
       });
     });
   }
@@ -133,6 +164,21 @@ function sanitizeTerminalText(text: string): string {
     .replace(/\u001b\[\?2004[hl]/g, '')
     .replace(/\n{3,}/g, '\n\n');
   return stripped.trim();
+}
+
+function extractUrls(text: string): string[] {
+  return Array.from(new Set(text.match(/https?:\/\/[^\s)<>"']+/g) ?? []));
+}
+
+function needsChatInput(text: string): boolean {
+  return /(\?\s*$|enter\b|press\b|select\b|choose\b|continue\b|confirm\b|input\b|code\b)/im.test(text);
+}
+
+function toProviderLabel(provider: string): string {
+  if (provider === 'opencode') {
+    return 'OpenCode';
+  }
+  return provider.slice(0, 1).toUpperCase() + provider.slice(1);
 }
 
 function stripAnsi(text: string): string {

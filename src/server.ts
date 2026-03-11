@@ -798,7 +798,7 @@ async function appDepsHandleFeishuCardAction(input: {
   if (input.action === 'opencode_login.start_provider_auth') {
     const providerId = extractCardField(input.value, 'provider_id') ?? '';
     if (!providerId) {
-      await sendText('feishu', input.userId, '❌ 缺少 OpenCode provider，无法启动登录。');
+      await sendText('feishu', input.userId, '❌ 缺少登录渠道，无法启动登录。');
       return;
     }
     const authSessionKey = buildOpenCodeAuthSessionKey('feishu', input.userId, currentAgent.agentId);
