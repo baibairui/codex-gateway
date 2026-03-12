@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp, dispatchFeishuCardActionEvent, dispatchFeishuMessageReceiveEvent } from '../src/app.js';
 
@@ -8,6 +8,10 @@ afterAll(() => {
   for (const server of serverRefs) {
     server.close();
   }
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 async function startTestServer(options?: {
@@ -33,56 +37,10 @@ async function startTestServer(options?: {
     action: string;
     value: Record<string, unknown>;
   }) => Promise<void>;
-  feishuOAuthService?: {
-    buildAuthUrl: (input: { state: string }) => string;
-    exchangeCode: (code: string) => Promise<{
-      accessToken: string;
-      refreshToken: string;
-      expiresIn: number;
-    }>;
-    getAuthorizedUser: (accessToken: string) => Promise<{
-      openId: string;
-      userId: string;
-      name?: string;
-      enName?: string;
-    }>;
-  };
-  feishuUserBindingStore?: {
-    upsertBinding: (input: {
-      gatewayUserId: string;
-      feishuOpenId?: string;
-      feishuUserId?: string;
-      accessToken: string;
-      refreshToken: string;
-      expiresAt: number;
-      scopeSnapshot?: string;
-    }) => unknown;
-    getByGatewayUserId: (gatewayUserId: string) => {
-      gatewayUserId: string;
-      feishuOpenId?: string;
-      feishuUserId?: string;
-      accessToken: string;
-      refreshToken: string;
-      expiresAt: number;
-      scopeSnapshot?: string;
-    } | undefined;
-  };
-  feishuUserApi?: {
-    createPersonalTask: (input: {
-      gatewayUserId: string;
-      summary: string;
-      description?: string;
-    }) => Promise<Record<string, unknown>>;
-    createPersonalCalendarEvent?: (input: {
-      gatewayUserId: string;
-      summary: string;
-      description?: string;
-      startTime: string;
-      endTime: string;
-      timezone?: string;
-    }) => Promise<Record<string, unknown>>;
-  };
   internalApiToken?: string;
+  feishuAppId?: string;
+  feishuAppSecret?: string;
+  gatewayRootDir?: string;
   browserAutomation?: {
     execute: (command: string, args: Record<string, unknown>) => Promise<{
       text: string;
@@ -105,13 +63,13 @@ async function startTestServer(options?: {
     feishuStartupHelpEnabled: options?.feishuStartupHelpEnabled,
     feishuStartupHelpAdminConfigured: options?.feishuStartupHelpAdminConfigured,
     internalApiToken: options?.internalApiToken,
+    feishuAppId: options?.feishuAppId,
+    feishuAppSecret: options?.feishuAppSecret,
+    gatewayRootDir: options?.gatewayRootDir,
     browserAutomation: options?.browserAutomation,
     isDuplicateMessage: () => false,
     handleText: options?.handleText ?? (async () => undefined),
     handleFeishuCardAction: options?.handleFeishuCardAction,
-    feishuOAuthService: options?.feishuOAuthService as never,
-    feishuUserBindingStore: options?.feishuUserBindingStore as never,
-    feishuUserApi: options?.feishuUserApi as never,
   });
 
   const server = app.listen(0);
@@ -236,6 +194,19 @@ describe('createApp feishu oauth routes', () => {
     expect(oauthStart.status).toBe(404);
     expect(oauthCallback.status).toBe(404);
     expect(authStatus.status).toBe(404);
+  });
+
+  it('does not expose the disabled feishu skill oauth callback', async () => {
+    const baseUrl = await startTestServer({
+      feishuAppId: 'cli_app',
+      feishuAppSecret: 'cli_secret',
+    });
+
+    const response = await fetch(
+      `${baseUrl}/feishu/skill/oauth/callback?code=code_123&state=test`,
+    );
+
+    expect(response.status).toBe(404);
   });
 });
 

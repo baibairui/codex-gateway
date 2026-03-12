@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.data/
+.env
+npm-debug.log*
+package.json.bak.*
+.pem
+docs/
+deploy*.sh
+!deploy-env.sh
+
+.worktrees/

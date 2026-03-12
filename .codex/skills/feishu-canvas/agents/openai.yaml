@@ -1,0 +1,7 @@
+interface:
+  display_name: "Feishu Canvas"
+  short_description: "Create and continue a Feishu DocX workspace like a lightweight Gemini Canvas."
+  default_prompt: "Use $feishu-canvas when the user needs a persistent Feishu document workspace."
+policy:
+  allow_implicit_invocation: true
+

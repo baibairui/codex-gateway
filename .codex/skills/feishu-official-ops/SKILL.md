@@ -1,185 +1,342 @@
 ---
 name: feishu-official-ops
-description: Use when the user wants real Feishu official operations such as creating DocX documents or Wiki nodes. Uses the bundled script inside this skill, backed by Feishu OpenAPI, instead of pretending to do the action.
+description: Use when an agent needs to perform real Feishu OpenAPI work, inspect which official Feishu API to use, or fall back to a direct authenticated OpenAPI call for operations such as DocX, Wiki, Drive, Bitable, Calendar, Task, Approval, Contacts, Chat, Cards, and Search.
 ---
 
 # Feishu Official Ops
 
-Use this skill when the user wants the agent to perform real Feishu operations through the official OpenAPI, especially:
+Use this skill when the user wants the agent to complete a real Feishu action through the official OpenAPI.
 
-- Read IM history or search messages
-- Read DocX / cloud document content
-- Query Bitable tables or records
-- Read calendar lists, events, or freebusy windows
-- Create or inspect tasks / subtasks
-- Create a DocX document
-- Create a Wiki node in a knowledge space
-- List Wiki spaces
-- Query a Wiki node
+This skill is the Feishu **skill layer**, not the gateway transport layer.
 
-Do not claim the action is done unless you actually run the skill's bundled script and verify success from the returned payload.
-For DocX / Wiki writes, a chat markdown answer is not a successful write; success means the script returned a real `document_id`, `document_url`, or wiki node token.
+## Boundary
+
+Count as skill coverage:
+
+- creating or editing DocX content
+- creating or querying Wiki nodes
+- querying or editing Drive, Bitable, Calendar, Task, Approval, Contact, Chat, Card, and Search resources
+- discovering official APIs from the Feishu API Explorer catalog
+- calling an official OpenAPI directly when no curated command exists yet
+
+Do **not** count as skill coverage:
+
+- gateway reply transport
+- chat reply formatting
+- sending a model answer back to Feishu through the gateway runtime
+
+If the action only requires sending a reply in the current chat, that is gateway behavior, not this skill.
 
 ## Executor
 
-Use the bundled script inside this skill:
+Use the bundled script:
 
 ```bash
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs --help
 ```
 
-The script reads these environment variables:
+Required environment:
 
 - `FEISHU_APP_ID`
 - `FEISHU_APP_SECRET`
-- `FEISHU_DOC_BASE_URL` (optional)
-If either credential is missing, stop and report the real blocker instead of inventing success.
 
-## Official docs
+Optional:
 
-- Tenant access token: `https://open.feishu.cn/api-explorer?project=auth&resource=tenant_access_token&apiName=internal&version=v3`
-- Create DocX document: `https://open.feishu.cn/document/ukTMukTMukTM/uUDN04SN0QjL1QDN/document-docx/docx-v1/document/create`
-- Create Wiki node: `https://open.feishu.cn/document/ukTMukTMukTM/uUDN04SN0QjL1QDN/wiki-v2/space-node/create`
-- List Wiki spaces: `https://open.feishu.cn/document/ukTMukTMukTM/uUDN04SN0QjL1QDN/wiki-v2/space/list`
-- Get Wiki node: `https://open.feishu.cn/document/ukTMukTMukTM/uUDN04SN0QjL1QDN/wiki-v2/space/get_node`
+- `FEISHU_DOC_BASE_URL`
+- `GATEWAY_ROOT_DIR`
 
-### Examples
+If credentials are missing, stop and report the real blocker.
 
-Read a single IM message:
+Personal Feishu commands are available again and use a **device-flow-only** auth bootstrap:
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs im get-message --message-id om_xxx
-```
+- `auth start-device-auth`
+- `auth poll-device-auth`
 
-List IM history:
+This follows the same no-public-callback model used by `openclaw-lark`. Do not ask the user to configure `GATEWAY_PUBLIC_BASE_URL` for Feishu user auth.
+If a personal command returns `authorization_required`, call `auth start-device-auth`, guide the user through approval, then call `auth poll-device-auth` and retry.
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs im list-messages --container-id-type chat --container-id oc_xxx --page-size 50
-```
+## Command Strategy
 
-Search IM messages:
+Choose commands in this order:
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs im search-messages --query "发布"
-```
+1. Use a **curated command** when the operation already has a stable command surface.
+2. Use **catalog search/show** when you need to find the correct official API.
+3. Use **api call** when no curated command exists yet.
 
-Read DocX markdown content:
+This is the core rule that makes the skill broad without pretending every Feishu API already has a handwritten wrapper.
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs doc get-content --doc-token doccnxxxxxxxx
-```
+## Curated Command Groups
 
-Read DocX raw text:
+Current first-class groups:
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs doc get-raw-content --document "https://feishu.cn/docx/doccnxxxxxxxx"
-```
+- `auth`
+- `im`
+- `doc`
+- `bitable`
+- `calendar`
+- `task`
+- `docx`
+- `wiki`
+- `drive`
+- `sheets`
+- `chat`
+- `card`
+- `approval`
+- `contact`
+- `search`
 
-List Bitable tables:
+Discovery and fallback:
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs bitable list-tables --app-token appcnxxxxxxxx
-```
+- `catalog list`
+- `catalog search`
+- `catalog show`
+- `api call`
 
-Search Bitable records:
+## When To Use Which Surface
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs bitable search-records --app-token appcnxxxxxxxx --table-id tblxxxxxxxx --filter-json '{"conjunction":"and","conditions":[]}'
-```
+Use curated commands for common work:
 
-List calendars:
+- `auth start-device-auth` / `auth poll-device-auth`
+- `docx create` / `docx append`
+- `wiki list-spaces` / `wiki list-nodes` / `wiki get-node` / `wiki create-node` / `wiki move-node` / `wiki update-title` / `wiki get-task`
+- `doc get-content`
+- `bitable list-tables` / `bitable search-records` / `bitable create-record` / `bitable update-record`
+- `calendar list-calendars` / `calendar create-calendar` / `calendar get-calendar` / `calendar update-calendar` / `calendar delete-calendar` / `calendar list-events` / `calendar create-event` / `calendar list-events-v4` / `calendar get-event` / `calendar update-event` / `calendar delete-event` / `calendar create-personal-event` / `calendar freebusy`
+- `task create` / `task update` / `task delete` / `task add-members` / `task remove-members` / `task add-reminders` / `task remove-reminders` / `task add-dependencies` / `task remove-dependencies` / `task list-subtasks` / `task list-tasklists` / `task add-tasklist` / `task remove-tasklist` / `task create-personal-task` / `task list-personal-tasks` / `task get-personal-task` / `task update-personal-task` / `task delete-personal-task`
+- `tasklist create` / `tasklist list` / `tasklist get` / `tasklist update` / `tasklist delete` / `tasklist tasks` / `tasklist add-members` / `tasklist remove-members`
+- `drive list-files` / `drive create-folder` / `drive get-meta` / `drive copy-file` / `drive move-file` / `drive delete-file` / `drive create-shortcut` / `drive get-public-permission` / `drive patch-public-permission` / `drive list-permission-members` / `drive create-permission-member` / `drive update-permission-member` / `drive delete-permission-member` / `drive check-member-auth` / `drive transfer-owner` / `drive list-comments` / `drive batch-query-comments` / `drive create-comment` / `drive patch-comment`
+- `sheets create` / `sheets get` / `sheets query-sheets` / `sheets find` / `sheets replace`
+- `chat list` / `chat create` / `chat get` / `chat search` / `chat update` / `chat add-members` / `chat remove-members` / `chat add-managers` / `chat delete-managers` / `chat get-announcement` / `chat update-announcement`
+- `card create` / `card update`
+- `approval create-instance` / `approval get-definition` / `approval get-instance` / `approval cancel-instance` / `approval search-tasks` / `approval query-tasks` / `approval approve-task` / `approval reject-task` / `approval transfer-task` / `approval resubmit-task` / `approval cc-instance` / `approval search-cc` / `approval list-comments` / `approval create-comment` / `approval delete-comment`
+- `contact get-user` / `contact get-department` / `contact list-users` / `contact list-users-by-department` / `contact list-departments` / `contact batch-get-user-id`
+- `search doc-wiki`
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar list-calendars
-```
+Use catalog discovery when the user asks for a Feishu capability but the matching command is unclear.
 
-Read calendar freebusy:
+Use `api call` when:
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar freebusy --time-min 2026-03-09T00:00:00Z --time-max 2026-03-10T00:00:00Z --user-id ou_xxx
-```
+- the API is in the official catalog,
+- you know the exact endpoint,
+- there is no curated wrapper yet.
 
-Create a task:
+## Examples
 
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create --summary "整理周报"
-```
-
-Create a task subtask:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create-subtask --task-guid task_guid_xxx --summary "补齐风险项"
-```
-
-Create a DocX document:
+Create a DocX:
 
 ```bash
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx create --title "项目周报"
 ```
 
-Create a DocX document in a folder:
+Append markdown into an existing DocX:
 
 ```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx create --title "项目周报" --folder-token fldcnxxxxxxxx
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx append --document "https://feishu.cn/docx/doccnxxxxxxxx" --markdown-file ./weekly.md
 ```
 
-Create a DocX document and write markdown content:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx create --title "项目周报" --markdown-file ./weekly.md
-```
-
-Create a DocX document and insert a local image:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx create --title "架构图" --image-file ./topology.png --image-caption "系统拓扑图"
-```
-
-Append markdown content into an existing DocX document:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx append --document "https://feishu.cn/docx/doccnxxxxxxxx" --markdown-file ./iteration.md
-```
-
-Append a local image into an existing DocX document:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs docx append --document "https://feishu.cn/docx/doccnxxxxxxxx" --image-file ./diagram.png --image-width 960 --image-caption "调用链路图"
-```
-
-List Wiki spaces:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki list-spaces
-```
-
-Create a DocX node in a Wiki space:
+Create a Wiki node:
 
 ```bash
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki create-node --space-id 123456789 --obj-type docx --title "需求评审记录"
 ```
 
-Create a child node under a parent node:
+Move an existing Wiki node into an archive branch:
 
 ```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki create-node --space-id 123456789 --parent-node-token wikinodecnxxxx --obj-type docx --title "接口设计"
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki move-node --space-id 123456789 --node-token wikicnxxxxxxxx --target-parent-token wikiarchivexxxx
+```
+
+Move a Drive DocX into Wiki:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki move-docs-to-wiki --space-id 123456789 --obj-type docx --obj-token doccnxxxxxxxx --parent-wiki-token wikicnparentxxxx --apply true
+```
+
+Start Feishu device auth without a public callback URL:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs auth start-device-auth --gateway-user-id ou_bind_1
+```
+
+Poll the device auth until the binding is created:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs auth poll-device-auth --gateway-user-id ou_bind_1 --device-code dev_xxx
+```
+
+These commands stay in the skill layer, use Feishu device flow, and write the resulting binding into the gateway SQLite store without any browser callback endpoint.
+
+Create a personal calendar event after user authorization is available:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar create-personal-event --gateway-user-id ou_bind_1 --summary "一对一沟通" --start-time "2026-03-13T10:00:00+08:00" --end-time "2026-03-13T10:30:00+08:00"
+```
+
+Create or list personal tasks:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create-personal-task --gateway-user-id ou_bind_1 --summary "整理个人待办"
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task list-personal-tasks --gateway-user-id ou_bind_1 --page-size 20
+```
+
+Create or manage a shared calendar through the official application API:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar create-calendar --body-json '{"summary":"项目协同","description":"跨团队共享日历","permissions":"private","color":5}'
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar get-calendar --calendar-id cal_shared_1
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar update-calendar --calendar-id cal_shared_1 --body-json '{"summary":"项目协同-更新","color":7}'
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar delete-calendar --calendar-id cal_shared_1
+```
+
+These commands stay in the skill layer and use the official calendar application APIs with the app or tenant token already configured for the gateway.
+
+Create or manage a shared calendar event through the official application API:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar create-event --calendar-id cal_shared_1 --body-json '{"summary":"架构评审","start_time":{"timestamp":"1741850400","timezone":"Asia/Shanghai"},"end_time":{"timestamp":"1741854000","timezone":"Asia/Shanghai"}}'
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar list-events-v4 --calendar-id cal_shared_1 --time-min "2026-03-13T00:00:00Z" --time-max "2026-03-14T00:00:00Z"
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar get-event --calendar-id cal_shared_1 --event-id evt_xxx
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar update-event --calendar-id cal_shared_1 --event-id evt_xxx --body-json '{"summary":"架构评审-更新"}'
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar delete-event --calendar-id cal_shared_1 --event-id evt_xxx
+```
+
+These commands stay in the skill layer and use the official calendar application APIs with the app or tenant token already configured for the gateway.
+
+Search the official catalog:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs catalog search --query "approval"
+```
+
+Show one official API entry:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs catalog show --project wiki --version v2 --resource space --api-name list
+```
+
+Call an official API directly:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs api call --method POST --path /open-apis/approval/v4/instances --body-json '{"approval_code":"leave","user_id":"ou_xxx"}'
+```
+
+List Drive files in a folder:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs drive list-files --folder-token fldcnxxxxxxxx --page-size 50
+```
+
+Copy a DocX into another Drive folder:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs drive copy-file --file-token doccnxxxxxxxx --name "项目周报-副本" --folder-token fldtargetxxxx --type docx
+```
+
+List comments on a Drive file:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs drive list-comments --file-token doccnxxxxxxxx --file-type docx --page-size 20
+```
+
+Grant edit access on a Drive DocX:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs drive create-permission-member --token doccnxxxxxxxx --type docx --need-notification true --body-json '{"member_type":"userid","member_id":"ou_xxx","perm":"edit"}'
+```
+
+Check whether the current user can edit a Drive DocX:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs drive check-member-auth --token doccnxxxxxxxx --type docx --action edit
+```
+
+Transfer a Drive DocX to a new owner while keeping the old owner as editor:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs drive transfer-owner --token doccnxxxxxxxx --type docx --need-notification true --remove-old-owner false --old-owner-perm edit --body-json '{"member_type":"userid","member_id":"ou_new_owner"}'
+```
+
+Create a spreadsheet workspace:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs sheets create --title "项目台账" --folder-token fldcnxxxxxxxx
+```
+
+Add an assignee to a task directly from the skill layer:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task add-members --task-guid taskguidcnxxxxxxxx --user-id-type open_id --body-json '{"members":[{"id":"ou_xxx","role":"assignee"}]}'
+```
+
+Search pending approval tasks for a user:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs approval search-tasks --page-size 50 --body-json '{"user_id":"ou_xxx","task_status":"PENDING"}'
+```
+
+Approve an approval task directly from the skill layer:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs approval approve-task --user-id-type open_id --body-json '{"approval_code":"leave","instance_code":"ins_xxx","user_id":"ou_xxx","task_id":"task_xxx","comment":"同意"}'
+```
+
+CC an approval instance directly from the skill layer:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs approval cc-instance --user-id-type open_id --body-json '{"approval_code":"leave","instance_code":"ins_xxx","user_id":"ou_xxx","cc_user_ids":["ou_cc_1","ou_cc_2"],"comment":"请同步关注"}'
+```
+
+Search unread approval CC items for a user:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs approval search-cc --page-size 50 --user-id-type open_id --body-json '{"user_id":"ou_xxx","read_status":"UNREAD"}'
+```
+
+Find cells inside a sheet:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs sheets find --spreadsheet-token spshcnxxxxxxxx --sheet-id sheetcnxxxxxxxx --body-json '{"find":"风险","find_condition":{"range":"A1:D200"}}'
+```
+
+Create a Bitable record:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs bitable create-record --app-token appcnxxxxxxxx --table-id tblcnxxxxxxxx --fields-json '{"标题":"新需求"}'
+```
+
+Create or update a group directly from the skill layer:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs chat create --body-json '{"name":"项目群","user_id_list":["ou_xxx"]}'
+```
+
+Update the group announcement directly from the skill layer:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs chat update-announcement --chat-id oc_xxx --body-json '{"revision":"7","requests":["{\"insert\":\"本周提测冻结到周四 18:00\"}"]}'
+```
+
+Create a card entity:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs card create --body-json '{"schema":"2.0","header":{"title":{"tag":"plain_text","content":"状态卡片"}}}'
 ```
 
 ## Workflow
 
-1. Confirm the target object type and destination.
-2. 如果用户给了飞书文档链接、wiki 链接或 document_id，直接解析并继续；只有目标对象完全不明确时才追问。
-3. For DocX / Wiki actions, run the matching command from this skill directly.
-4. Read the returned JSON and report the real result back to the user.
-5. If the API returns a permission error, say that the Feishu app lacks the required OpenAPI permission instead of inventing success.
-6. If the user wants to insert a local image or the message already contains `local_image_path=...`, prefer `--image-file` instead of trying to stuff the image into markdown.
-7. 优先选最小命令面：读取就用 `im/doc/bitable/calendar/task`，写文档或知识库才用 `docx/wiki`。
+1. Confirm whether the user wants a real Feishu operation, not just a chat reply.
+2. Prefer the narrowest curated command that can finish the work.
+3. If the API is unclear, run `catalog search`.
+4. If the API is known but not curated, run `api call`.
+5. Read the returned JSON before reporting success.
+6. If the API returns a permission error, say the Feishu app lacks the required OpenAPI scope.
 
-## Location rules
+## Rules
 
-- To create a standalone document, prefer `docx create`.
-- To create content inside a knowledge space, prefer `wiki create-node`.
-- If the user only says "建一个飞书文档" and does not specify a knowledge space or folder, create a standalone DocX document first.
-- After a DocX / Wiki write succeeds, reply with the returned document URL or node info directly; do not bounce the user into personal auth.
-- For appending content, accept either a full Feishu document URL, a wiki URL, or a raw `document_id`; do not insist on a user-provided URL format config.
-- For read-only queries, prefer the narrowest command: `im` for messages, `doc` for document content, `bitable` for records, `calendar` for calendars/freebusy, `task` for tasks.
+- Do not claim success unless the CLI returned a real successful payload.
+- For DocX and Wiki writes, success means the payload contains a real document or node identifier.
+- For DocX and Wiki writes, a chat markdown answer is not a successful write.
+- If the user provides a DocX URL, Wiki URL, or raw ID, parse it and continue; only ask when the target is genuinely unknown.
+- For local images in DocX writes, prefer `--image-file`.
+- After a real DocX or Wiki write succeeds, do not bounce the user into personal auth.
+- Keep responses factual: report the real document URL, node token, or API result.

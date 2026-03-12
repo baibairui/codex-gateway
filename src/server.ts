@@ -24,6 +24,7 @@ import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
 import { installReminderToolSkill } from './services/reminder-tool-skill.js';
 import { installFeishuOfficialOpsSkill } from './services/feishu-official-ops-skill.js';
+import { installFeishuCanvasSkill } from './services/feishu-canvas-skill.js';
 import { installGatewayBrowserSkill, syncManagedGlobalSkills } from './services/gateway-browser-skill.js';
 import { OpenCodeAuthFlowManager, buildOpenCodeAuthSessionKey } from './services/opencode-auth-flow.js';
 import { pushFeishuStartupHelp } from './services/startup-help.js';
@@ -143,6 +144,7 @@ const codexRunner = new CodexRunner({
   internalApiBaseUrl,
   internalApiToken,
   gatewayRootDir,
+  gatewayPublicBaseUrl: config.gatewayPublicBaseUrl,
   sandbox: config.codexSandbox,
   workdirIsolation: config.codexWorkdirIsolation,
   codexHomeDir,
@@ -159,6 +161,7 @@ const opencodeRunner = new CodexRunner({
   internalApiBaseUrl,
   internalApiToken,
   gatewayRootDir,
+  gatewayPublicBaseUrl: config.gatewayPublicBaseUrl,
   sandbox: config.codexSandbox,
   workdirIsolation: config.codexWorkdirIsolation,
   codexHomeDir: opencodeHomeDir,
@@ -419,9 +422,12 @@ const memorySteward = new MemorySteward({
 const app = createApp({
   wecomEnabled: config.wecomEnabled,
   feishuEnabled: config.feishuEnabled,
+  feishuAppId: config.feishuAppId,
+  feishuAppSecret: config.feishuAppSecret,
   wecomCrypto,
   allowFrom: config.allowFrom,
   internalApiToken,
+  gatewayRootDir,
   browserAutomation,
   feishuVerificationToken: config.feishuVerificationToken,
   feishuLongConnection: feishuStatusSummary.mode === 'long-connection',
@@ -859,6 +865,7 @@ function syncBuiltInSkills(agentsRootDir: string): void {
   syncManagedGlobalSkills();
   installReminderToolSkill(path.resolve(agentsRootDir));
   installFeishuOfficialOpsSkill(path.resolve(agentsRootDir));
+  installFeishuCanvasSkill(path.resolve(agentsRootDir));
   const usersDir = path.join(agentsRootDir, 'users');
   if (!fs.existsSync(usersDir)) {
     return;
@@ -879,6 +886,7 @@ function syncBuiltInSkills(agentsRootDir: string): void {
       installGatewayBrowserSkill(workspaceDir);
       installReminderToolSkill(workspaceDir);
       installFeishuOfficialOpsSkill(workspaceDir);
+      installFeishuCanvasSkill(workspaceDir);
     }
   }
 }

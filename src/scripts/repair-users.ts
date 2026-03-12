@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { AgentWorkspaceManager } from '../services/agent-workspace-manager.js';
+import { installFeishuCanvasSkill } from '../services/feishu-canvas-skill.js';
 import { installFeishuOfficialOpsSkill } from '../services/feishu-official-ops-skill.js';
 import { installGatewayBrowserSkill } from '../services/gateway-browser-skill.js';
 import { installReminderToolSkill } from '../services/reminder-tool-skill.js';
@@ -30,6 +31,7 @@ function repairWorkspace(workspaceDir: string): void {
   installGatewayBrowserSkill(workspaceDir);
   installReminderToolSkill(workspaceDir);
   installFeishuOfficialOpsSkill(workspaceDir);
+  installFeishuCanvasSkill(workspaceDir);
 }
 
 function tryEnsureDir(dir: string): boolean {
