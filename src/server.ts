@@ -635,7 +635,9 @@ app.listen(config.port, () => {
           isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
           handleText: async (input) => appDepsHandleText(input),
           handleFeishuCardAction: async (input) => appDepsHandleFeishuCardAction(input),
-        }, data);
+        }, data, {
+          publicBaseUrl: config.gatewayPublicBaseUrl,
+        });
       },
     });
     wsClient.start({ eventDispatcher }).then(async () => {
