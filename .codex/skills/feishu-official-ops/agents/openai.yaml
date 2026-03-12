@@ -1,6 +1,6 @@
 interface:
   display_name: "Feishu Official Ops"
-  short_description: "Execute real Feishu OpenAPI operations through the feishu-official-ops skill."
-  default_prompt: "Use $feishu-official-ops when the user wants real Feishu official operations."
+  short_description: "Run real Feishu OpenAPI actions, search the official API catalog, and fall back to direct authenticated API calls."
+  default_prompt: "Use $feishu-official-ops when the user needs a real Feishu OpenAPI action, needs to discover the right official API, or needs a direct authenticated fallback beyond the curated commands."
 policy:
   allow_implicit_invocation: true

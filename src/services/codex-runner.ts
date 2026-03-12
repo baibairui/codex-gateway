@@ -32,6 +32,7 @@ export interface CodexRunInput {
   onMessage?: (text: string) => void;
   /** 一旦收到 thread.started 就立刻回调，便于上层先持久化新会话 */
   onThreadStarted?: (threadId: string) => void;
+  gatewayPublicBaseUrl?: string;
 }
 
 export interface CodexRunResult {
@@ -70,6 +71,7 @@ interface CodexRunnerOptions {
   internalApiBaseUrl?: string;
   internalApiToken?: string;
   gatewayRootDir?: string;
+  gatewayPublicBaseUrl?: string;
   /** 'full-auto' (沙箱) 或 'none' (无沙箱) */
   sandbox?: 'full-auto' | 'none';
   workdirIsolation?: CodexWorkdirIsolationMode;
@@ -128,6 +130,7 @@ export class CodexRunner {
   private readonly browserAutomation?: BrowserAutomationRuntimeConfig;
   private readonly internalApiBaseUrl?: string;
   private readonly gatewayRootDir?: string;
+  private readonly gatewayPublicBaseUrl?: string;
   private readonly sandbox: 'full-auto' | 'none';
   private readonly workdirIsolation: CodexWorkdirIsolationMode;
   private readonly codexHomeDir?: string;
@@ -150,6 +153,7 @@ export class CodexRunner {
       : undefined;
     this.internalApiBaseUrl = options.internalApiBaseUrl?.trim() || undefined;
     this.gatewayRootDir = options.gatewayRootDir?.trim() || undefined;
+    this.gatewayPublicBaseUrl = options.gatewayPublicBaseUrl?.trim() || undefined;
     this.sandbox = options.sandbox ?? 'full-auto';
     this.workdirIsolation = options.workdirIsolation ?? 'off';
     this.codexHomeDir = options.codexHomeDir?.trim() || undefined;
@@ -163,6 +167,7 @@ export class CodexRunner {
       timeoutPerCharMs: this.timeoutPerCharMs,
       browserApiBaseUrl: this.browserAutomation?.apiBaseUrl ?? '(disabled)',
       gatewayRootDir: this.gatewayRootDir ?? '(unset)',
+      gatewayPublicBaseUrl: this.gatewayPublicBaseUrl ?? '(unset)',
       sandbox: this.sandbox,
       workdirIsolation: this.workdirIsolation,
       codexHomeDir: this.codexHomeDir ?? '(system HOME)',
@@ -178,6 +183,7 @@ export class CodexRunner {
         reminderToolContext: input.reminderToolContext,
         browserAutomation: this.browserAutomation,
         gatewayRootDir: this.gatewayRootDir,
+        gatewayPublicBaseUrl: input.gatewayPublicBaseUrl ?? this.gatewayPublicBaseUrl,
         gatewayUserId: input.gatewayUserId,
         internalApiBaseUrl: this.internalApiBaseUrl,
       }),
@@ -608,6 +614,7 @@ export function buildCodexChildEnv(
     reminderToolContext?: CodexRunInput['reminderToolContext'];
     browserAutomation?: BrowserAutomationRuntimeConfig;
     gatewayRootDir?: string;
+    gatewayPublicBaseUrl?: string;
     gatewayUserId?: string;
     internalApiBaseUrl?: string;
   },
@@ -631,6 +638,9 @@ export function buildCodexChildEnv(
   }
   if (input.gatewayRootDir?.trim()) {
     env.GATEWAY_ROOT_DIR = input.gatewayRootDir.trim();
+  }
+  if (input.gatewayPublicBaseUrl?.trim()) {
+    env.GATEWAY_PUBLIC_BASE_URL = input.gatewayPublicBaseUrl.trim();
   }
   if (input.gatewayUserId?.trim()) {
     env.GATEWAY_USER_ID = input.gatewayUserId.trim();

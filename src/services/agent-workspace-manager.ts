@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { installReminderToolSkill } from './reminder-tool-skill.js';
 import { installFeishuOfficialOpsSkill } from './feishu-official-ops-skill.js';
+import { installFeishuCanvasSkill } from './feishu-canvas-skill.js';
 import { installGatewayBrowserSkill } from './gateway-browser-skill.js';
 import { installSocialIntelSkills } from './social-intel-skill.js';
 
@@ -199,6 +200,7 @@ export class AgentWorkspaceManager {
     installGatewayBrowserSkill(workspaceDir);
     installReminderToolSkill(workspaceDir);
     installFeishuOfficialOpsSkill(workspaceDir);
+    installFeishuCanvasSkill(workspaceDir);
     installSocialIntelSkills(workspaceDir);
   }
 
@@ -416,6 +418,7 @@ export class AgentWorkspaceManager {
     installGatewayBrowserSkill(workspaceDir);
     installReminderToolSkill(workspaceDir);
     installFeishuOfficialOpsSkill(workspaceDir);
+    installFeishuCanvasSkill(workspaceDir);
     installSocialIntelSkills(workspaceDir);
     this.writeIfMissing(path.join(workspaceDir, 'browser-playbook.md'), renderBrowserPlaybook());
     this.writeIfMissing(path.join(workspaceDir, 'feishu-ops-playbook.md'), renderFeishuOpsPlaybook());

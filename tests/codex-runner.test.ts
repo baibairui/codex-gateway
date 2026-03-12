@@ -247,6 +247,7 @@ describe('buildCodexChildEnv', () => {
           internalApiToken: 'token-123',
         },
         gatewayRootDir: '/opt/gateway',
+        gatewayPublicBaseUrl: 'https://gateway.example.com',
         gatewayUserId: 'u1',
         internalApiBaseUrl: 'http://127.0.0.1:3000/internal',
       },
@@ -260,6 +261,7 @@ describe('buildCodexChildEnv', () => {
     expect(env.GATEWAY_INTERNAL_API_TOKEN).toBe('token-123');
     expect(env.GATEWAY_INTERNAL_API_BASE).toBe('http://127.0.0.1:3000/internal');
     expect(env.GATEWAY_ROOT_DIR).toBe('/opt/gateway');
+    expect(env.GATEWAY_PUBLIC_BASE_URL).toBe('https://gateway.example.com');
     expect(env.GATEWAY_USER_ID).toBe('u1');
   });
 });

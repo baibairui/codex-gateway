@@ -1,0 +1,57 @@
+{
+  "name": "wecom-codex-gateway",
+  "version": "0.1.0",
+  "description": "A lightweight WeCom/Feishu gateway for Codex CLI with multi-agent memory workspaces.",
+  "main": "dist/server.js",
+  "scripts": {
+    "test": "LOG_LEVEL=error vitest run",
+    "dev": "node ./bin/start-gateway.mjs dev",
+    "start": "node ./bin/start-gateway.mjs start",
+    "up": "node ./bin/start-gateway.mjs dev",
+    "build": "tsc -p tsconfig.json",
+    "docx:append-iteration": "npm run build && node dist/scripts/append-iteration-doc.js",
+    "repair:users": "npm run build && node dist/scripts/repair-users.js",
+    "config:check": "node ./bin/config-check.mjs",
+    "publish:workspace": "node ./bin/publish-workspace.mjs"
+  },
+  "keywords": [
+    "wecom",
+    "feishu",
+    "codex",
+    "gateway",
+    "agent",
+    "memory"
+  ],
+  "author": "bairui",
+  "license": "ISC",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baibairui/codex-gateway.git"
+  },
+  "bugs": {
+    "url": "https://github.com/baibairui/codex-gateway/issues"
+  },
+  "homepage": "https://github.com/baibairui/codex-gateway#readme",
+  "bin": {
+    "codexclaw": "./bin/codexclaw.mjs"
+  },
+  "type": "module",
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "playwright": "^1.58.2",
+    "strip-ansi": "^7.2.0",
+    "xml2js": "^0.6.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.3.3",
+    "@types/xml2js": "^0.4.14",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

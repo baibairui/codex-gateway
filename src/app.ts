@@ -8,10 +8,11 @@ import { buildFeishuStatusSummary } from './utils/feishu-status.js';
 import { normalizeFeishuIncomingMessage, normalizeWeComIncomingMessage } from './utils/message-normalizer.js';
 
 const log = createLogger('App');
-
 interface AppDeps {
   wecomEnabled: boolean;
   feishuEnabled?: boolean;
+  feishuAppId?: string;
+  feishuAppSecret?: string;
   wecomCrypto?: WeComCrypto;
   allowFrom: string;
   feishuVerificationToken?: string;
@@ -21,6 +22,7 @@ interface AppDeps {
   feishuStartupHelpEnabled?: boolean;
   feishuStartupHelpAdminConfigured?: boolean;
   internalApiToken?: string;
+  gatewayRootDir?: string;
   browserAutomation?: {
     execute: (command: string, args: Record<string, unknown>) => Promise<{
       text: string;
@@ -76,6 +78,13 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
 
 function clipText(input: string, max = 200): string {
   return input.length <= max ? input : `${input.slice(0, max)}...`;
+}
+
+function normalizeBaseUrl(raw: string): string {
+  const target = new URL(raw);
+  target.pathname = '/';
+  target.search = '';
+  return target.toString().replace(/\/$/, '');
 }
 
 function extractPublicBaseUrl(req: express.Request): string | undefined {
@@ -352,6 +361,10 @@ export function createApp(deps: AppDeps) {
         feishu: feishuStatus,
       },
     });
+  });
+
+  app.get('/feishu/skill/oauth/callback', (_req, res) => {
+    res.status(404).type('text/plain').send('feishu skill oauth callback removed');
   });
 
   app.get('/opencode/oauth/callback', async (req, res) => {
