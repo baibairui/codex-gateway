@@ -961,8 +961,8 @@ local_image_path=${sourcePath}`,
       actions?: Array<{ value?: { gateway_cmd?: string } }>;
     }>;
     const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
-    expect(cmds).toContain('/repair-users');
-    expect(cmds).toContain('/review');
+    expect(cmds).toContain('/help 2');
+    expect(cmds).toContain('/help 3');
   });
 
   it('formats short command response as feishu interactive card', async () => {

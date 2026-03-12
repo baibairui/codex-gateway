@@ -654,56 +654,26 @@ function buildSearchCardElements(text: string): Array<Record<string, unknown>> {
 function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
   const pageInfo = resolveHelpPageInfo(text);
-  const groups: Array<{ title: string; lines: string[] }> = [];
-  let currentGroup: { title: string; lines: string[] } | undefined;
-  for (const line of lines) {
-    if (line.startsWith('【') && line.endsWith('】')) {
-      currentGroup = {
-        title: line.replace(/^【/, '').replace(/】$/, ''),
-        lines: [],
-      };
-      groups.push(currentGroup);
-      continue;
-    }
-    if (line.startsWith('可用命令（按功能分组')) {
-      continue;
-    }
-    if (line.startsWith('翻页：')) {
-      continue;
-    }
-    if (!currentGroup) {
-      continue;
-    }
-    currentGroup.lines.push(line);
-  }
-  const groupNames = groups.map((group) => group.title).filter(Boolean);
+  const groupNames = lines
+    .filter((line) => line.startsWith('【') && line.endsWith('】'))
+    .map((line) => line.replace(/^【/, '').replace(/】$/, ''));
   const primaryGroupName = groupNames[0] ?? '';
   const summary = groupNames.length === 1 && pageInfo
     ? `${primaryGroupName} · ${pageInfo.page}/${pageInfo.total}`
     : pageInfo
     ? `帮助页 ${pageInfo.page}/${pageInfo.total}`
     : primaryGroupName || '可用命令';
-  const commandCount = groups.reduce((count, group) => count + group.lines.length, 0);
   const elements: Array<Record<string, unknown>> = [
     buildFeishuTitleBlock(CARD_COPY.helpTitle, summary),
   ];
   elements.push(buildFeishuFieldGrid([
     { label: CARD_COPY.helpGroupLabel, value: groupNames.join(' / ') },
     { label: '页码', value: pageInfo ? `${pageInfo.page}/${pageInfo.total}` : '' },
-    { label: '命令数', value: commandCount > 0 ? String(commandCount) : '' },
+    { label: '命令数', value: '' },
   ]));
   elements.push(buildFeishuDivider());
-  for (const group of groups) {
-    elements.push(buildFeishuSectionBlock(group.title, '点击下方按钮执行对应命令'));
-    const buttons = buildHelpGroupButtons(group.lines);
-    if (buttons.length > 0) {
-      elements.push(...buildCommandButtonRows(buttons, 3));
-    }
-    elements.push(buildFeishuDivider());
-  }
   const shortcutButtons = resolveHelpShortcutButtons(primaryGroupName);
   if (shortcutButtons.length > 0) {
-    elements.push(buildFeishuSectionBlock('推荐操作', '常用入口'));
     elements.push(...buildCommandButtonRows(shortcutButtons, 3));
   }
   if (elements[elements.length - 1]?.tag === 'hr') {
@@ -716,6 +686,7 @@ function resolveHelpShortcutButtons(groupName: string): FeishuCardButton[] {
   if (groupName === '会话与 Agent') {
     return [
       { label: '框架管理', cmd: '/provider', type: 'primary' },
+      { label: '新建会话', cmd: '/new' },
       { label: '会话列表', cmd: '/sessions' },
       { label: 'Agent 列表', cmd: '/agents' },
     ];
@@ -730,87 +701,6 @@ function resolveHelpShortcutButtons(groupName: string): FeishuCardButton[] {
   return [
     { label: '查看帮助', cmd: '/help', type: 'primary' },
   ];
-}
-
-function buildHelpGroupButtons(lines: string[]): FeishuCardButton[] {
-  const buttons: FeishuCardButton[] = [];
-  const seen = new Set<string>();
-  for (const line of lines) {
-    if (!line.startsWith('/')) {
-      continue;
-    }
-    const commandText = line.split(' - ')[0]?.trim() ?? '';
-    const cmd = normalizeHelpCommand(commandText);
-    if (!cmd || seen.has(cmd)) {
-      continue;
-    }
-    seen.add(cmd);
-    buttons.push({
-      label: resolveCommandLabel(cmd),
-      cmd,
-      type: cmd === '/provider' ? 'primary' : 'default',
-    });
-  }
-  return buttons;
-}
-
-function normalizeHelpCommand(commandText: string): string {
-  const normalized = commandText.trim().toLowerCase();
-  if (!normalized.startsWith('/')) {
-    return '';
-  }
-  if (normalized.startsWith('/runtime')) {
-    return '/provider';
-  }
-  if (normalized.startsWith('/provider')) {
-    return '/provider';
-  }
-  if (normalized.startsWith('/model')) {
-    return normalized.startsWith('/models') ? '/models' : '/model';
-  }
-  if (normalized.startsWith('/skills')) {
-    return '/skills';
-  }
-  if (normalized.startsWith('/search')) {
-    return '/search';
-  }
-  if (normalized.startsWith('/review')) {
-    return '/review';
-  }
-  if (normalized.startsWith('/agent')) {
-    return normalized.startsWith('/agents') ? '/agents' : '/agent';
-  }
-  if (normalized.startsWith('/switch')) {
-    return '/switch';
-  }
-  if (normalized.startsWith('/rename')) {
-    return '/rename';
-  }
-  if (normalized.startsWith('/session')) {
-    return normalized.startsWith('/sessions') ? '/sessions' : '/session';
-  }
-  if (normalized.startsWith('/new')) {
-    return '/new';
-  }
-  if (normalized.startsWith('/clear')) {
-    return '/clear';
-  }
-  if (normalized.startsWith('/memory')) {
-    return '/memory';
-  }
-  if (normalized.startsWith('/login')) {
-    return '/login';
-  }
-  if (normalized.startsWith('/repair-users')) {
-    return '/repair-users';
-  }
-  if (normalized.startsWith('/help')) {
-    return '/help';
-  }
-  if (normalized.startsWith('/skill-agent') || normalized.startsWith('/skillagent') || normalized.startsWith('/skill')) {
-    return '/skill-agent';
-  }
-  return normalized.split(/\s+/, 1)[0] ?? '';
 }
 
 function buildCommandButtonRows(buttons: FeishuCardButton[], buttonsPerRow = 2): Array<Record<string, unknown>> {
