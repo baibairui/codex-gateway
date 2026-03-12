@@ -43,9 +43,12 @@ describe('writeCliApiLoginConfig', () => {
     });
 
     const configPath = path.join(cliHomeDir, '.config', 'opencode', 'opencode.json');
+    const configText = fs.readFileSync(configPath, 'utf8');
     expect(result.configPath).toBe(configPath);
-    expect(fs.readFileSync(configPath, 'utf8')).toContain('"baseURL": "https://api.openai.com/v1"');
-    expect(fs.readFileSync(configPath, 'utf8')).toContain('"model": "gateway/gpt-5"');
+    expect(configText).toContain('"baseURL": "https://api.openai.com/v1"');
+    expect(configText).toContain('"model": "gateway/gpt-5"');
+    expect(configText).toContain('"models": {');
+    expect(configText).toContain('"gpt-5": {}');
     expect(readCliHomeDefaultModel('opencode', cliHomeDir)).toBe('gateway/gpt-5');
   });
 });
