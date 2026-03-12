@@ -7,6 +7,20 @@ import { describe, expect, it } from 'vitest';
 import { AgentWorkspaceManager } from '../src/services/agent-workspace-manager.js';
 
 describe('AgentWorkspaceManager', () => {
+  it('creates scaffold for the built-in default workspace', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-default-'));
+    const manager = new AgentWorkspaceManager(dir);
+
+    const result = manager.ensureDefaultWorkspace('wecom:u1');
+
+    expect(result.agentId).toBe('default');
+    expect(result.workspaceDir).toContain(path.join('users'));
+    expect(result.workspaceDir).toContain(path.join('default'));
+    expect(fs.existsSync(path.join(result.workspaceDir, 'AGENTS.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'gateway-browser', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
+  });
+
   it('creates workspace scaffold and global memory files', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-'));
     const manager = new AgentWorkspaceManager(dir);

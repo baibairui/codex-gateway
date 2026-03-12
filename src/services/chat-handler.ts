@@ -109,6 +109,7 @@ interface AgentWorkspaceManagerLike {
     existingAgentIds: string[];
     template?: 'default' | 'memory-onboarding' | 'skill-onboarding';
   }): { agentId: string; workspaceDir: string };
+  ensureDefaultWorkspace?(userId: string): { agentId: string; workspaceDir: string };
   isSharedMemoryEmpty(userId: string): boolean;
   isWorkspaceIdentityEmpty?(workspaceDir: string): boolean;
   getSharedMemorySnapshot?: (userId: string) => {
@@ -266,6 +267,24 @@ function resolveAgentWorkdir(agent: { agentId: string; workspaceDir: string }): 
     return path.dirname(agent.workspaceDir);
   }
   return agent.workspaceDir;
+}
+
+function resolveRuntimeAgent(
+  agentWorkspaceManager: AgentWorkspaceManagerLike | undefined,
+  userId: string,
+  agent: AgentRecord,
+): AgentRecord {
+  if (agent.agentId !== 'default') {
+    return agent;
+  }
+  const ensured = agentWorkspaceManager?.ensureDefaultWorkspace?.(userId);
+  if (!ensured?.workspaceDir) {
+    return agent;
+  }
+  return {
+    ...agent,
+    workspaceDir: ensured.workspaceDir,
+  };
 }
 
 function sanitizeOnboardingText(text: string): string {
@@ -731,7 +750,11 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     const targetAgent = reminder.sourceAgentId
       ? listedAgents.find((item) => item.agentId === reminder.sourceAgentId)
       : undefined;
-    const runtimeAgent = targetAgent ?? deps.sessionStore.getCurrentAgent(sessionUserKey);
+    const runtimeAgent = resolveRuntimeAgent(
+      deps.agentWorkspaceManager,
+      sessionUserKey,
+      targetAgent ?? deps.sessionStore.getCurrentAgent(sessionUserKey),
+    );
     const currentModel = getCurrentModel(sessionUserKey, runtimeAgent.agentId);
     const runner = getRunner(getCurrentProvider(sessionUserKey, runtimeAgent.agentId));
 
@@ -849,7 +872,11 @@ export function createChatHandler(deps: ChatHandlerDeps) {
 ${clipMessage(prompt, 500)}
 ════════════════════════════════════════════════════════════`);
 
-    const currentAgent = normalizeVisibleCurrentAgent(sessionUserKey);
+    const currentAgent = resolveRuntimeAgent(
+      deps.agentWorkspaceManager,
+      sessionUserKey,
+      normalizeVisibleCurrentAgent(sessionUserKey),
+    );
     const openCodeAuthSessionKey = buildOpenCodeAuthSessionKey(channel, userId, currentAgent.agentId);
     if (deps.openCodeAuthFlowManager?.has(openCodeAuthSessionKey)) {
       if (prompt === '/cancel') {
@@ -1218,7 +1245,11 @@ ${clipMessage(text, 500)}
           return;
         }
         deps.sessionStore.setCurrentAgent(sessionUserKey, resolved);
-        const nextAgent = deps.sessionStore.getCurrentAgent(sessionUserKey);
+        const nextAgent = resolveRuntimeAgent(
+          deps.agentWorkspaceManager,
+          sessionUserKey,
+          deps.sessionStore.getCurrentAgent(sessionUserKey),
+        );
         const nextThreadId = deps.sessionStore.getSession(sessionUserKey, nextAgent.agentId);
         await sendCommandText(
           [

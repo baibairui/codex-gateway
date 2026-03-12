@@ -200,6 +200,36 @@ describe('createChatHandler', () => {
     }));
   });
 
+  it('uses ensured default workspace for the built-in default agent', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const run = vi.fn(async () => ({ threadId: 'thread_default_ws', rawOutput: '' }));
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        ensureDefaultWorkspace: () => ({ agentId: 'default', workspaceDir: '/tmp/user-default' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      workdir: '/tmp/user-default',
+    }));
+  });
+
   it('runs agent again when reminder trigger arrives', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();

@@ -64,9 +64,53 @@ export class AgentWorkspaceManager {
     const sharedMemoryDir = this.ensureUserSharedMemory(userDir);
     const workspaceDir = path.join(userDir, agentId);
     const template = input.template ?? 'default';
+    this.ensureWorkspaceScaffold({
+      workspaceDir,
+      sharedMemoryDir,
+      agentName: input.agentName,
+      agentId,
+      template,
+    });
+
+    return {
+      agentId,
+      workspaceDir,
+    };
+  }
+
+  ensureDefaultWorkspace(userId: string): AgentWorkspaceRecord {
+    this.ensureGlobalMemory();
+
+    const agentId = 'default';
+    const agentName = '默认Agent';
+    const userDir = this.resolveUserDir(userId);
+    const sharedMemoryDir = this.ensureUserSharedMemory(userDir);
+    const workspaceDir = path.join(userDir, agentId);
+    this.ensureWorkspaceScaffold({
+      workspaceDir,
+      sharedMemoryDir,
+      agentName,
+      agentId,
+      template: 'default',
+    });
+
+    return {
+      agentId,
+      workspaceDir,
+    };
+  }
+
+  private ensureWorkspaceScaffold(input: {
+    workspaceDir: string;
+    sharedMemoryDir: string;
+    agentName: string;
+    agentId: string;
+    template: 'default' | 'memory-onboarding' | 'skill-onboarding';
+  }): void {
+    const { workspaceDir, sharedMemoryDir, agentName, agentId, template } = input;
     const initialIdentityContent = this.resolveInitialAgentIdentityContent(
       sharedMemoryDir,
-      input.agentName,
+      agentName,
       agentId,
       template,
     );
@@ -76,7 +120,7 @@ export class AgentWorkspaceManager {
     this.writeIfMissing(
       path.join(workspaceDir, 'AGENTS.md'),
       renderWorkspaceAgentsMd(
-        input.agentName,
+        agentName,
         agentId,
         path.relative(workspaceDir, this.globalMemoryDir),
         path.relative(workspaceDir, sharedMemoryDir),
@@ -85,7 +129,7 @@ export class AgentWorkspaceManager {
     );
     this.writeIfMissing(
       path.join(workspaceDir, 'agent.md'),
-      renderAgentMd(input.agentName, agentId, template),
+      renderAgentMd(agentName, agentId, template),
     );
     this.writeIfMissing(
       path.join(workspaceDir, 'memory', 'identity.md'),
@@ -122,11 +166,11 @@ export class AgentWorkspaceManager {
     );
     this.writeIfMissing(
       path.join(workspaceDir, 'README.md'),
-      renderWorkspaceReadme(input.agentName, agentId, template),
+      renderWorkspaceReadme(agentName, agentId, template),
     );
     this.writeIfMissing(
       path.join(workspaceDir, 'SOUL.md'),
-      renderSoulBootstrap(input.agentName, agentId, template),
+      renderSoulBootstrap(agentName, agentId, template),
     );
     this.writeIfMissing(
       path.join(workspaceDir, 'TOOLS.md'),
@@ -156,11 +200,6 @@ export class AgentWorkspaceManager {
     installReminderToolSkill(workspaceDir);
     installFeishuOfficialOpsSkill(workspaceDir);
     installSocialIntelSkills(workspaceDir);
-
-    return {
-      agentId,
-      workspaceDir,
-    };
   }
 
   isSharedMemoryEmpty(userId: string): boolean {
