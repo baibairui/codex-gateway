@@ -131,6 +131,7 @@ export const config = {
   codexSearch: process.env.CODEX_SEARCH === 'true',
   codexWorkdir: process.env.CODEX_WORKDIR ?? process.cwd(),
   gatewayRootDir: optionalStringUndefinedRaw('GATEWAY_ROOT_DIR'),
+  gatewayPublicBaseUrl: normalizeBaseUrl(optionalStringUndefined('GATEWAY_PUBLIC_BASE_URL')),
   codexAgentsDir: optionalStringUndefined('CODEX_AGENTS_DIR'),
   /** 'full-auto' (默认，有沙箱) 或 'none' (跳过沙箱，适合服务器) */
   codexSandbox: codexSandboxMode(),

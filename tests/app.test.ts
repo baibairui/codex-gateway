@@ -767,4 +767,44 @@ describe('dispatchFeishuCardActionEvent', () => {
       replyTargetType: 'chat_id',
     });
   });
+
+  it('passes the configured public base url through controlled card actions', async () => {
+    const handleFeishuCardAction = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuCardActionEvent({
+      allowFrom: '*',
+      isDuplicateMessage: () => false,
+      handleText: vi.fn(async () => undefined),
+      handleFeishuCardAction,
+    }, {
+      operator: {
+        operator_id: {
+          open_id: 'ou_3',
+        },
+      },
+      context: {
+        chat_id: 'oc_3',
+      },
+      action: {
+        value: {
+          gateway_action: 'opencode_login.start_provider_auth',
+          provider_id: 'openai',
+        },
+      },
+    }, {
+      publicBaseUrl: 'https://gateway.example.com',
+    });
+
+    expect(result).toBe('success');
+    expect(handleFeishuCardAction).toHaveBeenCalledWith({
+      userId: 'ou_3',
+      chatId: 'oc_3',
+      publicBaseUrl: 'https://gateway.example.com',
+      action: 'opencode_login.start_provider_auth',
+      value: {
+        gateway_action: 'opencode_login.start_provider_auth',
+        provider_id: 'openai',
+      },
+    });
+  });
 });

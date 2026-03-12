@@ -35,6 +35,7 @@ const CONFIG_ENV_KEYS = [
   'CODEX_SEARCH',
   'CODEX_WORKDIR',
   'GATEWAY_ROOT_DIR',
+  'GATEWAY_PUBLIC_BASE_URL',
   'CODEX_AGENTS_DIR',
   'CODEX_SANDBOX',
   'CODEX_WORKDIR_ISOLATION',
@@ -190,6 +191,18 @@ describe('config workdir isolation', () => {
     });
 
     expect(config.codexWorkdirIsolation).toBe('bwrap');
+  });
+});
+
+describe('config gateway public base url', () => {
+  it('normalizes the optional public base url for long connection oauth callbacks', async () => {
+    const config = await loadConfigWithEnv({
+      WECOM_ENABLED: 'false',
+      FEISHU_ENABLED: 'false',
+      GATEWAY_PUBLIC_BASE_URL: 'https://gateway.example.com///',
+    });
+
+    expect(config.gatewayPublicBaseUrl).toBe('https://gateway.example.com');
   });
 });
 
