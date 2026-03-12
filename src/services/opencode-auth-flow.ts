@@ -214,7 +214,8 @@ export function buildOpenCodeAuthSessionKey(channel: Channel, userId: string, ag
 }
 
 export function buildOpenCodeAuthCommand(opencodeBin: string, provider: string): string {
-  return `${shellEscape(opencodeBin)} auth login --provider ${shellEscape(provider)}`;
+  const method = resolveOpenCodeLoginMethod(provider);
+  return `${shellEscape(opencodeBin)} auth login --provider ${shellEscape(provider)}${method ? ` --method ${shellEscape(method)}` : ''}`;
 }
 
 function sanitizeTerminalText(text: string): string {
@@ -249,6 +250,16 @@ function needsChatInput(text: string): boolean {
 function shouldAutoConfirmPrompt(text: string): boolean {
   return /(press enter|press return|continue\b|confirm\b|open your browser|use your browser)/im.test(text)
     && !/(api key|api url|base url|one-time code|verification code|authenticator|paste|token|secret|password)/im.test(text);
+}
+
+function resolveOpenCodeLoginMethod(provider: string): string | undefined {
+  if (provider === 'openai') {
+    return 'ChatGPT Pro/Plus (browser)';
+  }
+  if (provider === 'anthropic') {
+    return 'Claude Pro/Max';
+  }
+  return undefined;
 }
 
 function toProviderLabel(provider: string): string {

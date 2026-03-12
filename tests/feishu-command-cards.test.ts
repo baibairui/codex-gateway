@@ -49,6 +49,31 @@ describe('buildFeishuLoginChoiceMessage', () => {
     expect(actions.some((item) => item.text?.content === '设备授权登录')).toBe(false);
     expect(actions.some((item) => item.text?.content === 'API URL / Key 登录')).toBe(true);
   });
+
+  it('limits opencode oauth buttons to providers that support browser auth', () => {
+    const payload = buildFeishuLoginChoiceMessage({
+      provider: 'opencode',
+      providerLabel: 'OpenCode',
+      supportsDeviceAuth: false,
+    });
+    const parsed = JSON.parse(payload) as {
+      content?: {
+        elements?: Array<Record<string, unknown>>;
+      };
+    };
+    const actions = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
+        text?: { content?: string };
+      }>;
+
+    expect(actions.some((item) => item.text?.content === 'OpenAI')).toBe(true);
+    expect(actions.some((item) => item.text?.content === 'Anthropic')).toBe(true);
+    expect(actions.some((item) => item.text?.content === 'OpenRouter')).toBe(false);
+    expect(actions.some((item) => item.text?.content === 'Google')).toBe(false);
+    expect(actions.some((item) => item.text?.content === 'Groq')).toBe(false);
+    expect(actions.some((item) => item.text?.content === 'xAI')).toBe(false);
+  });
 });
 
 describe('buildFeishuApiLoginFormMessage', () => {

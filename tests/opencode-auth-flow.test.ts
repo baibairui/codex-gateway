@@ -34,7 +34,19 @@ async function flushStreamEvents(): Promise<void> {
 describe('buildOpenCodeAuthCommand', () => {
   it('passes provider with the explicit --provider flag', () => {
     expect(buildOpenCodeAuthCommand('/root/.opencode/bin/opencode', 'openai')).toBe(
-      '/root/.opencode/bin/opencode auth login --provider openai',
+      "/root/.opencode/bin/opencode auth login --provider openai --method 'ChatGPT Pro/Plus (browser)'",
+    );
+  });
+
+  it('does not force a login method for providers without a pinned browser label', () => {
+    expect(buildOpenCodeAuthCommand('/root/.opencode/bin/opencode', 'anthropic')).toBe(
+      "/root/.opencode/bin/opencode auth login --provider anthropic --method 'Claude Pro/Max'",
+    );
+  });
+
+  it('does not force a login method for api-key-only providers', () => {
+    expect(buildOpenCodeAuthCommand('/root/.opencode/bin/opencode', 'openrouter')).toBe(
+      '/root/.opencode/bin/opencode auth login --provider openrouter',
     );
   });
 });

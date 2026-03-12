@@ -930,12 +930,8 @@ export function buildFeishuLoginChoiceMessage(input: {
 
 export function buildFeishuOpenCodeLoginChoiceMessage(): string {
   const providers = [
-    ['anthropic', 'Anthropic'],
     ['openai', 'OpenAI'],
-    ['openrouter', 'OpenRouter'],
-    ['google', 'Google'],
-    ['groq', 'Groq'],
-    ['xai', 'xAI'],
+    ['anthropic', 'Anthropic'],
   ] as const;
   return buildFeishuInteractiveMessage({
     config: {
@@ -950,7 +946,7 @@ export function buildFeishuOpenCodeLoginChoiceMessage(): string {
       },
     },
     elements: [
-      buildFeishuTitleBlock('选择 OpenCode 登录方式', '点击登录渠道后，系统会优先返回授权链接并引导你在浏览器完成登录；只有授权流程仍需补充信息时，才需要回到聊天里继续。'),
+      buildFeishuTitleBlock('选择 OpenCode 登录方式', 'OpenAI 和 Anthropic 支持浏览器授权链接。其他 OpenCode 渠道请使用下方 API URL / Key 登录。'),
       buildFeishuFieldGrid([
         { label: '写入位置', value: '.config/opencode/opencode.json' },
         { label: '认证文件', value: '.local/share/opencode/auth.json' },
