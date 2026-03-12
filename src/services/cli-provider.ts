@@ -169,6 +169,9 @@ export async function writeCliApiLoginConfig(input: CliApiLoginWriteInput): Prom
         gateway: {
           npm: '@ai-sdk/openai-compatible',
           name: 'Gateway',
+          models: {
+            [rawModel]: {},
+          },
           options: {
             baseURL: baseUrl,
             apiKey,

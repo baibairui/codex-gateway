@@ -161,7 +161,6 @@ describe('buildCodexArgs', () => {
 
     expect(args).toEqual([
       'run',
-      '--print',
       '--format',
       'json',
       '--session',
@@ -219,9 +218,8 @@ describe('buildCodexReviewArgs', () => {
       'none',
       'opencode',
     );
-    expect(args.slice(0, 6)).toEqual([
+    expect(args.slice(0, 5)).toEqual([
       'run',
-      '--print',
       '--format',
       'json',
       '--model',

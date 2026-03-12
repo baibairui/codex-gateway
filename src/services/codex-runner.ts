@@ -524,7 +524,7 @@ export function buildCodexArgs(
   provider: CliProvider = 'codex',
 ): string[] {
   if (provider === 'opencode') {
-    const args: string[] = ['run', '--print', '--format', 'json'];
+    const args: string[] = ['run', '--format', 'json'];
     if (input.threadId?.trim()) {
       args.push('--session', input.threadId.trim());
     }
@@ -562,7 +562,7 @@ export function buildCodexReviewArgs(
   provider: CliProvider = 'codex',
 ): string[] {
   if (provider === 'opencode') {
-    const args: string[] = ['run', '--print', '--format', 'json'];
+    const args: string[] = ['run', '--format', 'json'];
     if (input.model?.trim()) {
       args.push('--model', input.model.trim());
     }
