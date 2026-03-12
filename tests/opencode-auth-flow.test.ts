@@ -14,7 +14,11 @@ vi.mock('../src/services/cli-provider.js', () => ({
 }));
 
 import { spawn } from 'node:child_process';
-import { OpenCodeAuthFlowManager, buildOpenCodeAuthCommand } from '../src/services/opencode-auth-flow.js';
+import {
+  OpenCodeAuthFlowManager,
+  buildOpenCodeAuthCommand,
+  rewriteOpenCodeOauthUrl,
+} from '../src/services/opencode-auth-flow.js';
 
 function createMockChildProcess() {
   const child = new EventEmitter() as EventEmitter & {
@@ -52,6 +56,19 @@ describe('buildOpenCodeAuthCommand', () => {
   it('does not force a login method for api-key-only providers', () => {
     expect(buildOpenCodeAuthCommand('/root/.opencode/bin/opencode', 'openrouter')).toBe(
       '/root/.opencode/bin/opencode auth login --provider openrouter',
+    );
+  });
+});
+
+describe('rewriteOpenCodeOauthUrl', () => {
+  it('rewrites localhost callback urls to the gateway public callback proxy', () => {
+    expect(
+      rewriteOpenCodeOauthUrl(
+        'https://auth.openai.com/oauth/authorize?client_id=abc&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fcallback&state=xyz',
+        'https://gateway.example.com',
+      ),
+    ).toBe(
+      'https://auth.openai.com/oauth/authorize?client_id=abc&redirect_uri=https%3A%2F%2Fgateway.example.com%2Fopencode%2Foauth%2Fcallback%3Fgateway_target%3D%252Fcallback&state=xyz',
     );
   });
 });

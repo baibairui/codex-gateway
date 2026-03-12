@@ -31,6 +31,7 @@ interface StartOpenCodeAuthInput {
   opencodeBin: string;
   cliHomeDir: string;
   cwd: string;
+  publicBaseUrl?: string;
   baseEnv: NodeJS.ProcessEnv;
   onOutput?: (text: string) => Promise<void>;
   onEvent?: (event: OpenCodeAuthEvent) => Promise<void>;
@@ -110,7 +111,7 @@ export class OpenCodeAuthFlowManager {
           void input.onEvent?.({
             type: 'oauth_url',
             provider: input.provider,
-            url: urls[0]!,
+            url: rewriteOpenCodeOauthUrl(urls[0]!, input.publicBaseUrl),
           }).catch((error) => {
             log.warn('OpenCode OAuth 事件发送失败', {
               provider: input.provider,
@@ -249,6 +250,32 @@ function extractTrailingTerminalFragment(text: string): string {
 
 function extractUrls(text: string): string[] {
   return Array.from(new Set(text.match(/https?:\/\/[^\s)<>"']+/g) ?? []));
+}
+
+export function rewriteOpenCodeOauthUrl(url: string, publicBaseUrl?: string): string {
+  if (!publicBaseUrl) {
+    return url;
+  }
+  try {
+    const oauthUrl = new URL(url);
+    const redirectUri = oauthUrl.searchParams.get('redirect_uri');
+    if (!redirectUri) {
+      return url;
+    }
+    const redirectUrl = new URL(redirectUri);
+    const isLoopback = redirectUrl.hostname === '127.0.0.1' || redirectUrl.hostname === 'localhost';
+    if (!isLoopback || redirectUrl.port !== '1455') {
+      return url;
+    }
+    const publicUrl = new URL(publicBaseUrl);
+    publicUrl.pathname = '/opencode/oauth/callback';
+    publicUrl.search = '';
+    publicUrl.searchParams.set('gateway_target', `${redirectUrl.pathname}${redirectUrl.search}`);
+    oauthUrl.searchParams.set('redirect_uri', publicUrl.toString());
+    return oauthUrl.toString();
+  } catch {
+    return url;
+  }
 }
 
 function needsChatInput(text: string): boolean {

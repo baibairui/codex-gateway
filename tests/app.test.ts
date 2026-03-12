@@ -29,6 +29,7 @@ async function startTestServer(options?: {
   handleFeishuCardAction?: (input: {
     userId: string;
     chatId?: string;
+    publicBaseUrl?: string;
     action: string;
     value: Record<string, unknown>;
   }) => Promise<void>;
@@ -280,6 +281,36 @@ describe('createApp internal feishu user ops', () => {
   });
 });
 
+describe('createApp opencode oauth callback proxy', () => {
+  it('forwards the public callback request back to the local opencode callback server', async () => {
+    const realFetch = globalThis.fetch;
+    const upstreamFetch = vi.fn(async () => ({
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/plain; charset=utf-8' }),
+      text: async () => 'Authorization received. You can close this tab.',
+    }));
+    vi.stubGlobal('fetch', upstreamFetch);
+    const baseUrl = await startTestServer();
+
+    const response = await realFetch(
+      `${baseUrl}/opencode/oauth/callback?gateway_target=%2Fcallback&code=code_123&state=state_456`,
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toBe('Authorization received. You can close this tab.');
+    expect(upstreamFetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:1455/callback?code=code_123&state=state_456',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }),
+      }),
+    );
+    vi.stubGlobal('fetch', realFetch);
+  });
+});
+
 describe('createApp feishu callback', () => {
   it('does not expose webhook endpoint when long connection mode is enabled', async () => {
     const baseUrl = await startTestServer({
@@ -468,6 +499,7 @@ describe('createApp feishu callback', () => {
     expect(handleFeishuCardAction).toHaveBeenCalledWith({
       userId: 'ou_card_2',
       chatId: 'oc_group_2',
+      publicBaseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
       action: 'codex_login.open_api_form',
       value: {
         gateway_action: 'codex_login.open_api_form',
@@ -519,6 +551,7 @@ describe('createApp feishu callback', () => {
     expect(handleFeishuCardAction).toHaveBeenCalledWith({
       userId: 'ou_card_3',
       chatId: 'oc_group_3',
+      publicBaseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
       action: 'codex_login.start_device_auth',
       value: {
         gateway_action: 'codex_login.start_device_auth',
@@ -571,6 +604,7 @@ describe('createApp feishu callback', () => {
     expect(handleFeishuCardAction).toHaveBeenCalledWith({
       userId: 'ou_card_4',
       chatId: 'oc_group_4',
+      publicBaseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
       action: 'opencode_login.submit_auth_input',
       value: {
         gateway_action: 'opencode_login.submit_auth_input',

@@ -729,6 +729,7 @@ function extractCardField(value: Record<string, unknown>, key: string): string |
 async function appDepsHandleFeishuCardAction(input: {
   userId: string;
   chatId?: string;
+  publicBaseUrl?: string;
   action: string;
   value: Record<string, unknown>;
 }): Promise<void> {
@@ -770,6 +771,7 @@ async function appDepsHandleFeishuCardAction(input: {
       opencodeBin: config.opencodeBin,
       cliHomeDir: opencodeHomeDir,
       cwd: currentAgent.workspaceDir,
+      publicBaseUrl: input.publicBaseUrl,
       baseEnv: process.env,
       onEvent: async (event) => {
         if (event.type === 'oauth_url') {
