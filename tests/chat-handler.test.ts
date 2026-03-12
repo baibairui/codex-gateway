@@ -952,12 +952,17 @@ local_image_path=${sourcePath}`,
         elements?: Array<{ content?: string }>;
       };
     };
-    const merged = (parsed.content?.elements ?? []).map((item) => String(item.content ?? '')).join('\n');
+    const card = parsed.content ?? { elements: [] };
+    const merged = (card.elements ?? []).map((item) => String(item.content ?? '')).join('\n');
     expect(merged).toContain('工作区与运维 · 3/3');
     expect(merged).not.toContain('/deploy-workspace - 发布当前 agent 工作区');
     expect(merged).not.toContain('/publish-workspace - 发布当前 agent 工作区');
-    expect(merged).toContain('/repair-users - 清理并修复已部署用户工作区');
-    expect(merged).toContain('/review commit [SHA] - 审查指定提交');
+    const actionElements = (card.elements ?? []).filter((item) => (item as { tag?: string }).tag === 'action') as Array<{
+      actions?: Array<{ value?: { gateway_cmd?: string } }>;
+    }>;
+    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    expect(cmds).toContain('/repair-users');
+    expect(cmds).toContain('/review');
   });
 
   it('formats short command response as feishu interactive card', async () => {

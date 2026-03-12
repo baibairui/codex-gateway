@@ -694,11 +694,16 @@ function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
   ]));
   elements.push(buildFeishuDivider());
   for (const group of groups) {
-    elements.push(buildFeishuSectionBlock(group.title, group.lines));
+    elements.push(buildFeishuSectionBlock(group.title, '点击下方按钮执行对应命令'));
+    const buttons = buildHelpGroupButtons(group.lines);
+    if (buttons.length > 0) {
+      elements.push(...buildCommandButtonRows(buttons, 3));
+    }
     elements.push(buildFeishuDivider());
   }
   const shortcutButtons = resolveHelpShortcutButtons(primaryGroupName);
   if (shortcutButtons.length > 0) {
+    elements.push(buildFeishuSectionBlock('推荐操作', '常用入口'));
     elements.push(...buildCommandButtonRows(shortcutButtons, 3));
   }
   if (elements[elements.length - 1]?.tag === 'hr') {
@@ -725,6 +730,87 @@ function resolveHelpShortcutButtons(groupName: string): FeishuCardButton[] {
   return [
     { label: '查看帮助', cmd: '/help', type: 'primary' },
   ];
+}
+
+function buildHelpGroupButtons(lines: string[]): FeishuCardButton[] {
+  const buttons: FeishuCardButton[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    if (!line.startsWith('/')) {
+      continue;
+    }
+    const commandText = line.split(' - ')[0]?.trim() ?? '';
+    const cmd = normalizeHelpCommand(commandText);
+    if (!cmd || seen.has(cmd)) {
+      continue;
+    }
+    seen.add(cmd);
+    buttons.push({
+      label: resolveCommandLabel(cmd),
+      cmd,
+      type: cmd === '/provider' ? 'primary' : 'default',
+    });
+  }
+  return buttons;
+}
+
+function normalizeHelpCommand(commandText: string): string {
+  const normalized = commandText.trim().toLowerCase();
+  if (!normalized.startsWith('/')) {
+    return '';
+  }
+  if (normalized.startsWith('/runtime')) {
+    return '/provider';
+  }
+  if (normalized.startsWith('/provider')) {
+    return '/provider';
+  }
+  if (normalized.startsWith('/model')) {
+    return normalized.startsWith('/models') ? '/models' : '/model';
+  }
+  if (normalized.startsWith('/skills')) {
+    return '/skills';
+  }
+  if (normalized.startsWith('/search')) {
+    return '/search';
+  }
+  if (normalized.startsWith('/review')) {
+    return '/review';
+  }
+  if (normalized.startsWith('/agent')) {
+    return normalized.startsWith('/agents') ? '/agents' : '/agent';
+  }
+  if (normalized.startsWith('/switch')) {
+    return '/switch';
+  }
+  if (normalized.startsWith('/rename')) {
+    return '/rename';
+  }
+  if (normalized.startsWith('/session')) {
+    return normalized.startsWith('/sessions') ? '/sessions' : '/session';
+  }
+  if (normalized.startsWith('/new')) {
+    return '/new';
+  }
+  if (normalized.startsWith('/clear')) {
+    return '/clear';
+  }
+  if (normalized.startsWith('/memory')) {
+    return '/memory';
+  }
+  if (normalized.startsWith('/login')) {
+    return '/login';
+  }
+  if (normalized.startsWith('/repair-users')) {
+    return '/repair-users';
+  }
+  if (normalized.startsWith('/help')) {
+    return '/help';
+  }
+  if (normalized.startsWith('/skill-agent') || normalized.startsWith('/skillagent') || normalized.startsWith('/skill')) {
+    return '/skill-agent';
+  }
+  return normalized.split(/\s+/, 1)[0] ?? '';
 }
 
 function buildCommandButtonRows(buttons: FeishuCardButton[], buttonsPerRow = 2): Array<Record<string, unknown>> {
