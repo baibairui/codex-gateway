@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import path from 'node:path';
 import { createLogger } from '../utils/logger.js';
 import { buildCodexSpawnSpec, type CodexWorkdirIsolationMode } from './codex-bwrap.js';
 import { getCliProviderSpec, type CliProvider } from './cli-provider.js';
@@ -305,6 +306,10 @@ export class CodexRunner {
     requireThreadId: boolean;
     logMeta?: Record<string, unknown>;
   }): Promise<{ rawOutput: string; threadId?: string }> {
+    if (this.provider === 'opencode') {
+      repairLegacyOpenCodeConfig(this.codexHomeDir);
+    }
+
     log.info('Codex 子进程启动', {
       bin: this.codexBin,
       args: redactArgsForLog(options.args),
@@ -761,6 +766,57 @@ function parseOpenCodeJsonl(raw: string): ParsedCodexOutput {
     threadId,
     answer: answer || '（OpenCode 未返回可解析内容）',
   };
+}
+
+function repairLegacyOpenCodeConfig(codexHomeDir: string | undefined): void {
+  const trimmedHome = codexHomeDir?.trim();
+  if (!trimmedHome) {
+    return;
+  }
+  const configPath = path.join(trimmedHome, '.config', 'opencode', 'opencode.json');
+  if (!fs.existsSync(configPath)) {
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+      model?: unknown;
+      provider?: Record<string, unknown>;
+    };
+    const configuredModel = typeof parsed.model === 'string' ? parsed.model.trim() : '';
+    const [providerId, ...modelParts] = configuredModel.split('/');
+    if (!providerId || modelParts.length === 0) {
+      return;
+    }
+    const modelId = modelParts.join('/').trim();
+    if (!modelId) {
+      return;
+    }
+    const provider = parsed.provider?.[providerId];
+    if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
+      return;
+    }
+    const providerRecord = provider as Record<string, unknown>;
+    const existingModels = providerRecord.models;
+    if (existingModels && typeof existingModels === 'object' && !Array.isArray(existingModels) && modelId in (existingModels as Record<string, unknown>)) {
+      return;
+    }
+    providerRecord.models = {
+      ...(existingModels && typeof existingModels === 'object' && !Array.isArray(existingModels) ? existingModels as Record<string, unknown> : {}),
+      [modelId]: {},
+    };
+    fs.writeFileSync(configPath, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+    log.info('已修补旧版 OpenCode 配置中的 models 注册', {
+      configPath,
+      providerId,
+      modelId,
+    });
+  } catch (error) {
+    log.warn('修补 OpenCode 配置失败，继续按原配置执行', {
+      configPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function parseOpenCodeModels(raw: string): { fetchedAt?: string; models: Array<{ slug: string; visibility: 'list' | 'hide' | string; supportedInApi: boolean }> } {

@@ -627,6 +627,56 @@ describe('buildCodexSpawnSpec', () => {
   });
 });
 
+describe('CodexRunner opencode config repair', () => {
+  it('repairs legacy opencode config before spawning run', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-repair-'));
+    const opencodeHome = path.join(tempRoot, 'opencode-home');
+    const configDir = path.join(opencodeHome, '.config', 'opencode');
+    const configPath = path.join(configDir, 'opencode.json');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      $schema: 'https://opencode.ai/config.json',
+      provider: {
+        gateway: {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'Gateway',
+          options: {
+            baseURL: 'https://codex.ai02.cn/v1',
+            apiKey: 'sk-test',
+          },
+        },
+      },
+      model: 'gateway/gpt-5.2',
+    }, null, 2));
+
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValueOnce(child as never);
+
+    const runner = new CodexRunner({
+      provider: 'opencode',
+      codexBin: 'opencode',
+      codexHomeDir: opencodeHome,
+      timeoutMs: 1_000,
+    });
+
+    const resultPromise = runner.run({ prompt: 'hello' });
+    child.stdout.write(`${JSON.stringify({ type: 'text', sessionID: 'sess_123', text: 'ok' })}\n`);
+    child.emit('close', 0);
+
+    await expect(resultPromise).resolves.toEqual({
+      threadId: 'sess_123',
+      rawOutput: `${JSON.stringify({ type: 'text', sessionID: 'sess_123', text: 'ok' })}\n`,
+    });
+
+    const repaired = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+      provider?: { gateway?: { models?: Record<string, unknown> } };
+    };
+    expect(repaired.provider?.gateway?.models).toEqual({
+      'gpt-5.2': {},
+    });
+  });
+});
+
 describe('CodexRunner', () => {
   it('does not kill an active run when stdout activity keeps arriving before the idle timeout', async () => {
     vi.useFakeTimers();
