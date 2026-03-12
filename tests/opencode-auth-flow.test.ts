@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
@@ -18,11 +21,13 @@ function createMockChildProcess() {
     stdout: PassThrough;
     stderr: PassThrough;
     stdin: PassThrough;
+    pid: number;
     kill: ReturnType<typeof vi.fn>;
   };
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   child.stdin = new PassThrough();
+  child.pid = 4321;
   child.kill = vi.fn();
   return child;
 }
@@ -52,6 +57,84 @@ describe('buildOpenCodeAuthCommand', () => {
 });
 
 describe('OpenCodeAuthFlowManager', () => {
+  it('stops the whole auth process group so browser callback ports are released', async () => {
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const processKill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const manager = new OpenCodeAuthFlowManager();
+
+    await manager.start({
+      key: 'feishu:user:agent',
+      provider: 'openai',
+      opencodeBin: '/usr/local/bin/opencode',
+      cliHomeDir: '/tmp/opencode-home',
+      cwd: '/tmp/workspace',
+      baseEnv: {},
+      onExit: vi.fn(async () => undefined),
+    });
+
+    expect(manager.stop('feishu:user:agent', 'test-stop')).toBe(true);
+    expect(processKill).toHaveBeenCalledWith(-4321, 'SIGTERM');
+    processKill.mockRestore();
+  });
+
+  it('does not report success when the auth callback never writes auth.json', async () => {
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const cliHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-auth-home-'));
+    const onExit = vi.fn(async () => undefined);
+    const manager = new OpenCodeAuthFlowManager();
+
+    await manager.start({
+      key: 'feishu:user:agent',
+      provider: 'openai',
+      opencodeBin: '/usr/local/bin/opencode',
+      cliHomeDir,
+      cwd: '/tmp/workspace',
+      baseEnv: {},
+      onExit,
+    });
+
+    child.emit('close', 0);
+    await flushStreamEvents();
+
+    expect(onExit).toHaveBeenCalledWith({
+      ok: false,
+      provider: 'openai',
+      message: 'Openai 登录未完成，请完成浏览器授权后重试。',
+    });
+  });
+
+  it('reports success only after auth.json is created or updated', async () => {
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const cliHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-auth-home-success-'));
+    const authPath = path.join(cliHomeDir, '.local', 'share', 'opencode', 'auth.json');
+    fs.mkdirSync(path.dirname(authPath), { recursive: true });
+    const onExit = vi.fn(async () => undefined);
+    const manager = new OpenCodeAuthFlowManager();
+
+    await manager.start({
+      key: 'feishu:user:agent',
+      provider: 'openai',
+      opencodeBin: '/usr/local/bin/opencode',
+      cliHomeDir,
+      cwd: '/tmp/workspace',
+      baseEnv: {},
+      onExit,
+    });
+
+    fs.writeFileSync(authPath, JSON.stringify({ access_token: 'token' }), 'utf8');
+    child.emit('close', 0);
+    await flushStreamEvents();
+
+    expect(onExit).toHaveBeenCalledWith({
+      ok: true,
+      provider: 'openai',
+      message: 'Openai 登录完成。',
+    });
+  });
+
   it('buffers split ansi escape prefixes until the sequence is complete', async () => {
     const child = createMockChildProcess();
     vi.mocked(spawn).mockReturnValue(child as never);

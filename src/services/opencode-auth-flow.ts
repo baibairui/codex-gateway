@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { isExecutableAvailable } from './cli-provider.js';
 import { createLogger } from '../utils/logger.js';
@@ -15,6 +16,7 @@ interface OpenCodeAuthSession {
   announcedInputFallback: boolean;
   awaitingUserInput: boolean;
   autoConfirmedPrompt: boolean;
+  authFingerprintBefore?: string;
   pendingTerminalFragment: string;
 }
 
@@ -69,6 +71,7 @@ export class OpenCodeAuthFlowManager {
     }
     const child = spawn('script', ['-qfec', command, '/dev/null'], {
       cwd: input.cwd,
+      detached: true,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -81,6 +84,7 @@ export class OpenCodeAuthFlowManager {
       announcedInputFallback: false,
       awaitingUserInput: false,
       autoConfirmedPrompt: false,
+      authFingerprintBefore: readAuthFingerprint(input.cliHomeDir),
       pendingTerminalFragment: '',
     });
 
@@ -171,15 +175,19 @@ export class OpenCodeAuthFlowManager {
       });
     });
     child.on('close', (code) => {
+      const session = this.sessions.get(input.key);
       this.sessions.delete(input.key);
+      const authChanged = didAuthStateChange(input.cliHomeDir, session?.authFingerprintBefore);
       const normalizedOutput = code === 127
         ? '当前实例尚未安装 OpenCode，暂时无法使用该登录方式。'
         : undefined;
       void input.onExit({
-        ok: code === 0,
+        ok: code === 0 && authChanged,
         provider: input.provider,
         message: code === 0
-          ? `${toProviderLabel(input.provider)} 登录完成。`
+          ? (authChanged
+            ? `${toProviderLabel(input.provider)} 登录完成。`
+            : `${toProviderLabel(input.provider)} 登录未完成，请完成浏览器授权后重试。`)
           : (normalizedOutput ?? `${toProviderLabel(input.provider)} 登录失败，请稍后重试。`),
       });
     });
@@ -201,7 +209,7 @@ export class OpenCodeAuthFlowManager {
       return false;
     }
     this.sessions.delete(key);
-    session.child.kill('SIGTERM');
+    terminateProcessGroup(session.child, 'SIGTERM');
     if (reason) {
       log.info('OpenCode 登录流程已终止', { key, provider: session.provider, reason });
     }
@@ -260,6 +268,32 @@ function resolveOpenCodeLoginMethod(provider: string): string | undefined {
     return 'Claude Pro/Max';
   }
   return undefined;
+}
+
+function readAuthFingerprint(cliHomeDir: string): string | undefined {
+  const authPath = path.join(path.resolve(cliHomeDir), '.local', 'share', 'opencode', 'auth.json');
+  try {
+    const stat = fs.statSync(authPath);
+    return `${stat.size}:${stat.mtimeMs}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function didAuthStateChange(cliHomeDir: string, previous?: string): boolean {
+  return readAuthFingerprint(cliHomeDir) !== previous;
+}
+
+function terminateProcessGroup(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  if (typeof child.pid === 'number' && child.pid > 0) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall through to direct child kill if the process group is already gone.
+    }
+  }
+  child.kill(signal);
 }
 
 function toProviderLabel(provider: string): string {
