@@ -13,6 +13,7 @@ interface OpenCodeAuthSession {
   child: ChildProcessWithoutNullStreams;
   announcedUrl: boolean;
   announcedInputFallback: boolean;
+  awaitingUserInput: boolean;
   autoConfirmedPrompt: boolean;
   pendingTerminalFragment: string;
 }
@@ -39,6 +40,10 @@ export class OpenCodeAuthFlowManager {
 
   has(key: string): boolean {
     return this.sessions.has(key);
+  }
+
+  isAwaitingInput(key: string): boolean {
+    return this.sessions.get(key)?.awaitingUserInput === true;
   }
 
   async start(input: StartOpenCodeAuthInput): Promise<void> {
@@ -74,6 +79,7 @@ export class OpenCodeAuthFlowManager {
       child,
       announcedUrl: false,
       announcedInputFallback: false,
+      awaitingUserInput: false,
       autoConfirmedPrompt: false,
       pendingTerminalFragment: '',
     });
@@ -96,6 +102,7 @@ export class OpenCodeAuthFlowManager {
         const urls = extractUrls(text);
         if (urls.length > 0 && !session.announcedUrl) {
           session.announcedUrl = true;
+          session.awaitingUserInput = false;
           void input.onEvent?.({
             type: 'oauth_url',
             provider: input.provider,
@@ -109,6 +116,7 @@ export class OpenCodeAuthFlowManager {
           return;
         } else if (!session.autoConfirmedPrompt && shouldAutoConfirmPrompt(text)) {
           session.autoConfirmedPrompt = true;
+          session.awaitingUserInput = false;
           session.child.stdin.write('\n');
           void input.onEvent?.({
             type: 'auto_confirmed',
@@ -123,6 +131,7 @@ export class OpenCodeAuthFlowManager {
           return;
         } else if (!session.announcedUrl && needsChatInput(text) && !session.announcedInputFallback) {
           session.announcedInputFallback = true;
+          session.awaitingUserInput = true;
           void input.onEvent?.({
             type: 'input_required',
             provider: input.provider,
@@ -178,9 +187,10 @@ export class OpenCodeAuthFlowManager {
 
   async sendInput(key: string, text: string): Promise<boolean> {
     const session = this.sessions.get(key);
-    if (!session) {
+    if (!session || !session.awaitingUserInput) {
       return false;
     }
+    session.awaitingUserInput = false;
     session.child.stdin.write(`${text}\n`);
     return true;
   }
