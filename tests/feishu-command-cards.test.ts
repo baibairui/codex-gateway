@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFeishuApiLoginFormMessage,
   buildFeishuLoginChoiceMessage,
+  buildFeishuOpenCodeInputFallbackMessage,
+  buildFeishuOpenCodeOauthMessage,
 } from '../src/services/feishu-command-cards.js';
 
 describe('buildFeishuLoginChoiceMessage', () => {
@@ -79,5 +81,61 @@ describe('buildFeishuApiLoginFormMessage', () => {
       | undefined;
     expect(submitButton?.action_type).toBe('form_submit');
     expect(submitButton?.name).toBe('submit_api_login');
+  });
+});
+
+describe('buildFeishuOpenCodeOauthMessage', () => {
+  it('renders an oauth card with a direct open-link button', () => {
+    const payload = buildFeishuOpenCodeOauthMessage({
+      provider: 'openai',
+      url: 'https://auth.example.com/oauth/start',
+    });
+    const parsed = JSON.parse(payload) as {
+      __gateway_message__?: boolean;
+      msg_type?: string;
+      content?: {
+        elements?: Array<Record<string, unknown>>;
+      };
+    };
+
+    expect(parsed.__gateway_message__).toBe(true);
+    expect(parsed.msg_type).toBe('interactive');
+    const actions = (parsed.content?.elements ?? [])
+      .filter((item) => item.tag === 'action')
+      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
+        text?: { content?: string };
+        multi_url?: { url?: string };
+      }>;
+    expect(actions.some((item) => item.text?.content === '打开授权链接' && item.multi_url?.url === 'https://auth.example.com/oauth/start')).toBe(true);
+  });
+});
+
+describe('buildFeishuOpenCodeInputFallbackMessage', () => {
+  it('renders a minimal fallback form when oauth still needs user input', () => {
+    const payload = buildFeishuOpenCodeInputFallbackMessage({
+      provider: 'openai',
+      prompt: 'Enter the one-time code from your authenticator app',
+    });
+    const parsed = JSON.parse(payload) as {
+      __gateway_message__?: boolean;
+      msg_type?: string;
+      content?: {
+        elements?: Array<Record<string, unknown>>;
+      };
+    };
+
+    expect(parsed.__gateway_message__).toBe(true);
+    expect(parsed.msg_type).toBe('interactive');
+    const form = (parsed.content?.elements ?? []).find((item) => item.tag === 'form') as
+      | {
+          name?: string;
+          value?: Record<string, unknown>;
+          elements?: Array<Record<string, unknown>>;
+        }
+      | undefined;
+    expect(form?.name).toBe('opencode_oauth_input');
+    expect(form?.value?.gateway_action).toBe('opencode_login.submit_auth_input');
+    const inputs = (form?.elements ?? []).filter((item) => item.tag === 'input');
+    expect(inputs.map((item) => item.name)).toEqual(['auth_input']);
   });
 });

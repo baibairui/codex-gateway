@@ -975,6 +975,116 @@ export function buildFeishuOpenCodeLoginChoiceMessage(): string {
   });
 }
 
+export function buildFeishuOpenCodeOauthMessage(input: {
+  provider: string;
+  url: string;
+}): string {
+  const providerLabel = toProviderLabel(input.provider);
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+    },
+    header: {
+      template: 'blue',
+      title: {
+        tag: 'plain_text',
+        content: 'OpenCode 登录授权',
+      },
+    },
+    elements: [
+      buildFeishuTitleBlock(
+        `${providerLabel} 授权已就绪`,
+        '点击下面的按钮在浏览器中完成授权，网关会继续自动推进后续确认步骤。',
+      ),
+      buildFeishuFieldGrid([
+        { label: '登录渠道', value: providerLabel },
+        { label: '授权链接', value: input.url },
+      ]),
+      {
+        tag: 'action',
+        actions: [
+          {
+            tag: 'button',
+            type: 'primary',
+            text: {
+              tag: 'plain_text',
+              content: '打开授权链接',
+            },
+            multi_url: {
+              url: input.url,
+            },
+          },
+        ],
+      },
+    ],
+  });
+}
+
+export function buildFeishuOpenCodeInputFallbackMessage(input: {
+  provider: string;
+  prompt: string;
+}): string {
+  const providerLabel = toProviderLabel(input.provider);
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: false,
+    },
+    header: {
+      template: 'orange',
+      title: {
+        tag: 'plain_text',
+        content: 'OpenCode 登录补充输入',
+      },
+    },
+    elements: [
+      buildFeishuTitleBlock(
+        `${providerLabel} 登录还需要一步输入`,
+        input.prompt.trim(),
+      ),
+      {
+        tag: 'form',
+        name: 'opencode_oauth_input',
+        value: {
+          gateway_action: 'opencode_login.submit_auth_input',
+          provider_id: input.provider,
+        },
+        elements: [
+          {
+            tag: 'input',
+            name: 'auth_input',
+            label_position: 'top',
+            label: {
+              tag: 'plain_text',
+              content: '输入内容',
+            },
+            placeholder: {
+              tag: 'plain_text',
+              content: '仅在确实需要时填写',
+            },
+            max_length: 500,
+          },
+          {
+            tag: 'button',
+            name: 'submit_opencode_auth_input',
+            type: 'primary',
+            action_type: 'form_submit',
+            text: {
+              tag: 'plain_text',
+              content: '继续登录',
+            },
+            value: {
+              gateway_action: 'opencode_login.submit_auth_input',
+              provider_id: input.provider,
+            },
+          },
+        ],
+      },
+    ],
+  });
+}
+
 export function buildFeishuApiLoginFormMessage(defaults?: {
   provider?: CliProvider;
   baseUrl?: string;
@@ -1065,6 +1175,16 @@ export function buildFeishuApiLoginFormMessage(defaults?: {
       },
     ],
   });
+}
+
+function toProviderLabel(provider: string): string {
+  if (provider === 'openai') {
+    return 'OpenAI';
+  }
+  if (provider === 'xai') {
+    return 'xAI';
+  }
+  return provider.slice(0, 1).toUpperCase() + provider.slice(1);
 }
 
 export function buildFeishuApiLoginResultMessage(input: {

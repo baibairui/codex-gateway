@@ -13,7 +13,14 @@ interface OpenCodeAuthSession {
   child: ChildProcessWithoutNullStreams;
   announcedUrl: boolean;
   announcedInputFallback: boolean;
+  autoConfirmedPrompt: boolean;
+  pendingTerminalFragment: string;
 }
+
+export type OpenCodeAuthEvent =
+  | { type: 'oauth_url'; provider: string; url: string }
+  | { type: 'auto_confirmed'; provider: string; prompt: string }
+  | { type: 'input_required'; provider: string; prompt: string };
 
 interface StartOpenCodeAuthInput {
   key: string;
@@ -22,7 +29,8 @@ interface StartOpenCodeAuthInput {
   cliHomeDir: string;
   cwd: string;
   baseEnv: NodeJS.ProcessEnv;
-  onOutput: (text: string) => Promise<void>;
+  onOutput?: (text: string) => Promise<void>;
+  onEvent?: (event: OpenCodeAuthEvent) => Promise<void>;
   onExit: (result: { ok: boolean; provider: string; message: string }) => Promise<void>;
 }
 
@@ -66,11 +74,21 @@ export class OpenCodeAuthFlowManager {
       child,
       announcedUrl: false,
       announcedInputFallback: false,
+      autoConfirmedPrompt: false,
+      pendingTerminalFragment: '',
     });
 
     const forward = (raw: string) => {
       const session = this.sessions.get(input.key);
-      const text = sanitizeTerminalText(raw);
+      const combined = `${session?.pendingTerminalFragment ?? ''}${raw}`;
+      const pendingTerminalFragment = extractTrailingTerminalFragment(combined);
+      if (session) {
+        session.pendingTerminalFragment = pendingTerminalFragment;
+      }
+      const completeText = pendingTerminalFragment
+        ? combined.slice(0, -pendingTerminalFragment.length)
+        : combined;
+      const text = sanitizeTerminalText(completeText);
       if (!text.trim()) {
         return;
       }
@@ -78,15 +96,26 @@ export class OpenCodeAuthFlowManager {
         const urls = extractUrls(text);
         if (urls.length > 0 && !session.announcedUrl) {
           session.announcedUrl = true;
-          const providerLabel = input.provider === 'opencode' ? 'OpenCode' : input.provider;
-          const guidance = [
-            `已启动 OpenCode ${providerLabel} 登录。`,
-            '请先打开下面的链接，在浏览器中完成 OAuth 授权：',
-            ...urls.map((url) => `- ${url}`),
-            '完成后如果授权流程还在等待，可回到当前聊天继续按提示操作；如需中止，发送 /cancel。',
-          ].join('\n');
-          void input.onOutput(guidance).catch((error) => {
-            log.warn('OpenCode OAuth 引导消息发送失败', {
+          void input.onEvent?.({
+            type: 'oauth_url',
+            provider: input.provider,
+            url: urls[0]!,
+          }).catch((error) => {
+            log.warn('OpenCode OAuth 事件发送失败', {
+              provider: input.provider,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+          return;
+        } else if (!session.autoConfirmedPrompt && shouldAutoConfirmPrompt(text)) {
+          session.autoConfirmedPrompt = true;
+          session.child.stdin.write('\n');
+          void input.onEvent?.({
+            type: 'auto_confirmed',
+            provider: input.provider,
+            prompt: text,
+          }).catch((error) => {
+            log.warn('OpenCode 自动确认事件发送失败', {
               provider: input.provider,
               error: error instanceof Error ? error.message : String(error),
             });
@@ -94,16 +123,21 @@ export class OpenCodeAuthFlowManager {
           return;
         } else if (!session.announcedUrl && needsChatInput(text) && !session.announcedInputFallback) {
           session.announcedInputFallback = true;
-          void input.onOutput([
-            '授权流程还需要补充一步确认。',
-            '请根据接下来显示的提示，在当前聊天里回复所需内容；如需中止，发送 /cancel。',
-          ].join('\n')).catch((error) => {
-            log.warn('OpenCode 输入引导消息发送失败', {
+          void input.onEvent?.({
+            type: 'input_required',
+            provider: input.provider,
+            prompt: text,
+          }).catch((error) => {
+            log.warn('OpenCode 输入事件发送失败', {
               provider: input.provider,
               error: error instanceof Error ? error.message : String(error),
             });
           });
+          return;
         }
+      }
+      if (!input.onOutput) {
+        return;
       }
       void input.onOutput(text).catch((error) => {
         log.warn('OpenCode 登录输出转发失败', {
@@ -182,12 +216,29 @@ function sanitizeTerminalText(text: string): string {
   return stripped.trim();
 }
 
+function extractTrailingTerminalFragment(text: string): string {
+  if (!text) {
+    return '';
+  }
+  const escapeIndex = Math.max(text.lastIndexOf('\u001b'), text.lastIndexOf('\u009b'));
+  if (escapeIndex < 0) {
+    return '';
+  }
+  const fragment = text.slice(escapeIndex);
+  return isIncompleteAnsiFragment(fragment) ? fragment : '';
+}
+
 function extractUrls(text: string): string[] {
   return Array.from(new Set(text.match(/https?:\/\/[^\s)<>"']+/g) ?? []));
 }
 
 function needsChatInput(text: string): boolean {
   return /(\?\s*$|enter\b|press\b|select\b|choose\b|continue\b|confirm\b|input\b|code\b)/im.test(text);
+}
+
+function shouldAutoConfirmPrompt(text: string): boolean {
+  return /(press enter|press return|continue\b|confirm\b|open your browser|use your browser)/im.test(text)
+    && !/(api key|api url|base url|one-time code|verification code|authenticator|paste|token|secret|password)/im.test(text);
 }
 
 function toProviderLabel(provider: string): string {
@@ -199,6 +250,22 @@ function toProviderLabel(provider: string): string {
 
 function stripAnsi(text: string): string {
   return text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+}
+
+function isIncompleteAnsiFragment(fragment: string): boolean {
+  if (!fragment) {
+    return false;
+  }
+  if (fragment === '\u001b') {
+    return true;
+  }
+  if (fragment.startsWith('\u001b[')) {
+    return !/^\u001b\[[0-?]*[ -/]*[@-~]/.test(fragment);
+  }
+  if (fragment.startsWith('\u009b')) {
+    return !/^\u009b[0-?]*[ -/]*[@-~]/.test(fragment);
+  }
+  return false;
 }
 
 function shellEscape(value: string): string {

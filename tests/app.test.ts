@@ -525,6 +525,60 @@ describe('createApp feishu callback', () => {
       },
     });
   });
+
+  it('accepts opencode oauth fallback input card action and routes it without forwarding text', async () => {
+    const handleText = vi.fn(async () => undefined);
+    const handleFeishuCardAction = vi.fn(async () => undefined);
+    const baseUrl = await startTestServer({
+      feishuVerificationToken: 'expected-token',
+      handleText,
+      handleFeishuCardAction,
+    });
+
+    const response = await fetch(`${baseUrl}/feishu/callback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        schema: '2.0',
+        header: {
+          token: 'expected-token',
+          event_type: 'card.action.trigger',
+        },
+        event: {
+          operator: {
+            operator_id: {
+              open_id: 'ou_card_4',
+            },
+          },
+          context: {
+            chat_id: 'oc_group_4',
+          },
+          action: {
+            value: {
+              gateway_action: 'opencode_login.submit_auth_input',
+              auth_input: '123456',
+              provider_id: 'openai',
+            },
+          },
+        },
+      }),
+    });
+    const payload = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({});
+    expect(handleText).not.toHaveBeenCalled();
+    expect(handleFeishuCardAction).toHaveBeenCalledWith({
+      userId: 'ou_card_4',
+      chatId: 'oc_group_4',
+      action: 'opencode_login.submit_auth_input',
+      value: {
+        gateway_action: 'opencode_login.submit_auth_input',
+        auth_input: '123456',
+        provider_id: 'openai',
+      },
+    });
+  });
 });
 
 describe('dispatchFeishuMessageReceiveEvent', () => {
