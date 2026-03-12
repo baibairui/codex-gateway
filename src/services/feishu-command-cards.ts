@@ -929,10 +929,6 @@ export function buildFeishuLoginChoiceMessage(input: {
 }
 
 export function buildFeishuOpenCodeLoginChoiceMessage(): string {
-  const providers = [
-    ['openai', 'OpenAI'],
-    ['anthropic', 'Anthropic'],
-  ] as const;
   return buildFeishuInteractiveMessage({
     config: {
       wide_screen_mode: true,
@@ -946,18 +942,12 @@ export function buildFeishuOpenCodeLoginChoiceMessage(): string {
       },
     },
     elements: [
-      buildFeishuTitleBlock('选择 OpenCode 登录方式', 'OpenAI 和 Anthropic 支持浏览器授权链接。其他 OpenCode 渠道请使用下方 API URL / Key 登录。'),
+      buildFeishuTitleBlock('使用 API URL / Key 登录 OpenCode', '飞书内暂不提供 OpenCode 的浏览器授权登录，请直接写入 API 配置。'),
       buildFeishuFieldGrid([
         { label: '写入位置', value: '.config/opencode/opencode.json' },
         { label: '认证文件', value: '.local/share/opencode/auth.json' },
       ]),
-      ...buildValueButtonRows(providers.map(([providerId, label]) => ({
-        label,
-        value: {
-          gateway_action: 'opencode_login.start_provider_auth',
-          provider_id: providerId,
-        },
-      })), 2),
+      buildFeishuTipsNote('推荐填写 OpenAI 兼容 API：base_url + api_key + model。'),
       ...buildValueButtonRows([
         {
           label: 'API URL / Key 登录',

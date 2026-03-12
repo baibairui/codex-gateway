@@ -50,7 +50,7 @@ describe('buildFeishuLoginChoiceMessage', () => {
     expect(actions.some((item) => item.text?.content === 'API URL / Key 登录')).toBe(true);
   });
 
-  it('limits opencode oauth buttons to providers that support browser auth', () => {
+  it('shows only api login for opencode in feishu', () => {
     const payload = buildFeishuLoginChoiceMessage({
       provider: 'opencode',
       providerLabel: 'OpenCode',
@@ -67,12 +67,9 @@ describe('buildFeishuLoginChoiceMessage', () => {
         text?: { content?: string };
       }>;
 
-    expect(actions.some((item) => item.text?.content === 'OpenAI')).toBe(true);
-    expect(actions.some((item) => item.text?.content === 'Anthropic')).toBe(true);
-    expect(actions.some((item) => item.text?.content === 'OpenRouter')).toBe(false);
-    expect(actions.some((item) => item.text?.content === 'Google')).toBe(false);
-    expect(actions.some((item) => item.text?.content === 'Groq')).toBe(false);
-    expect(actions.some((item) => item.text?.content === 'xAI')).toBe(false);
+    expect(actions.some((item) => item.text?.content === 'OpenAI')).toBe(false);
+    expect(actions.some((item) => item.text?.content === 'Anthropic')).toBe(false);
+    expect(actions.filter((item) => item.text?.content === 'API URL / Key 登录')).toHaveLength(1);
   });
 });
 
