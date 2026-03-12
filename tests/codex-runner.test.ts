@@ -418,6 +418,40 @@ describe('buildCodexSpawnSpec', () => {
     expect(spec.env.GATEWAY_REMINDER_DB_PATH).toBe('/tmp/reminders.db');
   });
 
+  it('mounts absolute cli bin and its symlink target into bwrap', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-bin-'));
+    const hostHome = path.join(tempRoot, 'host-home');
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+    const realBinDir = path.join(hostHome, '.opencode', 'bin');
+    const linkBinDir = path.join(hostHome, '.local', 'bin');
+    const realBin = path.join(realBinDir, 'opencode');
+    const linkBin = path.join(linkBinDir, 'opencode');
+
+    fs.mkdirSync(realBinDir, { recursive: true });
+    fs.mkdirSync(linkBinDir, { recursive: true });
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(realBin, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(realBin, 0o755);
+    fs.symlinkSync(realBin, linkBin);
+    const resolvedRealBin = fs.realpathSync(linkBin);
+
+    const spec = buildCodexSpawnSpec({
+      provider: 'opencode',
+      codexBin: linkBin,
+      args: ['run', '--format', 'json', 'hello'],
+      cwd: workspaceDir,
+      env: { HOME: hostHome, PATH: '/usr/bin:/bin' },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(spec.args).toContain(linkBin);
+    expect(spec.args).toContain(resolvedRealBin);
+    expect(spec.args).toContain('--ro-bind');
+  });
+
   it('bridges gateway root node_modules into isolated runs for skill scripts', () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-gateway-root-'));
     const hostHome = path.join(tempRoot, 'host-home');

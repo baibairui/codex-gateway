@@ -96,6 +96,7 @@ function buildBubblewrapArgs(
   appendIfExists(result, ['--ro-bind', '/lib', '/lib']);
   appendIfExists(result, ['--ro-bind', '/lib64', '/lib64']);
   appendIfExists(result, ['--ro-bind', '/etc', '/etc']);
+  appendAbsoluteBinaryMounts(result, codexBin);
 
   result.push(
     '--bind',
@@ -247,6 +248,44 @@ function appendGatewayNodeModulesMount(result: string[], gatewayRootDir: string 
     nodeModulesDir,
     `${RUNTIME_GATEWAY_ROOT_MOUNT_DIR}/node_modules`,
   );
+}
+
+function appendAbsoluteBinaryMounts(result: string[], codexBin: string): void {
+  if (!path.isAbsolute(codexBin) || !fs.existsSync(codexBin)) {
+    return;
+  }
+
+  const mounts = new Set<string>([path.resolve(codexBin)]);
+  try {
+    const realBin = fs.realpathSync(codexBin);
+    mounts.add(realBin);
+  } catch {
+    // Keep the original path only when realpath resolution fails.
+  }
+
+  const createdDirs = new Set<string>();
+  for (const source of mounts) {
+    ensureSandboxDirTree(result, createdDirs, path.dirname(source));
+    result.push('--ro-bind', source, source);
+  }
+}
+
+function ensureSandboxDirTree(result: string[], createdDirs: Set<string>, dirPath: string): void {
+  const resolved = path.resolve(dirPath);
+  const segments = resolved.split(path.sep).filter(Boolean);
+  let current = '';
+  if (resolved.startsWith(path.sep)) {
+    current = path.sep;
+  }
+
+  for (const segment of segments) {
+    current = current === path.sep ? path.join(current, segment) : path.join(current, segment);
+    if (createdDirs.has(current)) {
+      continue;
+    }
+    result.push('--dir', current);
+    createdDirs.add(current);
+  }
 }
 
 function syncCodexRuntimeHome(sourceDir: string | undefined, targetDir: string): void {
