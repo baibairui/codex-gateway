@@ -695,7 +695,7 @@ local_image_path=${sourcePath}`,
     };
     expect(providerParsed.__gateway_message__).toBe(true);
     expect(providerParsed.msg_type).toBe('interactive');
-    expect(providerParsed.content?.header?.title?.content).toBe('框架切换');
+    expect(providerParsed.content?.header?.title?.content).toBe('框架管理');
     expect(helpParsed.__gateway_message__).toBe(true);
     expect(helpParsed.msg_type).toBe('interactive');
     expect(helpParsed.content?.header?.title?.content).toBe('命令帮助');
@@ -920,14 +920,44 @@ local_image_path=${sourcePath}`,
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前分组**'))).toBe(true);
     const actionElements = (card.elements ?? []).filter((item) => (item as { tag?: string }).tag === 'action') as Array<{
-      actions?: Array<{ value?: { gateway_cmd?: string } }>;
+      actions?: Array<{ text?: { content?: string }; value?: { gateway_cmd?: string } }>;
     }>;
     const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
-    expect(cmds).toContain('/new');
+    const labels = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.text?.content));
+    expect(labels).toContain('框架管理');
+    expect(cmds).toContain('/provider');
     expect(cmds).toContain('/sessions');
     expect(cmds).toContain('/agents');
     expect(cmds).toContain('/help 1');
     expect(cmds).toContain('/help 2');
+  });
+
+  it('renders third help page commands in feishu interactive card', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+      },
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/help 3' });
+
+    const payload = String(sendText.mock.calls[0]?.[2] ?? '');
+    const parsed = JSON.parse(payload) as {
+      content?: {
+        elements?: Array<{ content?: string }>;
+      };
+    };
+    const merged = (parsed.content?.elements ?? []).map((item) => String(item.content ?? '')).join('\n');
+    expect(merged).toContain('工作区与运维 · 3/3');
+    expect(merged).not.toContain('/deploy-workspace - 发布当前 agent 工作区');
+    expect(merged).not.toContain('/publish-workspace - 发布当前 agent 工作区');
+    expect(merged).toContain('/repair-users - 清理并修复已部署用户工作区');
+    expect(merged).toContain('/review commit [SHA] - 审查指定提交');
   });
 
   it('formats short command response as feishu interactive card', async () => {

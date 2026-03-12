@@ -42,7 +42,7 @@ const COMMAND_LABELS: Record<string, string> = {
   '/rename': '会话重命名',
   '/switch': '会话切换',
   '/model': '模型管理',
-  '/provider': '框架切换',
+  '/provider': '框架管理',
   '/models': '模型列表',
   '/skills': 'Skill 管理',
   '/search': '联网搜索',
@@ -59,7 +59,7 @@ const COMMAND_SUMMARIES: Record<string, string> = {
   '/agent': '查看当前 agent 状态，包括工作区和会话绑定情况。',
   '/skills': '查看当前会话生效的 skills，并快速切换不同范围。',
   '/model': '查看或切换当前模型，并在需要时恢复默认值。',
-  '/provider': '查看或切换当前 agent 的执行框架，并在 Codex 与 OpenCode 之间切换。',
+  '/provider': '查看当前执行框架，并通过卡片按钮切换 Codex 或 OpenCode。',
   '/models': '查看当前支持的模型集合，并回到当前模型设置。',
   '/search': '控制本会话的联网搜索开关，按需临时开启。',
   '/review': '发起当前工作区的代码审查，支持按分支或提交审查。',
@@ -653,26 +653,56 @@ function buildSearchCardElements(text: string): Array<Record<string, unknown>> {
 
 function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-  const groupLine = lines.find((line) => line.startsWith('【') && line.endsWith('】'));
   const pageInfo = resolveHelpPageInfo(text);
-  const groupName = groupLine?.replace(/^【/, '').replace(/】$/, '') ?? '';
-  const summary = groupName && pageInfo
-    ? `${groupName} · ${pageInfo.page}/${pageInfo.total}`
+  const groups: Array<{ title: string; lines: string[] }> = [];
+  let currentGroup: { title: string; lines: string[] } | undefined;
+  for (const line of lines) {
+    if (line.startsWith('【') && line.endsWith('】')) {
+      currentGroup = {
+        title: line.replace(/^【/, '').replace(/】$/, ''),
+        lines: [],
+      };
+      groups.push(currentGroup);
+      continue;
+    }
+    if (line.startsWith('可用命令（按功能分组')) {
+      continue;
+    }
+    if (line.startsWith('翻页：')) {
+      continue;
+    }
+    if (!currentGroup) {
+      continue;
+    }
+    currentGroup.lines.push(line);
+  }
+  const groupNames = groups.map((group) => group.title).filter(Boolean);
+  const primaryGroupName = groupNames[0] ?? '';
+  const summary = groupNames.length === 1 && pageInfo
+    ? `${primaryGroupName} · ${pageInfo.page}/${pageInfo.total}`
     : pageInfo
     ? `帮助页 ${pageInfo.page}/${pageInfo.total}`
-    : groupName || '可用命令';
+    : primaryGroupName || '可用命令';
+  const commandCount = groups.reduce((count, group) => count + group.lines.length, 0);
   const elements: Array<Record<string, unknown>> = [
     buildFeishuTitleBlock(CARD_COPY.helpTitle, summary),
   ];
   elements.push(buildFeishuFieldGrid([
-    { label: CARD_COPY.helpGroupLabel, value: groupName },
+    { label: CARD_COPY.helpGroupLabel, value: groupNames.join(' / ') },
     { label: '页码', value: pageInfo ? `${pageInfo.page}/${pageInfo.total}` : '' },
-    { label: '命令数', value: '' },
+    { label: '命令数', value: commandCount > 0 ? String(commandCount) : '' },
   ]));
   elements.push(buildFeishuDivider());
-  const shortcutButtons = resolveHelpShortcutButtons(groupName);
+  for (const group of groups) {
+    elements.push(buildFeishuSectionBlock(group.title, group.lines));
+    elements.push(buildFeishuDivider());
+  }
+  const shortcutButtons = resolveHelpShortcutButtons(primaryGroupName);
   if (shortcutButtons.length > 0) {
     elements.push(...buildCommandButtonRows(shortcutButtons, 3));
+  }
+  if (elements[elements.length - 1]?.tag === 'hr') {
+    elements.pop();
   }
   return elements;
 }
@@ -680,7 +710,7 @@ function buildHelpCardElements(text: string): Array<Record<string, unknown>> {
 function resolveHelpShortcutButtons(groupName: string): FeishuCardButton[] {
   if (groupName === '会话与 Agent') {
     return [
-      { label: '新建会话', cmd: '/new', type: 'primary' },
+      { label: '框架管理', cmd: '/provider', type: 'primary' },
       { label: '会话列表', cmd: '/sessions' },
       { label: 'Agent 列表', cmd: '/agents' },
     ];

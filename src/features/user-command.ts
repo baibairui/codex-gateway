@@ -107,6 +107,8 @@ const HELP_ENTRIES: Array<{ section: string; line: string }> = [
   { section: '模型、技能与执行', line: '/provider - 查看当前框架并切换' },
   { section: '模型、技能与执行', line: '/provider codex|opencode - 切换当前 agent 框架' },
   { section: '模型、技能与执行', line: '/provider reset - 恢复为服务默认框架' },
+  { section: '模型、技能与执行', line: '/runtime - 查看当前框架并切换' },
+  { section: '模型、技能与执行', line: '/runtime codex|opencode - 切换当前 agent 框架' },
   { section: '模型、技能与执行', line: '/model - 查看当前模型与可选模型' },
   { section: '模型、技能与执行', line: '/model page [页码] - 查看更多模型' },
   { section: '模型、技能与执行', line: '/model [模型名] - 切换模型' },
@@ -122,8 +124,6 @@ const HELP_ENTRIES: Array<{ section: string; line: string }> = [
   { section: '模型、技能与执行', line: '/search - 查看联网搜索状态' },
   { section: '模型、技能与执行', line: '/search on|off - 开启/关闭联网搜索' },
   { section: '工作区与运维', line: '/login - 使用设备码登录 Codex' },
-  { section: '工作区与运维', line: '/deploy-workspace - 发布当前 agent 工作区' },
-  { section: '工作区与运维', line: '/publish-workspace - 发布当前 agent 工作区' },
   { section: '工作区与运维', line: '/repair-users - 清理并修复已部署用户工作区（技能注入、规则升级、工作目录自愈）' },
   { section: '工作区与运维', line: '/review - 审查当前 agent 工作区变更' },
   { section: '工作区与运维', line: '/review base [分支] - 审查相对分支的变更' },
@@ -131,14 +131,14 @@ const HELP_ENTRIES: Array<{ section: string; line: string }> = [
   { section: '工作区与运维', line: '提醒任务请直接用自然语言描述，由已安装的 reminder-tool skill 执行内置脚本创建提醒。' },
 ];
 
-const HELP_PAGE_SIZE = 14;
-
 function buildHelpPages(): Array<Array<{ section: string; line: string }>> {
-  const pages: Array<Array<{ section: string; line: string }>> = [];
-  for (let index = 0; index < HELP_ENTRIES.length; index += HELP_PAGE_SIZE) {
-    pages.push(HELP_ENTRIES.slice(index, index + HELP_PAGE_SIZE));
+  const pages = new Map<string, Array<{ section: string; line: string }>>();
+  for (const entry of HELP_ENTRIES) {
+    const bucket = pages.get(entry.section) ?? [];
+    bucket.push(entry);
+    pages.set(entry.section, bucket);
   }
-  return pages;
+  return Array.from(pages.values());
 }
 
 function renderHelpMessage(page: number): string {

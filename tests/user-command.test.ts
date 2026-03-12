@@ -59,6 +59,8 @@ describe('handleUserCommand', () => {
     expect(result.handled).toBe(true);
     expect(result.message).toContain('帮助页 2/3');
     expect(result.message).toContain('/provider reset - 恢复为服务默认框架');
+    expect(result.message).toContain('/runtime - 查看当前框架并切换');
+    expect(result.message).toContain('/runtime codex|opencode - 切换当前 agent 框架');
     expect(result.message).toContain('/skills');
     expect(result.message).toContain('翻页：/help 1 | /help 3');
   });
@@ -67,7 +69,9 @@ describe('handleUserCommand', () => {
     const result = handleUserCommand('/help 3', context);
     expect(result.handled).toBe(true);
     expect(result.message).toContain('帮助页 3/3');
-    expect(result.message).toContain('/deploy-workspace - 发布当前 agent 工作区');
+    expect(result.message).not.toContain('/deploy-workspace - 发布当前 agent 工作区');
+    expect(result.message).not.toContain('/publish-workspace - 发布当前 agent 工作区');
+    expect(result.message).toContain('/repair-users - 清理并修复已部署用户工作区');
     expect(result.message).toContain('/review commit [SHA] - 审查指定提交');
     expect(result.message).toContain('翻页：/help 2 | /help 3');
   });
