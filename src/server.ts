@@ -13,7 +13,12 @@ import { CodexRunner } from './services/codex-runner.js';
 import { createChatHandler } from './services/chat-handler.js';
 import { getCliProviderSpec, readCliHomeDefaultModel, runnerHomeDirName, writeCliApiLoginConfig } from './services/cli-provider.js';
 import { startCodexDeviceLogin } from './services/codex-login-flow.js';
-import { buildFeishuApiLoginFormMessage, buildFeishuApiLoginResultMessage } from './services/feishu-command-cards.js';
+import {
+  buildFeishuApiLoginFormMessage,
+  buildFeishuApiLoginResultMessage,
+  buildFeishuOpenCodeInputFallbackMessage,
+  buildFeishuOpenCodeOauthMessage,
+} from './services/feishu-command-cards.js';
 import { MemorySteward } from './services/memory-steward.js';
 import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
@@ -766,13 +771,38 @@ async function appDepsHandleFeishuCardAction(input: {
       cliHomeDir: opencodeHomeDir,
       cwd: currentAgent.workspaceDir,
       baseEnv: process.env,
-      onOutput: async (text) => {
-        await sendText('feishu', input.userId, text);
+      onEvent: async (event) => {
+        if (event.type === 'oauth_url') {
+          await sendText('feishu', input.userId, buildFeishuOpenCodeOauthMessage({
+            provider: event.provider,
+            url: event.url,
+          }));
+          return;
+        }
+        if (event.type === 'input_required') {
+          await sendText('feishu', input.userId, buildFeishuOpenCodeInputFallbackMessage({
+            provider: event.provider,
+            prompt: event.prompt,
+          }));
+          return;
+        }
       },
       onExit: async (result) => {
         await sendText('feishu', input.userId, result.ok ? `✅ ${result.message}` : `❌ ${result.message}`);
       },
     });
+    return;
+  }
+
+  if (input.action === 'opencode_login.submit_auth_input') {
+    const authInput = extractCardField(input.value, 'auth_input') ?? '';
+    const authSessionKey = buildOpenCodeAuthSessionKey('feishu', input.userId, currentAgent.agentId);
+    const accepted = await openCodeAuthFlowManager.sendInput(authSessionKey, authInput);
+    await sendText(
+      'feishu',
+      input.userId,
+      accepted ? '⏳ 已继续 OpenCode 登录流程，请等待授权结果。' : '❌ 当前没有可继续的 OpenCode 登录流程，请重新点击 /login。',
+    );
     return;
   }
 
