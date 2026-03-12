@@ -857,10 +857,12 @@ ${clipMessage(prompt, 500)}
         await deps.sendText(channel, userId, '已取消当前登录流程。');
         return;
       }
-      const accepted = await deps.openCodeAuthFlowManager.sendInput(openCodeAuthSessionKey, prompt);
-      if (accepted) {
-        await deps.sendText(channel, userId, '已收到，正在继续处理授权流程。');
-        return;
+      if (deps.openCodeAuthFlowManager.isAwaitingInput(openCodeAuthSessionKey)) {
+        const accepted = await deps.openCodeAuthFlowManager.sendInput(openCodeAuthSessionKey, prompt);
+        if (accepted) {
+          await deps.sendText(channel, userId, '已收到，正在继续处理授权流程。');
+          return;
+        }
       }
     }
     const existingSessionState = getSessionState(sessionUserKey, currentAgent.agentId);

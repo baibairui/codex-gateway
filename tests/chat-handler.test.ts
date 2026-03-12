@@ -258,6 +258,41 @@ describe('createChatHandler', () => {
     expect(sessionStore.getSession('u1', 'test')).toBe('thread_reminder');
   });
 
+  it('does not hijack /help when an opencode auth session exists but is not waiting for manual input', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: vi.fn(async () => ({ threadId: 'thread_1', rawOutput: '' })),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      openCodeAuthFlowManager: {
+        has: () => true,
+        isAwaitingInput: () => false,
+        stop: vi.fn(() => true),
+        sendInput: vi.fn(async () => true),
+      },
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '/help' });
+
+    expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '已收到，正在继续处理授权流程。');
+    expect(sendText).toHaveBeenCalled();
+    const helpPayload = String(sendText.mock.calls.at(-1)?.[2] ?? '');
+    expect(helpPayload).toContain('命令帮助');
+  });
+
   it('sends a visible error message when codex run fails', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
