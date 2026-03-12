@@ -44,6 +44,7 @@ interface AppDeps {
   handleFeishuCardAction?: (input: {
     userId: string;
     chatId?: string;
+    publicBaseUrl?: string;
     action: string;
     value: Record<string, unknown>;
   }) => Promise<void>;
@@ -75,6 +76,16 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
 
 function clipText(input: string, max = 200): string {
   return input.length <= max ? input : `${input.slice(0, max)}...`;
+}
+
+function extractPublicBaseUrl(req: express.Request): string | undefined {
+  const host = firstNonEmptyString(req.header('x-forwarded-host'), req.header('host'));
+  if (!host) {
+    return undefined;
+  }
+  const proto = firstNonEmptyString(req.header('x-forwarded-proto'))
+    ?? (req.secure ? 'https' : 'http');
+  return `${proto}://${host}`;
 }
 
 function isLoopbackAddress(value: string | undefined): boolean {
@@ -220,6 +231,7 @@ export function dispatchFeishuMessageReceiveEvent(
 export function dispatchFeishuCardActionEvent(
   deps: FeishuEventDeps,
   event: Record<string, unknown>,
+  options?: { publicBaseUrl?: string },
 ): 'success' | 'ignored' {
   const operator = (event.operator ?? {}) as Record<string, unknown>;
   const operatorId = (operator.operator_id ?? {}) as Record<string, unknown>;
@@ -260,6 +272,7 @@ export function dispatchFeishuCardActionEvent(
     deps.handleFeishuCardAction({
       userId: openId,
       chatId: chatId || undefined,
+      publicBaseUrl: options?.publicBaseUrl,
       action: gatewayAction,
       value,
     }).catch((err) => {
@@ -339,6 +352,51 @@ export function createApp(deps: AppDeps) {
         feishu: feishuStatus,
       },
     });
+  });
+
+  app.get('/opencode/oauth/callback', async (req, res) => {
+    const gatewayTarget = qs(req.query.gateway_target);
+    if (!gatewayTarget) {
+      res.status(400).type('text/plain').send('missing gateway_target');
+      return;
+    }
+    const targetUrl = new URL(`http://127.0.0.1:1455${gatewayTarget}`);
+    for (const [key, value] of Object.entries(req.query)) {
+      if (key === 'gateway_target') {
+        continue;
+      }
+      if (typeof value === 'string') {
+        targetUrl.searchParams.append(key, value);
+        continue;
+      }
+      if (!Array.isArray(value)) {
+        continue;
+      }
+      for (const item of value) {
+        if (typeof item === 'string') {
+          targetUrl.searchParams.append(key, item);
+        }
+      }
+    }
+    try {
+      const upstream = await fetch(targetUrl.toString(), {
+        headers: {
+          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+      const body = await upstream.text();
+      const contentType = upstream.headers.get('content-type');
+      if (contentType) {
+        res.setHeader('content-type', contentType);
+      }
+      res.status(upstream.status).send(body);
+    } catch (error) {
+      log.warn('OpenCode OAuth 回调代理失败', {
+        gatewayTarget,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(502).type('text/plain').send('opencode oauth callback proxy failed');
+    }
   });
 
   if (deps.browserAutomation) {
@@ -603,7 +661,9 @@ export function createApp(deps: AppDeps) {
             isDuplicateMessage: deps.isDuplicateMessage,
             handleText: deps.handleText,
             handleFeishuCardAction: deps.handleFeishuCardAction,
-          }, event);
+          }, event, {
+            publicBaseUrl: extractPublicBaseUrl(req),
+          });
           // 飞书卡片动作回调不能复用普通事件回执格式（code/msg）。
           // 这里返回空对象，表示卡片点击已被服务端接收，由异步消息结果继续反馈给用户。
           log.info('POST /feishu/callback card.action.trigger 返回 {}');
