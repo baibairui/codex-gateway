@@ -286,6 +286,32 @@ describe('buildCodexSpawnSpec', () => {
     expect(spec.env.XDG_CACHE_HOME).toBeUndefined();
   });
 
+  it('points direct opencode runs at the instance XDG home so tool env stays stable', () => {
+    const instanceHome = '/tmp/opencode-instance-home';
+    const spec = buildCodexSpawnSpec({
+      provider: 'opencode',
+      codexBin: '/usr/bin/opencode',
+      args: ['run', '--format', 'json', 'hello'],
+      cwd: '/tmp/agent-opencode-direct',
+      env: {
+        HOME: '/root',
+        PATH: '/usr/bin',
+        FEISHU_APP_ID: 'cli_test',
+        FEISHU_APP_SECRET: 'sec_test',
+      },
+      isolationMode: 'off',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(spec.env.HOME).toBe(instanceHome);
+    expect(spec.env.CODEX_HOME).toBe(instanceHome);
+    expect(spec.env.XDG_CONFIG_HOME).toBe(`${instanceHome}/.config`);
+    expect(spec.env.XDG_CACHE_HOME).toBe(`${instanceHome}/.cache`);
+    expect(spec.env.XDG_DATA_HOME).toBe(`${instanceHome}/.local/share`);
+    expect(spec.env.FEISHU_APP_ID).toBe('cli_test');
+    expect(spec.env.FEISHU_APP_SECRET).toBe('sec_test');
+  });
+
   it('wraps codex in bubblewrap and rewrites --cd to /workspace', () => {
     const workspaceDir = '/tmp/agent-bwrap';
     const spec = buildCodexSpawnSpec({
@@ -311,6 +337,35 @@ describe('buildCodexSpawnSpec', () => {
     const cdIndex = spec.args.indexOf('--cd');
     expect(cdIndex).toBeGreaterThan(-1);
     expect(spec.args[cdIndex + 1]).toBe('/workspace');
+  });
+
+  it('sets XDG data home for isolated opencode runs', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bwrap-xdg-data-'));
+    const hostHome = path.join(tempRoot, 'host-home');
+    const instanceHome = path.join(tempRoot, 'instance-home');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+
+    fs.mkdirSync(hostHome, { recursive: true });
+    fs.mkdirSync(instanceHome, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+
+    const spec = buildCodexSpawnSpec({
+      provider: 'opencode',
+      codexBin: '/usr/bin/opencode',
+      args: ['run', '--format', 'json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: hostHome,
+        PATH: '/usr/bin:/bin',
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: instanceHome,
+    });
+
+    expect(spec.env.XDG_DATA_HOME).toBe(`${workspaceDir}/.codex-runtime/home/.local/share`);
+    const dataHomeIndex = spec.args.indexOf('XDG_DATA_HOME');
+    expect(dataHomeIndex).toBeGreaterThan(-1);
+    expect(spec.args[dataHomeIndex + 1]).toBe('/workspace/.codex-runtime/home/.local/share');
   });
 
   it('preserves nested workdir paths inside the mounted workspace', () => {

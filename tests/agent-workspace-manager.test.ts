@@ -85,6 +85,7 @@ describe('AgentWorkspaceManager', () => {
     expect(tools).toContain('`gateway-browser` skill');
     expect(tools).toContain('`reminder-tool` skill');
     expect(tools).toContain('`feishu-official-ops` skill');
+    expect(tools).toContain('个人日历 / 个人任务');
     expect(tools).toContain('`social-intel` skill');
     expect(tools).toContain('`social-doc-writer` skill');
     expect(tools).toContain('自带脚本执行真实 OpenAPI');
@@ -96,10 +97,19 @@ describe('AgentWorkspaceManager', () => {
     expect(feishuPlaybook).toContain('应用凭据可直接完成');
     expect(feishuPlaybook).toContain('只回 markdown 文本不算完成');
     expect(feishuPlaybook).toContain('不要把用户引到任何个人授权或登录页面');
+    expect(feishuPlaybook).toContain('calendar create-personal-event');
+    expect(feishuPlaybook).toContain('task create-personal-task');
+    expect(feishuPlaybook).toContain('`99991679`');
+    expect(feishuPlaybook).toContain('auth diagnose-permission');
+    expect(feishuPlaybook).toContain('required-scopes-json');
+    expect(feishuPlaybook).toContain('不要反问用户要不要继续');
     expect(feishuPlaybook).not.toContain('gateway_feishu');
     expect(feishuSkill).toContain('Use the bundled script');
     expect(feishuSkill).toContain('a chat markdown answer is not a successful write');
     expect(feishuSkill).toContain('do not bounce the user into personal auth');
+    expect(feishuSkill).toContain('For the current user\'s own calendar');
+    expect(feishuSkill).toContain('For personal calendar or task scope errors, continue the diagnostic flow yourself');
+    expect(feishuSkill).toContain('required-scopes-json');
     expect(feishuSkill).not.toContain('gateway_feishu');
     expect(socialIntelSkill).toContain('name: social-intel');
     expect(socialIntelSkill).toContain('sources, publish time, author/account, summary, and evidence');

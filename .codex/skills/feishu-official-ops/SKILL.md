@@ -53,7 +53,43 @@ Personal Feishu commands are available again and use a **device-flow-only** auth
 - `auth poll-device-auth`
 
 This follows the same no-public-callback model used by `openclaw-lark`. Do not ask the user to configure `GATEWAY_PUBLIC_BASE_URL` for Feishu user auth.
-If a personal command returns `authorization_required`, call `auth start-device-auth`, guide the user through approval, then call `auth poll-device-auth` and retry.
+If a personal command returns `authorization_required`, call `auth start-device-auth` with any returned `required-scopes-json`, guide the user through approval, then call `auth poll-device-auth` and retry.
+
+## High-Signal Defaults
+
+Follow these defaults unless the user explicitly asks for something else.
+
+### Calendar
+
+- For the current user's own calendar, default to `calendar create-personal-event`.
+- Do not use `calendar create-event` unless the user explicitly wants a shared calendar and you already have `calendar-id`.
+- If the user says "帮我建日程", "在我的日历里加一个会", or "给我安排一个会议", treat that as a personal calendar request.
+- Reuse `--gateway-user-id` or `GATEWAY_USER_ID` for the current chat user. Do not ask the user to manually provide their own gateway user id if it is already available in the environment.
+- If personal calendar auth is missing, run the device auth flow with the command's required scopes and retry the same personal command after authorization succeeds.
+- If a personal calendar call fails with `99991679` or a missing-scope error, immediately run `auth diagnose-permission` with the returned scopes and continue the diagnosis. If re-authorization is needed, pass those scopes back into `auth start-device-auth`. Do not stop at a generic explanation or ask the user whether to continue.
+
+### Task
+
+- For the current user's own tasks, default to `task create-personal-task`, `task list-personal-tasks`, `task get-personal-task`, `task update-personal-task`, and `task delete-personal-task`.
+- Do not default to shared `task create` or `tasklist create` when the user is talking about "我的待办", "给我记个任务", or similar personal todo requests.
+- Only use shared task or tasklist commands when the user explicitly wants a shared collaboration object or already provided a shared task or tasklist identifier.
+- If a personal task call fails with `99991679` or a missing-scope error, immediately run `auth diagnose-permission` with the returned scopes and continue the diagnosis. If re-authorization is needed, pass those scopes back into `auth start-device-auth`. Do not stop at a generic explanation or ask the user whether to continue.
+
+### IM Read
+
+- When the user asks what a chat or thread said, prefer curated `im` commands over generic `api call`.
+- If the first page returns `has_more: true` and the user asked for the full picture, continue paging.
+- If returned messages include a thread identifier and the user wants the discussion context, follow up by reading the thread replies instead of stopping at the root message.
+
+### Bitable
+
+- Before writing Bitable records, inspect the table and field schema first.
+- Match field values to the actual field type instead of guessing. Official Bitable errors are often value-shape mismatches, not missing permissions.
+
+### DocX / Wiki
+
+- For DocX and Wiki writes, success means a real object was created or updated and the API returned the real document or node identifiers.
+- A chat markdown answer is not a successful write.
 
 ## Command Strategy
 
@@ -101,8 +137,8 @@ Use curated commands for common work:
 - `wiki list-spaces` / `wiki list-nodes` / `wiki get-node` / `wiki create-node` / `wiki move-node` / `wiki update-title` / `wiki get-task`
 - `doc get-content`
 - `bitable list-tables` / `bitable search-records` / `bitable create-record` / `bitable update-record`
-- `calendar list-calendars` / `calendar create-calendar` / `calendar get-calendar` / `calendar update-calendar` / `calendar delete-calendar` / `calendar list-events` / `calendar create-event` / `calendar list-events-v4` / `calendar get-event` / `calendar update-event` / `calendar delete-event` / `calendar create-personal-event` / `calendar freebusy`
-- `task create` / `task update` / `task delete` / `task add-members` / `task remove-members` / `task add-reminders` / `task remove-reminders` / `task add-dependencies` / `task remove-dependencies` / `task list-subtasks` / `task list-tasklists` / `task add-tasklist` / `task remove-tasklist` / `task create-personal-task` / `task list-personal-tasks` / `task get-personal-task` / `task update-personal-task` / `task delete-personal-task`
+- `calendar create-personal-event` / `calendar list-calendars` / `calendar create-calendar` / `calendar get-calendar` / `calendar update-calendar` / `calendar delete-calendar` / `calendar list-events` / `calendar create-event` / `calendar list-events-v4` / `calendar get-event` / `calendar update-event` / `calendar delete-event` / `calendar freebusy`
+- `task create-personal-task` / `task list-personal-tasks` / `task get-personal-task` / `task update-personal-task` / `task delete-personal-task` / `task create` / `task update` / `task delete` / `task add-members` / `task remove-members` / `task add-reminders` / `task remove-reminders` / `task add-dependencies` / `task remove-dependencies` / `task list-subtasks` / `task list-tasklists` / `task add-tasklist` / `task remove-tasklist`
 - `tasklist create` / `tasklist list` / `tasklist get` / `tasklist update` / `tasklist delete` / `tasklist tasks` / `tasklist add-members` / `tasklist remove-members`
 - `drive list-files` / `drive create-folder` / `drive get-meta` / `drive copy-file` / `drive move-file` / `drive delete-file` / `drive create-shortcut` / `drive get-public-permission` / `drive patch-public-permission` / `drive list-permission-members` / `drive create-permission-member` / `drive update-permission-member` / `drive delete-permission-member` / `drive check-member-auth` / `drive transfer-owner` / `drive list-comments` / `drive batch-query-comments` / `drive create-comment` / `drive patch-comment`
 - `sheets create` / `sheets get` / `sheets query-sheets` / `sheets find` / `sheets replace`
@@ -155,7 +191,7 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs wiki move-do
 Start Feishu device auth without a public callback URL:
 
 ```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs auth start-device-auth --gateway-user-id ou_bind_1
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs auth start-device-auth --gateway-user-id ou_bind_1 --required-scopes-json '["calendar:calendar","calendar:calendar.event:create"]'
 ```
 
 Poll the device auth until the binding is created:
@@ -164,9 +200,15 @@ Poll the device auth until the binding is created:
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs auth poll-device-auth --gateway-user-id ou_bind_1 --device-code dev_xxx
 ```
 
+Diagnose whether a missing-scope error is blocked by the app or by the current user's authorization:
+
+```bash
+node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs auth diagnose-permission --gateway-user-id ou_bind_1 --required-scopes-json '["calendar:calendar","calendar:calendar.event:create"]'
+```
+
 These commands stay in the skill layer, use Feishu device flow, and write the resulting binding into the gateway SQLite store without any browser callback endpoint.
 
-Create a personal calendar event after user authorization is available:
+Create a personal calendar event after user authorization is available. This is the default path for "my calendar" requests:
 
 ```bash
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar create-personal-event --gateway-user-id ou_bind_1 --summary "一对一沟通" --start-time "2026-03-13T10:00:00+08:00" --end-time "2026-03-13T10:30:00+08:00"
@@ -179,6 +221,8 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create-
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task list-personal-tasks --gateway-user-id ou_bind_1 --page-size 20
 ```
 
+Do not switch to `calendar create-event` or shared `task create` just because those commands also exist. The personal commands are the safer default for the current chat user.
+
 Create or manage a shared calendar through the official application API:
 
 ```bash
@@ -189,6 +233,8 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar del
 ```
 
 These commands stay in the skill layer and use the official calendar application APIs with the app or tenant token already configured for the gateway.
+
+Only use this shared calendar path when the user explicitly wants a shared or project calendar, or when they already gave you the target `calendar-id`.
 
 Create or manage a shared calendar event through the official application API:
 
@@ -329,7 +375,7 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs card create 
 3. If the API is unclear, run `catalog search`.
 4. If the API is known but not curated, run `api call`.
 5. Read the returned JSON before reporting success.
-6. If the API returns a permission error, say the Feishu app lacks the required OpenAPI scope.
+6. If the API returns `99991672` or `99991679`, distinguish app scope missing vs. user scope missing. Use `auth diagnose-permission` when the error already names the scopes; do not collapse both cases into "the app lacks scope".
 
 ## Rules
 
@@ -340,3 +386,4 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs card create 
 - For local images in DocX writes, prefer `--image-file`.
 - After a real DocX or Wiki write succeeds, do not bounce the user into personal auth.
 - Keep responses factual: report the real document URL, node token, or API result.
+- For personal calendar or task scope errors, continue the diagnostic flow yourself. Do not stop with "如果你要我继续" when the next step is already known.

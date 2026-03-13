@@ -98,7 +98,8 @@ function readFeishuUserBinding(filePath: string, gatewayUserId: string) {
         gateway_user_id AS gatewayUserId,
         access_token AS accessToken,
         refresh_token AS refreshToken,
-        expires_at AS expiresAt
+        expires_at AS expiresAt,
+        scope_snapshot AS scopeSnapshot
       FROM feishu_user_binding
       WHERE gateway_user_id = ?
     `).get(gatewayUserId) as Record<string, unknown> | undefined;
@@ -110,6 +111,7 @@ function readFeishuUserBinding(filePath: string, gatewayUserId: string) {
       accessToken: String(row.accessToken ?? ''),
       refreshToken: String(row.refreshToken ?? ''),
       expiresAt: Number(row.expiresAt ?? 0),
+      scopeSnapshot: typeof row.scopeSnapshot === 'string' ? row.scopeSnapshot : null,
     };
   } finally {
     db.close();
@@ -185,7 +187,10 @@ describe('feishu-openapi doc target helpers', () => {
     expect(help).toContain('search doc-wiki --query <text>');
     expect(help).toContain('auth start-device-auth --gateway-user-id <id>');
     expect(help).toContain('auth poll-device-auth --gateway-user-id <id> --device-code <code>');
+    expect(help).toContain('auth diagnose-permission --gateway-user-id <id> [--required-scopes-json <json>]');
     expect(help).toContain('calendar create-personal-event --summary <text> --start-time <iso> --end-time <iso>');
+    expect(help).toContain('default for the current user');
+    expect(help).toContain('shared calendar only');
     expect(help).toContain('sheets create --title <text>');
     expect(help).toContain('sheets find --spreadsheet-token <token> --sheet-id <id> --body-json <json>');
     expect(help).toContain('task create-personal-task --summary <text>');
@@ -1138,8 +1143,12 @@ describe('feishu-openapi SDK-backed command groups', () => {
   });
 
   it('starts Feishu device auth and returns verification info', async () => {
-    const fetchMock = vi.fn(async (input: string | URL) => {
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
       expect(String(input)).toBe('https://accounts.feishu.cn/oauth/v1/device_authorization');
+      expect(init?.method).toBe('POST');
+      expect((init?.headers as Record<string, string>)?.Authorization).toBe(`Basic ${Buffer.from('cli_app:cli_secret').toString('base64')}`);
+      expect(String(init?.body)).toContain('client_id=cli_app');
+      expect(String(init?.body)).toContain('scope=calendar%3Acalendar+calendar%3Acalendar.event%3Acreate+offline_access');
       return new Response(JSON.stringify({
         device_code: 'dev_123',
         user_code: 'ABCD-EFGH',
@@ -1160,6 +1169,7 @@ describe('feishu-openapi SDK-backed command groups', () => {
       action: 'start-device-auth',
       args: {
         'gateway-user-id': 'ou_bind_1',
+        'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
         'app-id': 'cli_app',
         'app-secret': 'cli_secret',
       },
@@ -1174,6 +1184,7 @@ describe('feishu-openapi SDK-backed command groups', () => {
       interval: 5,
       verification_uri: 'https://accounts.feishu.cn/device',
       verification_uri_complete: 'https://accounts.feishu.cn/device?user_code=ABCD-EFGH',
+      requested_scopes: ['calendar:calendar', 'calendar:calendar.event:create', 'offline_access'],
     });
     expect(Number(result.expires_at)).toBeGreaterThanOrEqual(startedAt + 899_000);
   });
@@ -1222,6 +1233,7 @@ describe('feishu-openapi SDK-backed command groups', () => {
             access_token: 'user_access_1',
             refresh_token: 'refresh_1',
             expires_in: 7200,
+            scope: 'offline_access calendar:calendar',
           },
         }), {
           status: 200,
@@ -1274,6 +1286,144 @@ describe('feishu-openapi SDK-backed command groups', () => {
       gatewayUserId: 'ou_bind_1',
       accessToken: 'user_access_1',
       refreshToken: 'refresh_1',
+      scopeSnapshot: 'offline_access calendar:calendar',
+    });
+  });
+
+  it('diagnoses when app scopes are present but the user binding is missing required scopes', async () => {
+    const bindingDbPath = path.join(os.tmpdir(), `feishu-binding-${Date.now()}-diag-user.db`);
+    seedFeishuUserBinding(bindingDbPath, {
+      gatewayUserId: 'ou_bind_1',
+      accessToken: 'user_access_1',
+      refreshToken: 'refresh_1',
+      expiresAt: Date.now() + 7_200_000,
+      scopeSnapshot: 'offline_access calendar:calendar',
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal') {
+        expect(init?.method).toBe('POST');
+        return new Response(JSON.stringify({
+          code: 0,
+          tenant_access_token: 'tenant_token_1',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (url === 'https://open.feishu.cn/open-apis/application/v6/applications/me?lang=zh_cn') {
+        expect((init?.headers as Record<string, string>)?.Authorization).toBe('Bearer tenant_token_1');
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            app: {
+              scopes: [
+                { scope: 'calendar:calendar', token_types: ['user'] },
+                { scope: 'calendar:calendar.event:create', token_types: ['user'] },
+              ],
+            },
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCommand({
+      resource: 'auth',
+      action: 'diagnose-permission',
+      args: {
+        'gateway-user-id': 'ou_bind_1',
+        'binding-db-path': bindingDbPath,
+        'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
+        'app-id': 'cli_app',
+        'app-secret': 'cli_secret',
+      },
+    })).resolves.toEqual({
+      ok: true,
+      operation: 'auth.diagnose-permission',
+      gateway_user_id: 'ou_bind_1',
+      token_type: 'user',
+      required_scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
+      app_scope_query: {
+        ok: true,
+      },
+      app_missing_scopes: [],
+      user_granted_scopes: ['offline_access', 'calendar:calendar'],
+      user_missing_scopes: ['calendar:calendar.event:create'],
+      diagnosis: 'user_scope_missing',
+      message: 'The current Feishu user binding is missing required scopes, while the app already has them. Re-run device auth for this user, then retry the original command.',
+    });
+  });
+
+  it('diagnoses when the app itself is missing required scopes', async () => {
+    const bindingDbPath = path.join(os.tmpdir(), `feishu-binding-${Date.now()}-diag-app.db`);
+    seedFeishuUserBinding(bindingDbPath, {
+      gatewayUserId: 'ou_bind_1',
+      accessToken: 'user_access_1',
+      refreshToken: 'refresh_1',
+      expiresAt: Date.now() + 7_200_000,
+      scopeSnapshot: 'offline_access calendar:calendar',
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url === 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal') {
+        return new Response(JSON.stringify({
+          code: 0,
+          tenant_access_token: 'tenant_token_1',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (url === 'https://open.feishu.cn/open-apis/application/v6/applications/me?lang=zh_cn') {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            app: {
+              scopes: [
+                { scope: 'calendar:calendar', token_types: ['user'] },
+              ],
+            },
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCommand({
+      resource: 'auth',
+      action: 'diagnose-permission',
+      args: {
+        'gateway-user-id': 'ou_bind_1',
+        'binding-db-path': bindingDbPath,
+        'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
+        'app-id': 'cli_app',
+        'app-secret': 'cli_secret',
+      },
+    })).resolves.toEqual({
+      ok: true,
+      operation: 'auth.diagnose-permission',
+      gateway_user_id: 'ou_bind_1',
+      token_type: 'user',
+      required_scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
+      app_scope_query: {
+        ok: true,
+      },
+      app_missing_scopes: ['calendar:calendar.event:create'],
+      user_granted_scopes: ['offline_access', 'calendar:calendar'],
+      user_missing_scopes: ['calendar:calendar.event:create'],
+      diagnosis: 'app_scope_missing',
+      message: 'The Feishu app is missing required scopes. An app admin must enable them first, then the user should authorize again before retrying the original command.',
     });
   });
 
@@ -1293,15 +1443,60 @@ describe('feishu-openapi SDK-backed command groups', () => {
       authorization_required: true,
       reason: 'feishu_user_binding_missing',
       gateway_user_id: 'ou_bind_1',
+      required_scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
       next_action: {
         resource: 'auth',
         action: 'start-device-auth',
         args: {
           'gateway-user-id': 'ou_bind_1',
+          'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
         },
       },
       message: 'Feishu user authorization required. Run auth start-device-auth, finish auth poll-device-auth, then retry the original command.',
     });
+  });
+
+  it('returns an authorization_required result when the stored binding is missing the required calendar scopes', async () => {
+    const bindingDbPath = path.join(os.tmpdir(), `feishu-binding-${Date.now()}-missing-scope.db`);
+    seedFeishuUserBinding(bindingDbPath, {
+      gatewayUserId: 'ou_bind_1',
+      accessToken: 'user_access_1',
+      refreshToken: 'refresh_1',
+      expiresAt: Date.now() + 7_200_000,
+      scopeSnapshot: 'offline_access calendar:calendar',
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCommand({
+      resource: 'calendar',
+      action: 'create-personal-event',
+      args: {
+        'gateway-user-id': 'ou_bind_1',
+        'binding-db-path': bindingDbPath,
+        summary: '评审会',
+        'start-time': '2026-03-13T10:00:00+08:00',
+        'end-time': '2026-03-13T11:00:00+08:00',
+      },
+    })).resolves.toEqual({
+      ok: false,
+      operation: 'calendar.create-personal-event',
+      authorization_required: true,
+      reason: 'feishu_user_scope_missing',
+      gateway_user_id: 'ou_bind_1',
+      required_scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
+      missing_scopes: ['calendar:calendar.event:create'],
+      next_action: {
+        resource: 'auth',
+        action: 'start-device-auth',
+        args: {
+          'gateway-user-id': 'ou_bind_1',
+          'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
+        },
+      },
+      message: 'Feishu user authorization is missing required scopes. Run auth start-device-auth with the required scopes, finish auth poll-device-auth, then retry the original command.',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('creates a personal calendar event with an explicit user access token', async () => {
@@ -2035,6 +2230,14 @@ describe('feishu-openapi SDK-backed command groups', () => {
       type: 'api_error',
       code: null,
       message: 'plain boom',
+    });
+    expect(normalizeFeishuApiError(new Error(
+      'feishu api failed: 99991679 Unauthorized\n缺少用户侧权限：\ncalendar:calendar\ncalendar:calendar.event:create',
+    ))).toEqual({
+      type: 'user_scope_insufficient',
+      code: 99991679,
+      message: 'Unauthorized\n缺少用户侧权限：\ncalendar:calendar\ncalendar:calendar.event:create',
+      scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
     });
   });
 

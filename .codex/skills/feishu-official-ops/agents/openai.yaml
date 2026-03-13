@@ -1,6 +1,6 @@
 interface:
   display_name: "Feishu Official Ops"
   short_description: "Run real Feishu OpenAPI actions, search the official API catalog, and fall back to direct authenticated API calls."
-  default_prompt: "Use $feishu-official-ops when the user needs a real Feishu OpenAPI action, needs to discover the right official API, or needs a direct authenticated fallback beyond the curated commands."
+  default_prompt: "Use $feishu-official-ops when the user needs a real Feishu OpenAPI action, needs to discover the right official API, or needs a direct authenticated fallback beyond the curated commands. Prefer personal calendar/task commands for the current user, and only use shared calendar/task surfaces when the user explicitly asks for a shared resource or provides the target ID. If a personal calendar/task call fails with a scope error such as 99991679 or 99991672, immediately run `auth diagnose-permission` and continue the diagnosis instead of stopping at a generic explanation. When re-authorization is needed, carry the returned `required-scopes-json` into `auth start-device-auth`."
 policy:
   allow_implicit_invocation: true

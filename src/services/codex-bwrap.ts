@@ -36,7 +36,8 @@ const EXTRA_READS_ENV_NAME = 'CODEX_WORKDIR_ISOLATION_EXTRA_READS';
 
 export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawnSpec {
   const hostHomeDir = resolveHostHomeDir(input.env);
-  const hostEnv = buildHostCodexEnv(input.env, input.provider ?? 'codex', input.codexHomeDir);
+  const provider = input.provider ?? 'codex';
+  const hostEnv = buildHostCodexEnv(input.env, provider, input.codexHomeDir);
   const gatewayRootDir = resolveGatewayRootDir(hostEnv);
   if (input.isolationMode === 'off') {
     return {
@@ -54,6 +55,7 @@ export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawn
   return {
     command: 'bwrap',
     args: buildBubblewrapArgs(
+      provider,
       input.codexBin,
       input.args,
       workspaceDir,
@@ -63,11 +65,12 @@ export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawn
       input.env[EXTRA_READS_ENV_NAME],
     ),
     cwd: workspaceDir,
-    env: buildIsolatedEnv(hostEnv, runtimeHomeDir, gatewayRootDir),
+    env: buildIsolatedEnv(hostEnv, runtimeHomeDir, gatewayRootDir, provider),
   };
 }
 
 function buildBubblewrapArgs(
+  provider: CliProvider,
   codexBin: string,
   args: string[],
   workspaceDir: string,
@@ -112,6 +115,10 @@ function buildBubblewrapArgs(
   }
   appendGatewayNodeModulesMount(result, gatewayRootDir);
 
+  const xdgDataEnv = provider === 'opencode'
+    ? ['--setenv', 'XDG_DATA_HOME', '/workspace/.codex-runtime/home/.local/share'] as const
+    : [];
+
   result.push(
     '--chdir',
     '/workspace',
@@ -127,6 +134,7 @@ function buildBubblewrapArgs(
     '--setenv',
     'XDG_CACHE_HOME',
     '/workspace/.codex-runtime/home/.cache',
+    ...xdgDataEnv,
     '--setenv',
     'TMPDIR',
     '/tmp',
@@ -154,6 +162,7 @@ function buildHostCodexEnv(
     ...env,
     CODEX_HOME: resolvedHome,
   };
+  applyCliHomeOverrides(nextEnv, provider, resolvedHome);
   if (hasCliHomeConfig(provider, resolvedHome)) {
     delete nextEnv.OPENAI_BASE_URL;
     delete nextEnv.CHATGPT_BASE_URL;
@@ -169,6 +178,7 @@ function buildIsolatedEnv(
   env: NodeJS.ProcessEnv,
   runtimeHomeDir: string,
   gatewayRootDir: string | undefined,
+  provider: CliProvider,
 ): NodeJS.ProcessEnv {
   const nextEnv: NodeJS.ProcessEnv = {
     PATH: env.PATH || DEFAULT_PATH,
@@ -197,6 +207,10 @@ function buildIsolatedEnv(
     CODEX_DISABLE_WRITES_OUTSIDE_CWD: 'true',
   };
 
+  if (provider === 'opencode') {
+    nextEnv.XDG_DATA_HOME = path.join(runtimeHomeDir, '.local', 'share');
+  }
+
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) {
       continue;
@@ -212,6 +226,26 @@ function buildIsolatedEnv(
     }
   }
   return nextEnv;
+}
+
+function applyCliHomeOverrides(
+  env: NodeJS.ProcessEnv,
+  provider: CliProvider,
+  resolvedHome: string,
+): void {
+  if (provider !== 'opencode') {
+    return;
+  }
+  const configHome = path.join(resolvedHome, '.config');
+  const cacheHome = path.join(resolvedHome, '.cache');
+  const dataHome = path.join(resolvedHome, '.local', 'share');
+  fs.mkdirSync(configHome, { recursive: true });
+  fs.mkdirSync(cacheHome, { recursive: true });
+  fs.mkdirSync(dataHome, { recursive: true });
+  env.HOME = resolvedHome;
+  env.XDG_CONFIG_HOME = configHome;
+  env.XDG_CACHE_HOME = cacheHome;
+  env.XDG_DATA_HOME = dataHome;
 }
 
 function resolveGatewayRootDir(env: NodeJS.ProcessEnv): string | undefined {
@@ -292,6 +326,7 @@ function syncCodexRuntimeHome(sourceDir: string | undefined, targetDir: string):
   fs.mkdirSync(targetDir, { recursive: true });
   fs.mkdirSync(path.join(targetDir, '.config'), { recursive: true });
   fs.mkdirSync(path.join(targetDir, '.cache'), { recursive: true });
+  fs.mkdirSync(path.join(targetDir, '.local', 'share'), { recursive: true });
   fs.mkdirSync(path.join(targetDir, 'tmp'), { recursive: true });
   fs.mkdirSync(path.join(targetDir, 'sessions'), { recursive: true });
   fs.mkdirSync(path.join(targetDir, 'shell_snapshots'), { recursive: true });

@@ -19,6 +19,14 @@ const FEISHU_USER_BINDING_REFRESH_WINDOW_MS = 10_000;
 const FEISHU_DEVICE_AUTH_URL = 'https://accounts.feishu.cn/oauth/v1/device_authorization';
 const FEISHU_DEVICE_TOKEN_URL = `${FEISHU_API_BASE}/authen/v2/oauth/token`;
 const FEISHU_USER_INFO_URL = `${FEISHU_API_BASE}/authen/v1/user_info`;
+const FEISHU_OPERATION_REQUIRED_SCOPES = {
+  'calendar.create-personal-event': ['calendar:calendar', 'calendar:calendar.event:create'],
+  'task.create-personal-task': ['task:task:write', 'task:task:writeonly'],
+  'task.list-personal-tasks': ['task:task:read', 'task:task:write'],
+  'task.get-personal-task': ['task:task:read', 'task:task:write'],
+  'task.update-personal-task': ['task:task:write', 'task:task:writeonly'],
+  'task.delete-personal-task': ['task:task:write', 'task:task:writeonly'],
+};
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -62,20 +70,21 @@ export function buildHelpText() {
     '  bitable batch-create-records --app-token <token> --table-id <id> --records-json <json>',
     '  bitable batch-update-records --app-token <token> --table-id <id> --records-json <json>',
     '  bitable batch-delete-records --app-token <token> --table-id <id> --record-ids-json <json>',
-    '  auth start-device-auth --gateway-user-id <id>',
+    '  auth start-device-auth --gateway-user-id <id> [--required-scopes-json <json>]',
     '  auth poll-device-auth --gateway-user-id <id> --device-code <code>',
+    '  auth diagnose-permission --gateway-user-id <id> [--required-scopes-json <json>] [--error-message <text>] [--token-type <user|tenant>]',
     '  calendar list-calendars [--page-size <n>] [--page-token <token>]',
     '  calendar list-events --calendar-id <id> --time-min <time> --time-max <time> [--page-size <n>] [--page-token <token>]',
     '  calendar create-calendar --body-json <json>',
     '  calendar get-calendar --calendar-id <id>',
     '  calendar update-calendar --calendar-id <id> --body-json <json>',
     '  calendar delete-calendar --calendar-id <id>',
-    '  calendar create-event --calendar-id <id> --body-json <json> [--idempotency-key <key>] [--user-id-type <open_id|union_id|user_id>]',
+    '  calendar create-event --calendar-id <id> --body-json <json> [--idempotency-key <key>] [--user-id-type <open_id|union_id|user_id>]  # shared calendar only',
     '  calendar list-events-v4 --calendar-id <id> [--page-size <n>] [--page-token <token>] [--time-min <time>] [--time-max <time>] [--anchor-time <time>] [--sync-token <token>] [--user-id-type <open_id|union_id|user_id>]',
     '  calendar get-event --calendar-id <id> --event-id <id> [--need-attendee <true|false>] [--need-meeting-settings <true|false>] [--max-attendee-num <n>] [--user-id-type <open_id|union_id|user_id>]',
     '  calendar update-event --calendar-id <id> --event-id <id> --body-json <json> [--user-id-type <open_id|union_id|user_id>]',
     '  calendar delete-event --calendar-id <id> --event-id <id> [--need-notification <true|false>]',
-    '  calendar create-personal-event --summary <text> --start-time <iso> --end-time <iso> [--timezone <tz>] [--description <text>] [--user-access-token <token>] [--gateway-user-id <id>]',
+    '  calendar create-personal-event --summary <text> --start-time <iso> --end-time <iso> [--timezone <tz>] [--description <text>] [--user-access-token <token>] [--gateway-user-id <id>]  # default for the current user',
     '  calendar freebusy --time-min <time> --time-max <time> [--user-id <id>] [--room-id <id>] [--only-busy <true|false>]',
     '  task create --summary <text>',
     '  task list [--page-size <n>] [--page-token <token>]',
@@ -1659,6 +1668,7 @@ async function handleAuthCommand(action, args) {
       verification_uri: deviceAuth.verificationUri,
       verification_uri_complete: deviceAuth.verificationUriComplete,
       expires_at: startedAt + deviceAuth.expiresIn * 1000,
+      requested_scopes: deviceAuth.requestedScopes,
     };
   }
   if (action === 'poll-device-auth') {
@@ -1697,6 +1707,7 @@ async function handleAuthCommand(action, args) {
       accessToken: polled.accessToken,
       refreshToken: polled.refreshToken,
       expiresAt: Date.now() + polled.expiresIn * 1000,
+      scopeSnapshot: polled.scopeSnapshot,
     });
     return {
       ok: true,
@@ -1713,6 +1724,67 @@ async function handleAuthCommand(action, args) {
             scope_snapshot: binding.scopeSnapshot ?? null,
           }
         : null,
+    };
+  }
+  if (action === 'diagnose-permission') {
+    const gatewayUserId = parseRequiredStringFlag(
+      firstNonEmptyString(args['gateway-user-id'], process.env.GATEWAY_USER_ID),
+      '--gateway-user-id',
+    );
+    const requiredScopes = resolveRequiredScopesForDiagnosis(args);
+    const tokenType = firstNonEmptyString(args['token-type']) === 'tenant' ? 'tenant' : 'user';
+    const binding = getFeishuUserBinding(resolveFeishuUserBindingDbPath(args), gatewayUserId);
+    const userGrantedScopes = binding?.scopeSnapshot
+      ? binding.scopeSnapshot.split(/\s+/).map((scope) => scope.trim()).filter(Boolean)
+      : [];
+    const userGrantedScopeSet = new Set(userGrantedScopes);
+    const userMissingScopes = requiredScopes.filter((scope) => !userGrantedScopeSet.has(scope));
+
+    let appGrantedScopes = [];
+    let appScopeQuery = { ok: true };
+    try {
+      appGrantedScopes = await listFeishuAppGrantedScopes(args, tokenType);
+    } catch (error) {
+      appScopeQuery = {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const appGrantedScopeSet = new Set(appGrantedScopes);
+    const appMissingScopes = appScopeQuery.ok
+      ? requiredScopes.filter((scope) => !appGrantedScopeSet.has(scope))
+      : [];
+
+    let diagnosis = 'scope_diagnostics_inconclusive';
+    let message = 'Unable to fully classify the Feishu permission blocker from the currently available scope data.';
+    if (!binding) {
+      diagnosis = 'authorization_required';
+      message = 'No Feishu user binding exists for the current gateway user. Run device auth first, then retry the original command.';
+    } else if (appScopeQuery.ok && appMissingScopes.length > 0) {
+      diagnosis = 'app_scope_missing';
+      message = 'The Feishu app is missing required scopes. An app admin must enable them first, then the user should authorize again before retrying the original command.';
+    } else if (userMissingScopes.length > 0) {
+      diagnosis = 'user_scope_missing';
+      message = appScopeQuery.ok
+        ? 'The current Feishu user binding is missing required scopes, while the app already has them. Re-run device auth for this user, then retry the original command.'
+        : 'The current Feishu user binding is missing required scopes. Re-run device auth for this user, then retry the original command.';
+    } else if (appScopeQuery.ok) {
+      diagnosis = 'grants_look_ok';
+      message = 'The app scopes and stored user scopes already cover the required permissions. Retry the original command; if it still fails, re-run device auth to refresh the user token.';
+    }
+
+    return {
+      ok: true,
+      operation: 'auth.diagnose-permission',
+      gateway_user_id: gatewayUserId,
+      token_type: tokenType,
+      required_scopes: requiredScopes,
+      app_scope_query: appScopeQuery,
+      app_missing_scopes: appMissingScopes,
+      user_granted_scopes: userGrantedScopes,
+      user_missing_scopes: userMissingScopes,
+      diagnosis,
+      message,
     };
   }
   throw new Error(`unsupported command: auth ${action ?? ''}`.trim());
@@ -2123,35 +2195,48 @@ async function refreshFeishuUserAccessToken(refreshToken, args) {
     accessToken: parseRequiredStringFlag(payload?.data?.access_token, 'refresh access_token'),
     refreshToken: parseRequiredStringFlag(payload?.data?.refresh_token, 'refresh refresh_token'),
     expiresIn: Number(payload?.data?.expires_in ?? 0),
+    scopeSnapshot: firstNonEmptyString(payload?.data?.scope),
   };
 }
 
 async function resolveFeishuUserAccessTokenForOperation(args, operation) {
-  return resolveFeishuUserAccessToken(args).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.startsWith('feishu user binding not found:')) {
-      throw error;
-    }
-    const gatewayUserId = parseRequiredStringFlag(
-      firstNonEmptyString(args?.['gateway-user-id'], process.env.GATEWAY_USER_ID),
-      '--gateway-user-id',
-    );
-    return {
-      ok: false,
+  const explicitAccessToken = firstNonEmptyString(args['user-access-token']);
+  if (explicitAccessToken) {
+    return explicitAccessToken;
+  }
+  const gatewayUserId = parseRequiredStringFlag(
+    firstNonEmptyString(args?.['gateway-user-id'], process.env.GATEWAY_USER_ID),
+    '--gateway-user-id',
+  );
+  const requiredScopes = getRequiredScopesForOperation(operation);
+  const bindingDbPath = resolveFeishuUserBindingDbPath(args);
+  const binding = getFeishuUserBinding(bindingDbPath, gatewayUserId);
+  if (!binding) {
+    return buildFeishuAuthorizationRequiredResult({
       operation,
-      authorization_required: true,
       reason: 'feishu_user_binding_missing',
-      gateway_user_id: gatewayUserId,
-      next_action: {
-        resource: 'auth',
-        action: 'start-device-auth',
-        args: {
-          'gateway-user-id': gatewayUserId,
-        },
-      },
+      gatewayUserId,
+      requiredScopes,
       message: 'Feishu user authorization required. Run auth start-device-auth, finish auth poll-device-auth, then retry the original command.',
-    };
-  });
+    });
+  }
+  if (binding.scopeSnapshot && requiredScopes.length > 0) {
+    const grantedScopes = new Set(
+      binding.scopeSnapshot.split(/\s+/).map((scope) => scope.trim()).filter(Boolean),
+    );
+    const missingScopes = requiredScopes.filter((scope) => !grantedScopes.has(scope));
+    if (missingScopes.length > 0) {
+      return buildFeishuAuthorizationRequiredResult({
+        operation,
+        reason: 'feishu_user_scope_missing',
+        gatewayUserId,
+        requiredScopes,
+        missingScopes,
+        message: 'Feishu user authorization is missing required scopes. Run auth start-device-auth with the required scopes, finish auth poll-device-auth, then retry the original command.',
+      });
+    }
+  }
+  return resolveFeishuUserAccessToken(args);
 }
 
 function normalizeOptionalString(value) {
@@ -2163,16 +2248,20 @@ function normalizeOptionalSqlValue(value) {
 }
 
 async function startFeishuDeviceAuth(args) {
-  const { appId } = resolveAppCredentials(args);
+  const { appId, appSecret } = resolveAppCredentials(args);
+  const requestedScopes = resolveDeviceAuthRequestedScopes(args);
+  const basicAuth = Buffer.from(`${appId}:${appSecret}`).toString('base64');
   const payload = await requestFeishuOauthJson(
     FEISHU_DEVICE_AUTH_URL,
     {
       method: 'POST',
       headers: {
         'content-type': 'application/x-www-form-urlencoded; charset=utf-8',
+        Authorization: `Basic ${basicAuth}`,
       },
       body: new URLSearchParams({
         client_id: appId,
+        scope: requestedScopes.join(' '),
       }),
     },
     'feishu device auth failed',
@@ -2185,6 +2274,7 @@ async function startFeishuDeviceAuth(args) {
     expiresIn: Number(data.expires_in ?? 0),
     verificationUri: parseRequiredStringFlag(data.verification_uri, 'verification_uri'),
     verificationUriComplete: parseRequiredStringFlag(data.verification_uri_complete, 'verification_uri_complete'),
+    requestedScopes,
   };
 }
 
@@ -2220,7 +2310,105 @@ async function pollFeishuDeviceAuth(deviceCode, args) {
     accessToken: parseRequiredStringFlag(data.access_token, 'access_token'),
     refreshToken: parseRequiredStringFlag(data.refresh_token, 'refresh_token'),
     expiresIn: Number(data.expires_in ?? 0),
+    scopeSnapshot: firstNonEmptyString(data.scope),
   };
+}
+
+function resolveRequiredScopesForDiagnosis(args) {
+  const requiredScopesJson = firstNonEmptyString(args['required-scopes-json']);
+  if (requiredScopesJson) {
+    const scopes = normalizeScopeList(parseRequiredJsonArrayFlag(requiredScopesJson, '--required-scopes-json'));
+    if (scopes.length > 0) {
+      return scopes;
+    }
+  }
+  const errorMessage = firstNonEmptyString(args['error-message']);
+  if (errorMessage) {
+    const scopes = extractFeishuScopesFromText(errorMessage);
+    if (scopes.length > 0) {
+      return scopes;
+    }
+  }
+  throw new Error('missing --required-scopes-json or --error-message');
+}
+
+function resolveDeviceAuthRequestedScopes(args) {
+  const scopeParts = [];
+  const requiredScopesJson = firstNonEmptyString(args['required-scopes-json']);
+  if (requiredScopesJson) {
+    scopeParts.push(...normalizeScopeList(parseRequiredJsonArrayFlag(requiredScopesJson, '--required-scopes-json')));
+  }
+  const scopeText = firstNonEmptyString(args.scope);
+  if (scopeText) {
+    scopeParts.push(...scopeText.split(/\s+/).map((scope) => scope.trim()).filter(Boolean));
+  }
+  if (!scopeParts.includes('offline_access')) {
+    scopeParts.push('offline_access');
+  }
+  return Array.from(new Set(scopeParts));
+}
+
+function normalizeScopeList(items) {
+  return Array.from(new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item ?? '').trim())
+      .filter(Boolean),
+  ));
+}
+
+function getRequiredScopesForOperation(operation) {
+  const scopes = FEISHU_OPERATION_REQUIRED_SCOPES[operation];
+  return Array.isArray(scopes) ? [...scopes] : [];
+}
+
+function buildDeviceAuthNextActionArgs(gatewayUserId, requiredScopes) {
+  return {
+    'gateway-user-id': gatewayUserId,
+    ...(requiredScopes.length > 0 ? { 'required-scopes-json': JSON.stringify(requiredScopes) } : {}),
+  };
+}
+
+function buildFeishuAuthorizationRequiredResult(input) {
+  return {
+    ok: false,
+    operation: input.operation,
+    authorization_required: true,
+    reason: input.reason,
+    gateway_user_id: input.gatewayUserId,
+    ...(input.requiredScopes?.length ? { required_scopes: input.requiredScopes } : {}),
+    ...(input.missingScopes?.length ? { missing_scopes: input.missingScopes } : {}),
+    next_action: {
+      resource: 'auth',
+      action: 'start-device-auth',
+      args: buildDeviceAuthNextActionArgs(input.gatewayUserId, input.requiredScopes ?? []),
+    },
+    message: input.message,
+  };
+}
+
+async function listFeishuAppGrantedScopes(args, tokenType) {
+  const token = await resolveTenantToken(args);
+  const payload = await apiRequest(
+    token,
+    'GET',
+    appendQueryToPath('/application/v6/applications/me', { lang: 'zh_cn' }),
+  );
+  const app = payload?.data?.app ?? payload?.app ?? payload?.data ?? null;
+  const rawScopes = Array.isArray(app?.scopes)
+    ? app.scopes
+    : Array.isArray(app?.online_version?.scopes)
+    ? app.online_version.scopes
+    : [];
+  return rawScopes
+    .filter((item) => item && typeof item.scope === 'string')
+    .filter((item) => {
+      if (!tokenType || !Array.isArray(item.token_types) || item.token_types.length === 0) {
+        return true;
+      }
+      return item.token_types.includes(tokenType);
+    })
+    .map((item) => item.scope)
+    .filter(Boolean);
 }
 
 async function requestFeishuOauthJson(url, init, errorPrefix = 'feishu oauth failed') {
@@ -3558,13 +3746,25 @@ export function normalizeFeishuApiError(error) {
     };
   }
 
-  const apiMatch = message.match(/feishu api failed:\s*(\d+)\s+(.+)$/i);
+  const apiMatch = message.match(/feishu api failed:\s*(\d+)\s+([\s\S]+)$/i);
   if (apiMatch) {
     const code = Number.parseInt(apiMatch[1], 10);
+    const scopes = extractFeishuScopesFromText(apiMatch[2]);
     return {
-      type: code === 99991663 ? 'permission_denied' : code === 404 ? 'not_found' : code === 429 ? 'rate_limited' : 'api_error',
+      type: code === 99991679
+        ? 'user_scope_insufficient'
+        : code === 99991672
+        ? 'app_scope_missing'
+        : code === 99991663
+        ? 'permission_denied'
+        : code === 404
+        ? 'not_found'
+        : code === 429
+        ? 'rate_limited'
+        : 'api_error',
       code,
       message: apiMatch[2],
+      ...(scopes.length > 0 ? { scopes } : {}),
     };
   }
 
@@ -3573,6 +3773,11 @@ export function normalizeFeishuApiError(error) {
     code: null,
     message,
   };
+}
+
+function extractFeishuScopesFromText(value) {
+  const matches = String(value ?? '').match(/\b[a-z]+:[a-z0-9._:-]+\b/g) ?? [];
+  return Array.from(new Set(matches));
 }
 
 function parseOptionalPositiveInteger(value, flagName) {
