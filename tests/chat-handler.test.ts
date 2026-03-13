@@ -1131,6 +1131,40 @@ local_image_path=${sourcePath}`,
     expect(buttons.some((button) => button.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
   });
 
+  it('injects personal Feishu calendar guardrails into runtime prompts', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const run = vi.fn(async () => ({ threadId: 'thread_calendar_guardrail', rawOutput: '' }));
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '帮我在我的日历里创建一个明天下午三点的评审会' });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      gatewayUserId: 'u1',
+      prompt: expect.stringContaining('当前用户自己的日历/待办必须走个人命令'),
+    }));
+    const runtimePrompt = String(run.mock.calls[0]?.[0]?.prompt ?? '');
+    expect(runtimePrompt).toContain('`calendar create-personal-event`');
+    expect(runtimePrompt).toContain('不要改走 `calendar create-event`');
+    expect(runtimePrompt).toContain('`auth start-device-auth`');
+  });
+
   it('treats /feishu-auth as an unknown command in feishu channel', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();

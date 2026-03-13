@@ -23,7 +23,7 @@ import { MemorySteward } from './services/memory-steward.js';
 import { ReminderStore } from './services/reminder-store.js';
 import { ReminderDispatcher } from './services/reminder-dispatcher.js';
 import { installReminderToolSkill } from './services/reminder-tool-skill.js';
-import { installFeishuOfficialOpsSkill } from './services/feishu-official-ops-skill.js';
+import { installFeishuOfficialOpsSkill, syncManagedFeishuOfficialOpsSkills } from './services/feishu-official-ops-skill.js';
 import { installFeishuCanvasSkill } from './services/feishu-canvas-skill.js';
 import { installGatewayBrowserSkill, syncManagedGlobalSkills } from './services/gateway-browser-skill.js';
 import { OpenCodeAuthFlowManager, buildOpenCodeAuthSessionKey } from './services/opencode-auth-flow.js';
@@ -863,8 +863,8 @@ async function appDepsHandleFeishuCardAction(input: {
 
 function syncBuiltInSkills(agentsRootDir: string): void {
   syncManagedGlobalSkills();
+  syncManagedFeishuOfficialOpsSkills({ roots: [path.join(path.resolve(agentsRootDir), '.codex', 'skills')] });
   installReminderToolSkill(path.resolve(agentsRootDir));
-  installFeishuOfficialOpsSkill(path.resolve(agentsRootDir));
   installFeishuCanvasSkill(path.resolve(agentsRootDir));
   const usersDir = path.join(agentsRootDir, 'users');
   if (!fs.existsSync(usersDir)) {

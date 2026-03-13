@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { DatabaseSync } from 'node:sqlite';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client as LarkClient, Domain as LarkDomain, LoggerLevel as LarkLoggerLevel } from '@larksuiteoapi/node-sdk';
 import { buildDocxChildrenFromConvertPayload, buildDocxCreateNodes } from './docx-markdown.mjs';
 
@@ -16,16 +16,21 @@ const LATEST_DOC_STATE_PATH = path.resolve(process.cwd(), '.data', 'feishu-docx-
 const API_CATALOG_CACHE_PATH = path.resolve(process.cwd(), '.data', 'feishu-api-catalog.json');
 const FEISHU_USER_BINDING_DB_FILENAME = 'feishu-user-binding.db';
 const FEISHU_USER_BINDING_REFRESH_WINDOW_MS = 10_000;
+const FEISHU_USER_BINDING_SQLITE_BUSY_RETRY_COUNT = 3;
+const FEISHU_USER_BINDING_SQLITE_BUSY_RETRY_DELAY_MS = 150;
+const FEISHU_USER_BINDING_SQLITE_BUSY_TIMEOUT_MS = 5_000;
 const FEISHU_DEVICE_AUTH_URL = 'https://accounts.feishu.cn/oauth/v1/device_authorization';
 const FEISHU_DEVICE_TOKEN_URL = `${FEISHU_API_BASE}/authen/v2/oauth/token`;
 const FEISHU_USER_INFO_URL = `${FEISHU_API_BASE}/authen/v1/user_info`;
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_GATEWAY_ROOT_DIR = deriveGatewayRootDirFromScriptDir(SCRIPT_DIR);
 const FEISHU_OPERATION_REQUIRED_SCOPES = {
   'calendar.create-personal-event': ['calendar:calendar', 'calendar:calendar.event:create'],
-  'task.create-personal-task': ['task:task:write', 'task:task:writeonly'],
+  'task.create-personal-task': ['task:task:read', 'task:task:write', 'task:task:writeonly'],
   'task.list-personal-tasks': ['task:task:read', 'task:task:write'],
   'task.get-personal-task': ['task:task:read', 'task:task:write'],
-  'task.update-personal-task': ['task:task:write', 'task:task:writeonly'],
-  'task.delete-personal-task': ['task:task:write', 'task:task:writeonly'],
+  'task.update-personal-task': ['task:task:read', 'task:task:write', 'task:task:writeonly'],
+  'task.delete-personal-task': ['task:task:read', 'task:task:write', 'task:task:writeonly'],
 };
 
 async function main() {
@@ -75,11 +80,9 @@ export function buildHelpText() {
     '  auth diagnose-permission --gateway-user-id <id> [--required-scopes-json <json>] [--error-message <text>] [--token-type <user|tenant>]',
     '  calendar list-calendars [--page-size <n>] [--page-token <token>]',
     '  calendar list-events --calendar-id <id> --time-min <time> --time-max <time> [--page-size <n>] [--page-token <token>]',
-    '  calendar create-calendar --body-json <json>',
     '  calendar get-calendar --calendar-id <id>',
     '  calendar update-calendar --calendar-id <id> --body-json <json>',
     '  calendar delete-calendar --calendar-id <id>',
-    '  calendar create-event --calendar-id <id> --body-json <json> [--idempotency-key <key>] [--user-id-type <open_id|union_id|user_id>]  # shared calendar only',
     '  calendar list-events-v4 --calendar-id <id> [--page-size <n>] [--page-token <token>] [--time-min <time>] [--time-max <time>] [--anchor-time <time>] [--sync-token <token>] [--user-id-type <open_id|union_id|user_id>]',
     '  calendar get-event --calendar-id <id> --event-id <id> [--need-attendee <true|false>] [--need-meeting-settings <true|false>] [--max-attendee-num <n>] [--user-id-type <open_id|union_id|user_id>]',
     '  calendar update-event --calendar-id <id> --event-id <id> --body-json <json> [--user-id-type <open_id|union_id|user_id>]',
@@ -103,7 +106,7 @@ export function buildHelpText() {
     '  task add-tasklist --task-guid <guid> --body-json <json> [--user-id-type <open_id|union_id|user_id>]',
     '  task remove-tasklist --task-guid <guid> --body-json <json> [--user-id-type <open_id|union_id|user_id>]',
     '  task create-personal-task --summary <text> [--description <text>] [--user-access-token <token>] [--gateway-user-id <id>]',
-    '  task list-personal-tasks [--page-size <n>] [--page-token <token>] [--user-access-token <token>] [--gateway-user-id <id>]',
+    '  task list-personal-tasks [--page-size <n>] [--page-token <token>] [--completed <true|false>] [--type <value>] [--user-access-token <token>] [--gateway-user-id <id>]',
     '  task get-personal-task --task-guid <guid> [--user-access-token <token>] [--gateway-user-id <id>]',
     '  task update-personal-task --task-guid <guid> --task-json <json> --update-fields-json <json> [--user-access-token <token>] [--gateway-user-id <id>]',
     '  task delete-personal-task --task-guid <guid> [--user-access-token <token>] [--gateway-user-id <id>]',
@@ -157,12 +160,12 @@ export function buildHelpText() {
     '  chat delete-managers --chat-id <id> --body-json <json> [--member-id-type <user_id|union_id|open_id|app_id>]',
     '  chat update --chat-id <id> --body-json <json>',
     '  card create --body-json <json>',
-    '  card update --card-id <id> --body-json <json>',
+    '  card update --card-id <id> --body-json <json> --sequence <n>',
     '  approval create-instance --body-json <json>',
     '  approval get-definition --approval-code <code>',
     '  approval get-instance --instance-id <id>',
     '  approval cancel-instance --body-json <json>',
-    '  approval list-instances [--page-size <n>] [--page-token <token>]',
+    '  approval query-instances --body-json <json> [--page-size <n>] [--page-token <token>]  # query instance list with filters',
     '  approval search-tasks --body-json <json> [--page-size <n>] [--page-token <token>]',
     '  approval approve-task --body-json <json> [--user-id-type <open_id|union_id|user_id>]',
     '  approval reject-task --body-json <json> [--user-id-type <open_id|union_id|user_id>]',
@@ -300,6 +303,18 @@ function resolveAppCredentials(args) {
   return { appId, appSecret };
 }
 
+async function resolvePreferredSearchToken(args, providedToken) {
+  if (providedToken) {
+    return providedToken;
+  }
+  const userAccessToken = await resolveOptionalFeishuUserAccessToken(args);
+  if (userAccessToken) {
+    return userAccessToken;
+  }
+  return resolveTenantToken(args);
+}
+
+
 async function resolveTenantToken(args, providedToken) {
   if (providedToken) {
     return providedToken;
@@ -368,7 +383,8 @@ export async function runCommand(input) {
     return handleContactCommand(action, args, await resolveTenantToken(args, token));
   }
   if (resource === 'search') {
-    return handleSearchCommand(action, args, await resolveTenantToken(args, token));
+    const resolvedToken = await resolvePreferredSearchToken(args, token);
+    return handleSearchCommand(action, args, resolvedToken);
   }
   if (resource === 'sheets') {
     return handleSheetsCommand(action, args, await resolveTenantToken(args, token));
@@ -960,21 +976,18 @@ async function handleChatCommand(action, args, token) {
 
 async function handleCardCommand(action, args, token) {
   if (action === 'create') {
-    const payload = await apiRequest(
-      token,
-      'POST',
-      '/cardkit/v1/cards',
-      parseJsonFlag(args['body-json'], '--body-json'),
-    );
+    const body = buildCardkitCreateBody(parseJsonFlag(args['body-json'], '--body-json'));
+    const payload = await requestCardkitCreate(token, body);
     return buildGenericSuccess('card.create', payload?.data ?? null);
   }
   if (action === 'update') {
     const cardId = parseRequiredStringFlag(args['card-id'], '--card-id');
+    const body = buildCardkitUpdateBody(parseJsonFlag(args['body-json'], '--body-json'), args);
     const payload = await apiRequest(
       token,
       'PUT',
       `/cardkit/v1/cards/${encodeURIComponent(cardId)}`,
-      parseJsonFlag(args['body-json'], '--body-json'),
+      body,
     );
     return buildGenericSuccess('card.update', payload?.data ?? null, { card_id: cardId });
   }
@@ -1166,13 +1179,14 @@ async function handleApprovalCommand(action, args, token) {
     );
     return buildGenericSuccess('approval.delete-comment', payload?.data ?? null, { comment_id: commentId });
   }
-  if (action === 'list-instances') {
+  if (action === 'query-instances') {
     const payload = await apiRequest(
       token,
-      'GET',
-      appendQueryToPath('/approval/v4/instances', buildPagingParams(args)),
+      'POST',
+      appendQueryToPath('/approval/v4/instances/query', buildPagingParams(args)),
+      parseJsonFlag(args['body-json'], '--body-json'),
     );
-    return buildGenericSuccess('approval.list-instances', payload?.data ?? null);
+    return buildGenericSuccess('approval.query-instances', payload?.data ?? null);
   }
   throw new Error(`unsupported command: approval ${action ?? ''}`.trim());
 }
@@ -1797,8 +1811,9 @@ async function handleCalendarCommand(action, args, sdkClient) {
       return accessToken;
     }
     const timezone = firstNonEmptyString(args.timezone) ?? 'Asia/Shanghai';
+    const calendarId = await resolveFeishuPrimaryCalendarId(accessToken, args);
     const payload = await requestFeishuJson(
-      `${FEISHU_API_BASE}/calendar/v4/calendars/primary/events`,
+      `${FEISHU_API_BASE}/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events`,
       {
         method: 'POST',
         headers: {
@@ -1808,14 +1823,8 @@ async function handleCalendarCommand(action, args, sdkClient) {
         body: JSON.stringify({
           summary: parseRequiredStringFlag(args.summary, '--summary'),
           ...(firstNonEmptyString(args.description) ? { description: firstNonEmptyString(args.description) } : {}),
-          start_time: {
-            date_time: parseRequiredStringFlag(args['start-time'], '--start-time'),
-            timezone,
-          },
-          end_time: {
-            date_time: parseRequiredStringFlag(args['end-time'], '--end-time'),
-            timezone,
-          },
+          start_time: buildFeishuCalendarTimeValue(parseRequiredStringFlag(args['start-time'], '--start-time'), timezone),
+          end_time: buildFeishuCalendarTimeValue(parseRequiredStringFlag(args['end-time'], '--end-time'), timezone),
         }),
       },
       'feishu user api failed',
@@ -1823,20 +1832,14 @@ async function handleCalendarCommand(action, args, sdkClient) {
     return {
       ok: true,
       operation: 'calendar.create-personal-event',
+      calendar_id: calendarId,
       event: payload?.data?.event ?? null,
     };
   }
-  const client = sdkClient ?? resolveSdkClient(args);
-  if (action === 'create-calendar') {
-    const response = await client.calendar.calendar.create({
-      data: parseRequiredJsonObjectFlag(args['body-json'], '--body-json'),
-    });
-    return {
-      ok: true,
-      operation: 'calendar.create-calendar',
-      calendar: response?.data?.calendar ?? null,
-    };
+  if (action === 'create-calendar' || action === 'create-event') {
+    throw new Error('shared calendar write commands are disabled; use calendar create-personal-event');
   }
+  const client = sdkClient ?? resolveSdkClient(args);
   if (action === 'get-calendar') {
     const calendarId = parseRequiredStringFlag(args['calendar-id'], '--calendar-id');
     const response = await client.calendar.calendar.get({
@@ -1874,48 +1877,77 @@ async function handleCalendarCommand(action, args, sdkClient) {
       deleted: true,
     };
   }
-  if (action === 'create-event') {
-    const calendarId = parseRequiredStringFlag(args['calendar-id'], '--calendar-id');
-    const response = await client.calendar.calendarEvent.create({
-      path: { calendar_id: calendarId },
-      params: {
-        ...(firstNonEmptyString(args['idempotency-key']) ? { idempotency_key: firstNonEmptyString(args['idempotency-key']) } : {}),
-        ...(firstNonEmptyString(args['user-id-type']) ? { user_id_type: firstNonEmptyString(args['user-id-type']) } : {}),
-      },
-      data: parseRequiredJsonObjectFlag(args['body-json'], '--body-json'),
-    });
-    return {
-      ok: true,
-      operation: 'calendar.create-event',
-      calendar_id: calendarId,
-      event: response?.data?.event ?? null,
-    };
-  }
   if (action === 'list-calendars') {
+    if (firstNonEmptyString(args['user-access-token'], args['gateway-user-id'], process.env.GATEWAY_USER_ID)) {
+      const accessToken = await resolveFeishuUserAccessToken(args);
+      const payload = await requestFeishuJson(
+        `${FEISHU_API_BASE}${appendQueryToPath('/calendar/v4/calendars', buildCalendarListPagingParams(args, { ignorePageSize: true }))}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'content-type': 'application/json; charset=utf-8',
+          },
+        },
+        'feishu user api failed',
+      );
+      return {
+        ok: true,
+        operation: 'calendar.list-calendars',
+        items: normalizeCalendarListItems(payload),
+        has_more: payload?.data?.has_more ?? false,
+        page_token: payload?.data?.page_token ?? null,
+        sync_token: payload?.data?.sync_token ?? null,
+      };
+    }
     const response = await client.calendar.calendar.list({
-      params: buildPagingParams(args),
+      params: buildCalendarListPagingParams(args),
     });
     return {
       ok: true,
       operation: 'calendar.list-calendars',
-      items: response?.data?.calendar_list ?? [],
+      items: normalizeCalendarListItems(response),
       has_more: response?.data?.has_more ?? false,
       page_token: response?.data?.page_token ?? null,
       sync_token: response?.data?.sync_token ?? null,
     };
   }
   if (action === 'list-events-v4') {
-    const calendarId = parseRequiredStringFlag(args['calendar-id'], '--calendar-id');
+    const userAccessToken = await resolveOptionalFeishuUserAccessToken(args);
+    const calendarId = await resolveCalendarIdForEventOperation(args, userAccessToken);
+    const params = {
+      ...buildPagingParams(args),
+      ...(firstNonEmptyString(args['time-min']) ? { start_time: normalizeCalendarQueryTimestamp(args['time-min'], '--time-min') } : {}),
+      ...(firstNonEmptyString(args['time-max']) ? { end_time: normalizeCalendarQueryTimestamp(args['time-max'], '--time-max') } : {}),
+      ...(firstNonEmptyString(args['anchor-time']) ? { anchor_time: normalizeCalendarQueryTimestamp(args['anchor-time'], '--anchor-time') } : {}),
+      ...(firstNonEmptyString(args['sync-token']) ? { sync_token: firstNonEmptyString(args['sync-token']) } : {}),
+      ...(firstNonEmptyString(args['user-id-type']) ? { user_id_type: firstNonEmptyString(args['user-id-type']) } : {}),
+    };
+    if (userAccessToken) {
+      const payload = await requestFeishuJson(
+        `${FEISHU_API_BASE}${appendQueryToPath(`/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events`, params)}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${userAccessToken}`,
+            'content-type': 'application/json; charset=utf-8',
+          },
+        },
+        'feishu user api failed',
+      );
+      return {
+        ok: true,
+        operation: 'calendar.list-events-v4',
+        calendar_id: calendarId,
+        items: payload?.data?.items ?? [],
+        has_more: payload?.data?.has_more ?? false,
+        page_token: payload?.data?.page_token ?? null,
+        sync_token: payload?.data?.sync_token ?? null,
+      };
+    }
     const response = await client.calendar.calendarEvent.list({
       path: { calendar_id: calendarId },
-      params: {
-        ...buildPagingParams(args),
-        ...(firstNonEmptyString(args['time-min']) ? { start_time: firstNonEmptyString(args['time-min']) } : {}),
-        ...(firstNonEmptyString(args['time-max']) ? { end_time: firstNonEmptyString(args['time-max']) } : {}),
-        ...(firstNonEmptyString(args['anchor-time']) ? { anchor_time: firstNonEmptyString(args['anchor-time']) } : {}),
-        ...(firstNonEmptyString(args['sync-token']) ? { sync_token: firstNonEmptyString(args['sync-token']) } : {}),
-        ...(firstNonEmptyString(args['user-id-type']) ? { user_id_type: firstNonEmptyString(args['user-id-type']) } : {}),
-      },
+      params,
     });
     return {
       ok: true,
@@ -1928,13 +1960,34 @@ async function handleCalendarCommand(action, args, sdkClient) {
     };
   }
   if (action === 'list-events') {
-    const calendarId = parseRequiredStringFlag(args['calendar-id'], '--calendar-id');
+    const userAccessToken = await resolveOptionalFeishuUserAccessToken(args);
+    const calendarId = await resolveCalendarIdForEventOperation(args, userAccessToken);
+    const params = {
+      start_time: normalizeCalendarQueryTimestamp(parseRequiredStringFlag(args['time-min'], '--time-min'), '--time-min'),
+      end_time: normalizeCalendarQueryTimestamp(parseRequiredStringFlag(args['time-max'], '--time-max'), '--time-max'),
+    };
+    if (userAccessToken) {
+      const payload = await requestFeishuJson(
+        `${FEISHU_API_BASE}${appendQueryToPath(`/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events/instance_view`, params)}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${userAccessToken}`,
+            'content-type': 'application/json; charset=utf-8',
+          },
+        },
+        'feishu user api failed',
+      );
+      return {
+        ok: true,
+        operation: 'calendar.list-events',
+        calendar_id: calendarId,
+        items: payload?.data?.items ?? [],
+      };
+    }
     const response = await client.calendar.calendarEvent.instanceView({
       path: { calendar_id: calendarId },
-      params: {
-        start_time: parseRequiredStringFlag(args['time-min'], '--time-min'),
-        end_time: parseRequiredStringFlag(args['time-max'], '--time-max'),
-      },
+      params,
     });
     return {
       ok: true,
@@ -1944,19 +1997,41 @@ async function handleCalendarCommand(action, args, sdkClient) {
     };
   }
   if (action === 'get-event') {
-    const calendarId = parseRequiredStringFlag(args['calendar-id'], '--calendar-id');
+    const userAccessToken = await resolveOptionalFeishuUserAccessToken(args);
+    const calendarId = await resolveCalendarIdForEventOperation(args, userAccessToken);
     const eventId = parseRequiredStringFlag(args['event-id'], '--event-id');
+    const params = {
+      ...(args['need-attendee'] !== undefined ? { need_attendee: parseOptionalBooleanFlag(args['need-attendee'], '--need-attendee') } : {}),
+      ...(args['need-meeting-settings'] !== undefined ? { need_meeting_settings: parseOptionalBooleanFlag(args['need-meeting-settings'], '--need-meeting-settings') } : {}),
+      ...(args['max-attendee-num'] !== undefined ? { max_attendee_num: parseOptionalPositiveInteger(args['max-attendee-num'], '--max-attendee-num') } : {}),
+      ...(firstNonEmptyString(args['user-id-type']) ? { user_id_type: firstNonEmptyString(args['user-id-type']) } : {}),
+    };
+    if (userAccessToken) {
+      const payload = await requestFeishuJson(
+        `${FEISHU_API_BASE}${appendQueryToPath(`/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, params)}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${userAccessToken}`,
+            'content-type': 'application/json; charset=utf-8',
+          },
+        },
+        'feishu user api failed',
+      );
+      return {
+        ok: true,
+        operation: 'calendar.get-event',
+        calendar_id: calendarId,
+        event_id: eventId,
+        event: payload?.data?.event ?? null,
+      };
+    }
     const response = await client.calendar.calendarEvent.get({
       path: {
         calendar_id: calendarId,
         event_id: eventId,
       },
-      params: {
-        ...(args['need-attendee'] !== undefined ? { need_attendee: parseOptionalBooleanFlag(args['need-attendee'], '--need-attendee') } : {}),
-        ...(args['need-meeting-settings'] !== undefined ? { need_meeting_settings: parseOptionalBooleanFlag(args['need-meeting-settings'], '--need-meeting-settings') } : {}),
-        ...(args['max-attendee-num'] !== undefined ? { max_attendee_num: parseOptionalPositiveInteger(args['max-attendee-num'], '--max-attendee-num') } : {}),
-        ...(firstNonEmptyString(args['user-id-type']) ? { user_id_type: firstNonEmptyString(args['user-id-type']) } : {}),
-      },
+      params,
     });
     return {
       ok: true,
@@ -1967,17 +2042,41 @@ async function handleCalendarCommand(action, args, sdkClient) {
     };
   }
   if (action === 'update-event') {
-    const calendarId = parseRequiredStringFlag(args['calendar-id'], '--calendar-id');
+    const userAccessToken = await resolveOptionalFeishuUserAccessToken(args);
+    const calendarId = await resolveCalendarIdForEventOperation(args, userAccessToken);
     const eventId = parseRequiredStringFlag(args['event-id'], '--event-id');
+    const params = {
+      ...(firstNonEmptyString(args['user-id-type']) ? { user_id_type: firstNonEmptyString(args['user-id-type']) } : {}),
+    };
+    const body = parseRequiredJsonObjectFlag(args['body-json'], '--body-json');
+    if (userAccessToken) {
+      const payload = await requestFeishuJson(
+        `${FEISHU_API_BASE}${appendQueryToPath(`/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, params)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${userAccessToken}`,
+            'content-type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(body),
+        },
+        'feishu user api failed',
+      );
+      return {
+        ok: true,
+        operation: 'calendar.update-event',
+        calendar_id: calendarId,
+        event_id: eventId,
+        event: payload?.data?.event ?? null,
+      };
+    }
     const response = await client.calendar.calendarEvent.patch({
       path: {
         calendar_id: calendarId,
         event_id: eventId,
       },
-      params: {
-        ...(firstNonEmptyString(args['user-id-type']) ? { user_id_type: firstNonEmptyString(args['user-id-type']) } : {}),
-      },
-      data: parseRequiredJsonObjectFlag(args['body-json'], '--body-json'),
+      params,
+      data: body,
     });
     return {
       ok: true,
@@ -1988,24 +2087,93 @@ async function handleCalendarCommand(action, args, sdkClient) {
     };
   }
   if (action === 'delete-event') {
-    const calendarId = parseRequiredStringFlag(args['calendar-id'], '--calendar-id');
+    const userAccessToken = await resolveOptionalFeishuUserAccessToken(args);
+    const calendarId = await resolveCalendarIdForEventOperation(args, userAccessToken);
     const eventId = parseRequiredStringFlag(args['event-id'], '--event-id');
     const needNotification = parseOptionalBooleanFlag(args['need-notification'], '--need-notification');
+    const params = {
+      ...(needNotification !== undefined ? { need_notification: String(needNotification) } : {}),
+    };
+    if (userAccessToken) {
+      await requestFeishuJson(
+        `${FEISHU_API_BASE}${appendQueryToPath(`/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, params)}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${userAccessToken}`,
+            'content-type': 'application/json; charset=utf-8',
+          },
+        },
+        'feishu user api failed',
+      );
+      let event = null;
+      try {
+        const probePayload = await requestFeishuJson(
+          `${FEISHU_API_BASE}${appendQueryToPath(`/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {})}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${userAccessToken}`,
+              'content-type': 'application/json; charset=utf-8',
+            },
+          },
+          'feishu user api failed',
+        );
+        event = probePayload?.data?.event ?? null;
+      } catch (error) {
+        const normalized = normalizeFeishuApiError(error);
+        if (normalized.type !== 'not_found') {
+          throw error;
+        }
+      }
+      const status = firstNonEmptyString(event?.status);
+      const cancelled = status === 'cancelled' || status === 'canceled';
+      return {
+        ok: true,
+        operation: 'calendar.delete-event',
+        calendar_id: calendarId,
+        event_id: eventId,
+        result: cancelled ? 'cancelled' : 'deleted',
+        deleted: event === null,
+        cancelled,
+        ...(status ? { status } : {}),
+        ...(event ? { event } : {}),
+      };
+    }
     await client.calendar.calendarEvent.delete({
       path: {
         calendar_id: calendarId,
         event_id: eventId,
       },
-      params: {
-        ...(needNotification !== undefined ? { need_notification: String(needNotification) } : {}),
-      },
+      params,
     });
+    let event = null;
+    try {
+      const probeResponse = await client.calendar.calendarEvent.get({
+        path: {
+          calendar_id: calendarId,
+          event_id: eventId,
+        },
+      });
+      event = probeResponse?.data?.event ?? null;
+    } catch (error) {
+      const normalized = normalizeFeishuApiError(error);
+      if (normalized.type !== 'not_found') {
+        throw error;
+      }
+    }
+    const status = firstNonEmptyString(event?.status);
+    const cancelled = status === 'cancelled' || status === 'canceled';
     return {
       ok: true,
       operation: 'calendar.delete-event',
       calendar_id: calendarId,
       event_id: eventId,
-      deleted: true,
+      result: cancelled ? 'cancelled' : 'deleted',
+      deleted: event === null,
+      cancelled,
+      ...(status ? { status } : {}),
+      ...(event ? { event } : {}),
     };
   }
   if (action === 'freebusy') {
@@ -2026,6 +2194,25 @@ async function handleCalendarCommand(action, args, sdkClient) {
   }
   throw new Error(`unsupported command: calendar ${action ?? ''}`.trim());
 }
+
+async function resolveOptionalFeishuUserAccessToken(args) {
+  if (!firstNonEmptyString(args?.['user-access-token'], args?.['gateway-user-id'], process.env.GATEWAY_USER_ID)) {
+    return null;
+  }
+  return resolveFeishuUserAccessToken(args);
+}
+
+async function resolveCalendarIdForEventOperation(args, accessToken) {
+  const explicitCalendarId = firstNonEmptyString(args?.['calendar-id']);
+  if (explicitCalendarId) {
+    return parseRequiredStringFlag(explicitCalendarId, '--calendar-id');
+  }
+  if (!accessToken) {
+    throw new Error('missing --calendar-id');
+  }
+  return resolveFeishuPrimaryCalendarId(accessToken, args);
+}
+
 
 async function resolveFeishuUserAccessToken(args) {
   const explicitAccessToken = firstNonEmptyString(args['user-access-token']);
@@ -2055,32 +2242,41 @@ async function resolveFeishuUserAccessToken(args) {
     accessToken: refreshed.accessToken,
     refreshToken: refreshed.refreshToken,
     expiresAt: Date.now() + refreshed.expiresIn * 1000,
-    scopeSnapshot: binding.scopeSnapshot,
+    scopeSnapshot: mergeFeishuScopeSnapshots(binding.scopeSnapshot, refreshed.scopeSnapshot),
   });
   return next.accessToken;
 }
 
-function resolveFeishuUserBindingDbPath(args) {
+export function deriveGatewayRootDirFromScriptDir(scriptDir) {
+  const normalized = path.resolve(parseRequiredStringFlag(scriptDir, 'scriptDir'));
+  const agentsMarker = `${path.sep}.data${path.sep}agents${path.sep}`;
+  const agentMarkerIndex = normalized.indexOf(agentsMarker);
+  if (agentMarkerIndex >= 0) {
+    return normalized.slice(0, agentMarkerIndex);
+  }
+  const codexSkillsMarker = `${path.sep}.codex${path.sep}skills${path.sep}`;
+  const codexSkillsIndex = normalized.indexOf(codexSkillsMarker);
+  if (codexSkillsIndex >= 0) {
+    return normalized.slice(0, codexSkillsIndex);
+  }
+  return path.resolve(normalized, '..', '..', '..', '..');
+}
+
+export function resolveFeishuUserBindingDbPath(args) {
   const explicitPath = firstNonEmptyString(args['binding-db-path'], process.env.FEISHU_USER_BINDING_DB_PATH);
   if (explicitPath) {
     return path.resolve(explicitPath);
   }
-  const gatewayRootDir = firstNonEmptyString(process.env.GATEWAY_ROOT_DIR, process.cwd());
+  const gatewayRootDir = firstNonEmptyString(process.env.GATEWAY_ROOT_DIR, DEFAULT_GATEWAY_ROOT_DIR, process.cwd());
   return path.resolve(gatewayRootDir, '.data', FEISHU_USER_BINDING_DB_FILENAME);
 }
 
 function getFeishuUserBinding(filePath, gatewayUserId) {
-  const db = openFeishuUserBindingDb(filePath);
-  try {
-    return getFeishuUserBindingFromDb(db, gatewayUserId);
-  } finally {
-    db.close();
-  }
+  return withFeishuUserBindingDb(filePath, (db) => getFeishuUserBindingFromDb(db, gatewayUserId));
 }
 
 function upsertFeishuUserBinding(filePath, input) {
-  const db = openFeishuUserBindingDb(filePath);
-  try {
+  return withFeishuUserBindingDb(filePath, (db) => {
     const existing = getFeishuUserBindingFromDb(db, input.gatewayUserId);
     const now = Date.now();
     db.prepare(`
@@ -2116,30 +2312,74 @@ function upsertFeishuUserBinding(filePath, input) {
       now,
     );
     return getFeishuUserBindingFromDb(db, input.gatewayUserId);
+  });
+}
+
+function openFeishuUserBindingDb(filePath) {
+  return runWithSqliteBusyRetry(() => {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const db = new DatabaseSync(filePath);
+    db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA busy_timeout = ${FEISHU_USER_BINDING_SQLITE_BUSY_TIMEOUT_MS};
+      CREATE TABLE IF NOT EXISTS feishu_user_binding (
+        gateway_user_id TEXT PRIMARY KEY,
+        feishu_open_id TEXT,
+        feishu_user_id TEXT,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        scope_snapshot TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `);
+    return db;
+  });
+}
+
+function withFeishuUserBindingDb(filePath, callback) {
+  const db = openFeishuUserBindingDb(filePath);
+  try {
+    return runWithSqliteBusyRetry(() => callback(db));
   } finally {
     db.close();
   }
 }
 
-function openFeishuUserBindingDb(filePath) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const db = new DatabaseSync(filePath);
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA synchronous = NORMAL;
-    CREATE TABLE IF NOT EXISTS feishu_user_binding (
-      gateway_user_id TEXT PRIMARY KEY,
-      feishu_open_id TEXT,
-      feishu_user_id TEXT,
-      access_token TEXT NOT NULL,
-      refresh_token TEXT NOT NULL,
-      expires_at INTEGER NOT NULL,
-      scope_snapshot TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `);
-  return db;
+export function runWithSqliteBusyRetry(callback, options = {}) {
+  const maxAttempts = Number.isInteger(options.maxAttempts) && options.maxAttempts > 0
+    ? options.maxAttempts
+    : FEISHU_USER_BINDING_SQLITE_BUSY_RETRY_COUNT;
+  const delayMs = Number.isInteger(options.delayMs) && options.delayMs >= 0
+    ? options.delayMs
+    : FEISHU_USER_BINDING_SQLITE_BUSY_RETRY_DELAY_MS;
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return callback();
+    } catch (error) {
+      if (!isSqliteBusyError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+      lastError = error;
+      sleepSync(delayMs);
+    }
+  }
+  throw lastError;
+}
+
+function isSqliteBusyError(error) {
+  const message = firstNonEmptyString(error?.message, String(error));
+  return typeof message === 'string' && message.toLowerCase().includes('database is locked');
+}
+
+function sleepSync(delayMs) {
+  if (!Number.isFinite(delayMs) || delayMs <= 0) {
+    return;
+  }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 }
 
 function getFeishuUserBindingFromDb(db, gatewayUserId) {
@@ -2342,11 +2582,98 @@ function resolveDeviceAuthRequestedScopes(args) {
   if (scopeText) {
     scopeParts.push(...scopeText.split(/\s+/).map((scope) => scope.trim()).filter(Boolean));
   }
+  const operation = firstNonEmptyString(args.operation);
+  if (operation === 'task' || operation === 'task.personal' || scopeParts.some((scope) => scope.startsWith('task:'))) {
+    scopeParts.push('task:task:read', 'task:task:write', 'task:task:writeonly');
+  }
   if (!scopeParts.includes('offline_access')) {
     scopeParts.push('offline_access');
   }
   return Array.from(new Set(scopeParts));
 }
+
+
+function buildFeishuCalendarTimeValue(input, timezone) {
+  const trimmed = parseRequiredStringFlag(input, 'calendar time');
+  if (/^\d+$/.test(trimmed)) {
+    return { timestamp: trimmed, timezone };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return { date: trimmed, timezone };
+  }
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`invalid calendar time: ${trimmed}`);
+  }
+  return {
+    timestamp: String(Math.floor(parsed / 1000)),
+    timezone,
+  };
+}
+
+
+function normalizeCalendarListItems(payload) {
+  const data = payload?.data ?? payload ?? {};
+  if (Array.isArray(data?.calendar_list)) {
+    return data.calendar_list;
+  }
+  if (Array.isArray(data?.items)) {
+    return data.items;
+  }
+  return [];
+}
+
+function resolveCalendarIdFromEntry(entry) {
+  const calendarId = firstNonEmptyString(entry?.calendar_id, entry?.calendarId, entry?.id);
+  return calendarId ?? null;
+}
+
+function isPrimaryCalendarEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return false;
+  }
+  return entry.is_primary === true
+    || entry.isPrimary === true
+    || entry.primary === true
+    || entry.is_default === true
+    || entry.isDefault === true
+    || entry.default === true
+    || entry.is_default_calendar === true
+    || entry.type === 'primary';
+}
+
+async function resolveFeishuPrimaryCalendarId(accessToken, args) {
+  const payload = await requestFeishuJson(
+    `${FEISHU_API_BASE}${appendQueryToPath('/calendar/v4/calendars', { page_size: 100, ...buildPagingParams(args) })}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json; charset=utf-8',
+      },
+    },
+    'feishu user api failed',
+  );
+  const items = normalizeCalendarListItems(payload);
+  const primary = items.find((item) => isPrimaryCalendarEntry(item));
+  const fallback = primary ?? (items.length === 1 ? items[0] : items.find((item) => resolveCalendarIdFromEntry(item)));
+  const calendarId = resolveCalendarIdFromEntry(fallback);
+  if (!calendarId) {
+    throw new Error('unable to resolve primary calendar id from Feishu user calendar list');
+  }
+  return calendarId;
+}
+
+function mergeFeishuScopeSnapshots(...snapshots) {
+  const merged = normalizeScopeList(
+    snapshots
+      .flatMap((snapshot) => String(snapshot ?? '').split(/\s+/))
+      .map((scope) => scope.trim())
+      .filter(Boolean),
+  );
+  return merged.length > 0 ? merged.join(' ') : undefined;
+}
+
 
 function normalizeScopeList(items) {
   return Array.from(new Set(
@@ -2498,10 +2825,11 @@ async function handleTaskCommand(action, args, sdkClient) {
       },
       'feishu user api failed',
     );
+    const task = payload?.data?.task ?? null;
     return {
       ok: true,
       operation: 'task.create-personal-task',
-      task: payload?.data?.task ?? null,
+      task,
     };
   }
   if (action === 'list-personal-tasks') {
@@ -2509,23 +2837,20 @@ async function handleTaskCommand(action, args, sdkClient) {
     if (typeof accessToken !== 'string') {
       return accessToken;
     }
-    const payload = await requestFeishuJson(
-      `${FEISHU_API_BASE}${appendQueryToPath('/task/v2/tasks', buildPagingParams(args))}`,
-      {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'content-type': 'application/json; charset=utf-8',
-        },
-      },
-      'feishu user api failed',
-    );
+    const payloadResult = await requestFeishuPersonalTaskListWithFallback(accessToken, args);
+    const payload = payloadResult.payload;
+    if (process.env.FEISHU_DEBUG_TASK_PAYLOAD === '1') {
+      process.stderr.write(`[feishu task debug] list-personal-tasks payload.data=${JSON.stringify(payload?.data ?? null)}\n`);
+    }
+    const items = normalizeTaskListItems(payload);
+    const queryVariant = payloadResult.query_variant;
     return {
       ok: true,
       operation: 'task.list-personal-tasks',
-      items: payload?.data?.items ?? [],
+      items,
       has_more: payload?.data?.has_more ?? false,
       page_token: firstNonEmptyString(payload?.data?.page_token) ?? null,
+      ...(queryVariant ? { query_variant: queryVariant } : {}),
     };
   }
   if (action === 'get-personal-task') {
@@ -2545,11 +2870,12 @@ async function handleTaskCommand(action, args, sdkClient) {
       },
       'feishu user api failed',
     );
+    const task = payload?.data?.task ?? null;
     return {
       ok: true,
       operation: 'task.get-personal-task',
       task_guid: taskGuid,
-      task: payload?.data?.task ?? null,
+      task,
     };
   }
   if (action === 'update-personal-task') {
@@ -2558,7 +2884,7 @@ async function handleTaskCommand(action, args, sdkClient) {
       return accessToken;
     }
     const taskGuid = parseRequiredStringFlag(args['task-guid'], '--task-guid');
-    const task = parseJsonFlag(args['task-json'], '--task-json');
+    const taskPatch = parseJsonFlag(args['task-json'], '--task-json');
     const updateFields = parseJsonFlag(args['update-fields-json'], '--update-fields-json');
     if (!Array.isArray(updateFields)) {
       throw new Error('invalid --update-fields-json: expected a JSON array');
@@ -2572,17 +2898,18 @@ async function handleTaskCommand(action, args, sdkClient) {
           'content-type': 'application/json; charset=utf-8',
         },
         body: JSON.stringify({
-          task,
+          task: taskPatch,
           update_fields: updateFields,
         }),
       },
       'feishu user api failed',
     );
+    const task = payload?.data?.task ?? null;
     return {
       ok: true,
       operation: 'task.update-personal-task',
       task_guid: taskGuid,
-      task: payload?.data?.task ?? null,
+      task,
     };
   }
   if (action === 'delete-personal-task') {
@@ -3731,6 +4058,152 @@ function buildPagingParams(args) {
   return {
     ...(pageSize ? { page_size: pageSize } : {}),
     ...(firstNonEmptyString(args['page-token']) ? { page_token: firstNonEmptyString(args['page-token']) } : {}),
+  };
+}
+
+function buildCalendarListPagingParams(args, options = {}) {
+  const params = buildPagingParams(args);
+  if (options.ignorePageSize === true) {
+    delete params.page_size;
+  }
+  return params;
+}
+
+function normalizeCalendarQueryTimestamp(value, flagName) {
+  const raw = firstNonEmptyString(value);
+  if (!raw) {
+    return undefined;
+  }
+  if (/^\d+$/.test(raw)) {
+    return raw;
+  }
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`invalid ${flagName}: expected unix timestamp seconds or ISO datetime`);
+  }
+  return String(Math.floor(parsed / 1000));
+}
+
+function normalizeTaskListItems(payload) {
+  const data = payload?.data ?? payload ?? {};
+  if (Array.isArray(data?.items)) {
+    return data.items;
+  }
+  if (Array.isArray(data?.tasks)) {
+    return data.tasks;
+  }
+  return [];
+}
+
+async function requestFeishuPersonalTaskListWithFallback(accessToken, args) {
+  const baseParams = buildPagingParams(args);
+  const explicitCompleted = parseOptionalBooleanFlag(args.completed, '--completed');
+  const explicitType = firstNonEmptyString(args.type);
+  const variants = [];
+  variants.push({
+    label: 'default',
+    params: {
+      ...baseParams,
+      ...(explicitCompleted !== undefined ? { completed: explicitCompleted } : {}),
+      ...(explicitType ? { type: explicitType } : {}),
+    },
+  });
+  if (explicitCompleted === undefined && explicitType === undefined) {
+    variants.push({
+      label: 'completed=false',
+      params: {
+        ...baseParams,
+        completed: false,
+      },
+    });
+    variants.push({
+      label: 'completed=false&type=task',
+      params: {
+        ...baseParams,
+        completed: false,
+        type: 'task',
+      },
+    });
+  }
+
+  let lastPayload = null;
+  let lastVariant = 'default';
+  for (const variant of variants) {
+    const payload = await requestFeishuJson(
+      `${FEISHU_API_BASE}${appendQueryToPath('/task/v2/tasks', variant.params)}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'content-type': 'application/json; charset=utf-8',
+        },
+      },
+      'feishu user api failed',
+    );
+    lastPayload = payload;
+    lastVariant = variant.label;
+    if (normalizeTaskListItems(payload).length > 0 || variant === variants[variants.length - 1]) {
+      return {
+        payload,
+        query_variant: variant.label === 'default' ? null : variant.label,
+      };
+    }
+  }
+  return {
+    payload: lastPayload,
+    query_variant: lastVariant === 'default' ? null : lastVariant,
+  };
+}
+
+async function requestCardkitCreate(token, body) {
+  const attempts = [
+    body,
+    { data: body },
+  ];
+  let lastError;
+  for (const candidate of attempts) {
+    try {
+      return await apiRequest(
+        token,
+        'POST',
+        '/cardkit/v1/cards',
+        candidate,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      lastError = error;
+      if (!message.includes('body is nil')) {
+        throw error;
+      }
+    }
+  }
+  throw lastError;
+}
+
+function buildCardkitCreateBody(body) {
+  if (body && typeof body === 'object' && typeof body.type === 'string' && typeof body.data === 'string') {
+    return body;
+  }
+  return {
+    type: 'card_json',
+    data: JSON.stringify(body ?? {}),
+  };
+}
+
+function buildCardkitUpdateBody(body, args) {
+  if (body && typeof body === 'object' && body.card && typeof body.sequence !== 'undefined') {
+    return body;
+  }
+  const sequence = parseOptionalPositiveInteger(args.sequence, '--sequence');
+  if (!sequence) {
+    throw new Error('missing --sequence');
+  }
+  return {
+    card: {
+      type: 'card_json',
+      data: JSON.stringify(body ?? {}),
+    },
+    sequence,
   };
 }
 

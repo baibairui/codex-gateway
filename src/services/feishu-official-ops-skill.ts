@@ -1,10 +1,15 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const FEISHU_OFFICIAL_OPS_SKILL_NAME = 'feishu-official-ops';
 const FEISHU_RULE_START = '<!-- gateway:feishu-ops:start -->';
 const FEISHU_RULE_END = '<!-- gateway:feishu-ops:end -->';
+
+interface GlobalSkillSyncOptions {
+  roots?: string[];
+}
 
 const SOURCE_SKILL_DIR = fileURLToPath(
   new URL(`../../.codex/skills/${FEISHU_OFFICIAL_OPS_SKILL_NAME}`, import.meta.url),
@@ -13,6 +18,13 @@ const SOURCE_SKILL_DIR = fileURLToPath(
 export function installFeishuOfficialOpsSkill(workspaceDir: string): void {
   installToSkillRoot(path.join(workspaceDir, '.codex', 'skills'));
   ensureAgentsFeishuOpsRule(workspaceDir);
+}
+
+export function syncManagedFeishuOfficialOpsSkills(options: GlobalSkillSyncOptions = {}): void {
+  const roots = options.roots ?? defaultGlobalSkillRoots();
+  for (const root of roots) {
+    installToSkillRoot(root);
+  }
 }
 
 function installToSkillRoot(skillRootDir: string): void {
@@ -38,7 +50,7 @@ function ensureAgentsFeishuOpsRule(workspaceDir: string): void {
     '- DocX / Wiki 走 `./feishu-ops-playbook.md` 的标准流程；不要再尝试任何个人授权链路。',
     '- DocX / Wiki 写入完成的判定标准是真实返回 document_id / document_url / node token；只产出 markdown 文本不算完成。',
     '- DocX / Wiki 使用应用凭据直接写，不需要用户个人授权；禁止把文档写入结果再引导到任何用户登录。',
-    '- 用户说“帮我建日程”这类当前用户个人日历事务时，默认走 `calendar create-personal-event`，不要误用共享 `calendar create-event`。',
+    '- 用户说“帮我建日程”这类当前用户个人日历事务时，默认走 `calendar create-personal-event`；共享 `calendar create-event` / `calendar create-calendar` 在此网关中已禁用。',
     '- 用户说“我的待办”这类当前用户个人任务事务时，默认走 `task create-personal-task`，不要误用共享 `task create`。',
     '- 只有当用户明确要求共享日历、项目日历、共享任务对象，或已经提供了 `calendar-id` / `task_guid` / `tasklist_guid` 之类共享对象标识时，才走共享命令。',
     '- 当前聊天用户标识优先复用 `GATEWAY_USER_ID`；不要让用户重复手填自己的 gateway user id。',
@@ -77,4 +89,12 @@ function upsertManagedSection(
     return [before, section, after].filter(Boolean).join('\n\n');
   }
   return `${next.trimEnd()}\n\n${section}\n`;
+}
+
+function defaultGlobalSkillRoots(): string[] {
+  const homeDir = os.homedir();
+  return [
+    path.join(homeDir, '.codex', 'skills'),
+    path.join(homeDir, '.agents', 'skills'),
+  ];
 }

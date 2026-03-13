@@ -17,6 +17,9 @@ import {
   parseJsonFlag,
   parseOptionalBooleanFlag,
   parseRequiredStringFlag,
+  deriveGatewayRootDirFromScriptDir,
+  resolveFeishuUserBindingDbPath,
+  runWithSqliteBusyRetry,
   runCommand,
   resolveDocxWriteInput,
 } from '../.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs';
@@ -126,8 +129,8 @@ describe('feishu-openapi doc target helpers', () => {
     expect(help).toContain('bitable list-records --app-token <token> --table-id <id>');
     expect(help).toContain('bitable create-record --app-token <token> --table-id <id> --fields-json <json>');
     expect(help).toContain('calendar freebusy --time-min <time> --time-max <time>');
-    expect(help).toContain('calendar create-calendar --body-json <json>');
-    expect(help).toContain('calendar create-event --calendar-id <id> --body-json <json>');
+    expect(help).not.toContain('calendar create-calendar --body-json <json>');
+    expect(help).not.toContain('calendar create-event --calendar-id <id> --body-json <json>');
     expect(help).toContain('calendar get-calendar --calendar-id <id>');
     expect(help).toContain('calendar update-calendar --calendar-id <id> --body-json <json>');
     expect(help).toContain('calendar delete-calendar --calendar-id <id>');
@@ -190,7 +193,7 @@ describe('feishu-openapi doc target helpers', () => {
     expect(help).toContain('auth diagnose-permission --gateway-user-id <id> [--required-scopes-json <json>]');
     expect(help).toContain('calendar create-personal-event --summary <text> --start-time <iso> --end-time <iso>');
     expect(help).toContain('default for the current user');
-    expect(help).toContain('shared calendar only');
+    expect(help).not.toContain('shared calendar only');
     expect(help).toContain('sheets create --title <text>');
     expect(help).toContain('sheets find --spreadsheet-token <token> --sheet-id <id> --body-json <json>');
     expect(help).toContain('task create-personal-task --summary <text>');
@@ -252,29 +255,70 @@ describe('feishu-openapi doc target helpers', () => {
       'wikicnabcdefghijk',
     );
   });
-});
 
-describe('feishu-openapi docx image support', () => {
-  it('prefers explicit image write input with optional image metadata', () => {
-    expect(resolveDocxWriteInput({
-      'image-file': '/tmp/sample.png',
-      'image-width': '640',
-      'image-height': '480',
-      'image-align': '3',
-      'image-caption': '系统拓扑图',
-    })).toEqual({
-      mode: 'image',
-      image: {
-        filePath: '/tmp/sample.png',
-        width: 640,
-        height: 480,
-        align: 3,
-        caption: '系统拓扑图',
-      },
-    });
+  it('resolves feishu binding db path from gateway root instead of nested cwd fallback', () => {
+    const originalGatewayRootDir = process.env.GATEWAY_ROOT_DIR;
+    const originalBindingDbPath = process.env.FEISHU_USER_BINDING_DB_PATH;
+    const originalCwd = process.cwd();
+    const nestedWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'gateway-nested-workspace-'));
+    try {
+      delete process.env.GATEWAY_ROOT_DIR;
+      delete process.env.FEISHU_USER_BINDING_DB_PATH;
+      process.chdir(nestedWorkspace);
+      expect(resolveFeishuUserBindingDbPath({})).toBe(
+        path.resolve(__dirname, '..', '.data', 'feishu-user-binding.db'),
+      );
+    } finally {
+      process.chdir(originalCwd);
+      if (originalGatewayRootDir === undefined) {
+        delete process.env.GATEWAY_ROOT_DIR;
+      } else {
+        process.env.GATEWAY_ROOT_DIR = originalGatewayRootDir;
+      }
+      if (originalBindingDbPath === undefined) {
+        delete process.env.FEISHU_USER_BINDING_DB_PATH;
+      } else {
+        process.env.FEISHU_USER_BINDING_DB_PATH = originalBindingDbPath;
+      }
+    }
   });
 
-  it('builds an image block with the official docx image block shape', () => {
+  it('uses the current gateway root for the default binding db path', () => {
+    const originalGatewayRootDir = process.env.GATEWAY_ROOT_DIR;
+    try {
+      process.env.GATEWAY_ROOT_DIR = '/tmp/example/gateway-3';
+      expect(resolveFeishuUserBindingDbPath({})).toBe(
+        path.resolve('/tmp/example/gateway-3', '.data', 'feishu-user-binding.db'),
+      );
+    } finally {
+      if (originalGatewayRootDir === undefined) {
+        delete process.env.GATEWAY_ROOT_DIR;
+      } else {
+        process.env.GATEWAY_ROOT_DIR = originalGatewayRootDir;
+      }
+    }
+  });
+
+  it('derives gateway root from workspace-local skill copies under .data/agents', () => {
+    expect(deriveGatewayRootDirFromScriptDir(
+      '/opt/gateway/.data/agents/users/ou_x/default/.codex/skills/feishu-official-ops/scripts',
+    )).toBe('/opt/gateway');
+  });
+
+  it('retries sqlite busy errors before failing', () => {
+    let attempts = 0;
+    const result = runWithSqliteBusyRetry(() => {
+      attempts += 1;
+      if (attempts < 3) {
+        throw new Error('database is locked');
+      }
+      return 'ok';
+    });
+    expect(result).toBe('ok');
+    expect(attempts).toBe(3);
+  });
+
+    it('builds an image block with the official docx image block shape', () => {
     expect(buildDocxImageBlock({
       token: 'file_tok_123',
       width: 640,
@@ -679,6 +723,7 @@ describe('feishu-openapi SDK-backed command groups', () => {
   });
 
   it('lists calendars, calendar events, and freebusy slots', async () => {
+    const originalGatewayUserId = process.env.GATEWAY_USER_ID;
     const sdkClient = {
       im: { message: { get: vi.fn(), list: vi.fn() } },
       docs: { v1: { content: { get: vi.fn() } } },
@@ -714,820 +759,124 @@ describe('feishu-openapi SDK-backed command groups', () => {
       },
     };
 
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'list-calendars',
-      args: {},
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.list-calendars',
-      items: [{ calendar_id: 'cal_1', summary: '主日历' }],
-      has_more: false,
-      page_token: 'calendar_done',
-      sync_token: 'sync_1',
-    });
+    try {
+      delete process.env.GATEWAY_USER_ID;
+      await expect(runCommand({
+        resource: 'calendar',
+        action: 'list-calendars',
+        args: {},
+        sdkClient,
+      })).resolves.toEqual({
+        ok: true,
+        operation: 'calendar.list-calendars',
+        items: [{ calendar_id: 'cal_1', summary: '主日历' }],
+        has_more: false,
+        page_token: 'calendar_done',
+        sync_token: 'sync_1',
+      });
 
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'list-events',
-      args: {
-        'calendar-id': 'cal_1',
-        'time-min': '2026-03-09T00:00:00Z',
-        'time-max': '2026-03-10T00:00:00Z',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.list-events',
-      calendar_id: 'cal_1',
-      items: [{ event_id: 'evt_1', summary: '评审会' }],
-    });
+      await expect(runCommand({
+        resource: 'calendar',
+        action: 'list-events',
+        args: {
+          'calendar-id': 'cal_1',
+          'time-min': '2026-03-09T00:00:00Z',
+          'time-max': '2026-03-10T00:00:00Z',
+        },
+        sdkClient,
+      })).resolves.toEqual({
+        ok: true,
+        operation: 'calendar.list-events',
+        calendar_id: 'cal_1',
+        items: [{ event_id: 'evt_1', summary: '评审会' }],
+      });
 
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'freebusy',
-      args: {
-        'time-min': '2026-03-09T00:00:00Z',
-        'time-max': '2026-03-10T00:00:00Z',
-        'user-id': 'ou_1',
-        'only-busy': 'true',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.freebusy',
-      freebusy_list: [{ start_time: '1', end_time: '2' }],
-    });
+      await expect(runCommand({
+        resource: 'calendar',
+        action: 'freebusy',
+        args: {
+          'time-min': '2026-03-09T00:00:00Z',
+          'time-max': '2026-03-10T00:00:00Z',
+          'user-id': 'ou_1',
+          'only-busy': 'true',
+        },
+        sdkClient,
+      })).resolves.toEqual({
+        ok: true,
+        operation: 'calendar.freebusy',
+        freebusy_list: [{ start_time: '1', end_time: '2' }],
+      });
+    } finally {
+      if (originalGatewayUserId === undefined) {
+        delete process.env.GATEWAY_USER_ID;
+      } else {
+        process.env.GATEWAY_USER_ID = originalGatewayUserId;
+      }
+    }
   });
 
-  it('creates, gets, updates, and deletes shared calendars without user auth', async () => {
-    const sdkClient = {
-      im: { message: { get: vi.fn(), list: vi.fn() } },
-      docs: { v1: { content: { get: vi.fn() } } },
-      docx: { v1: { document: { rawContent: vi.fn() } } },
-      calendar: {
-        calendar: {
-          create: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              data: {
-                summary: '项目协同',
-                description: '跨团队共享日历',
-                permissions: 'private',
-                color: 5,
-              },
-            });
-            return {
-              code: 0,
-              data: {
-                calendar: {
-                  calendar_id: 'cal_shared_2',
-                  summary: '项目协同',
-                },
-              },
-            };
-          }),
-          get: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              path: { calendar_id: 'cal_shared_2' },
-            });
-            return {
-              code: 0,
-              data: {
-                calendar_id: 'cal_shared_2',
-                summary: '项目协同',
-              },
-            };
-          }),
-          patch: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              path: { calendar_id: 'cal_shared_2' },
-              data: {
-                summary: '项目协同-更新',
-                color: 7,
-              },
-            });
-            return {
-              code: 0,
-              data: {
-                calendar: {
-                  calendar_id: 'cal_shared_2',
-                  summary: '项目协同-更新',
-                },
-              },
-            };
-          }),
-          delete: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              path: { calendar_id: 'cal_shared_2' },
-            });
-            return {
-              code: 0,
-              data: {},
-            };
-          }),
-          list: vi.fn(),
-        },
-        calendarEvent: {
-          instanceView: vi.fn(),
-        },
-        freebusy: {
-          list: vi.fn(),
-        },
-      },
-    };
-
+  it('rejects shared calendar write commands and keeps personal create as the only write path', async () => {
     await expect(runCommand({
       resource: 'calendar',
       action: 'create-calendar',
       args: {
-        'body-json': '{"summary":"项目协同","description":"跨团队共享日历","permissions":"private","color":5}',
+        'body-json': '{"summary":"项目协同"}',
       },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.create-calendar',
-      calendar: {
-        calendar_id: 'cal_shared_2',
-        summary: '项目协同',
-      },
-    });
-
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'get-calendar',
-      args: {
-        'calendar-id': 'cal_shared_2',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.get-calendar',
-      calendar_id: 'cal_shared_2',
-      calendar: {
-        calendar_id: 'cal_shared_2',
-        summary: '项目协同',
-      },
-    });
-
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'update-calendar',
-      args: {
-        'calendar-id': 'cal_shared_2',
-        'body-json': '{"summary":"项目协同-更新","color":7}',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.update-calendar',
-      calendar_id: 'cal_shared_2',
-      calendar: {
-        calendar_id: 'cal_shared_2',
-        summary: '项目协同-更新',
-      },
-    });
-
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'delete-calendar',
-      args: {
-        'calendar-id': 'cal_shared_2',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.delete-calendar',
-      calendar_id: 'cal_shared_2',
-      deleted: true,
-    });
-  });
-
-  it('creates, lists, gets, updates, and deletes calendar events without user auth', async () => {
-    const sdkClient = {
-      im: { message: { get: vi.fn(), list: vi.fn() } },
-      docs: { v1: { content: { get: vi.fn() } } },
-      docx: { v1: { document: { rawContent: vi.fn() } } },
-      calendar: {
-        calendar: {
-          list: vi.fn(),
-        },
-        calendarEvent: {
-          instanceView: vi.fn(),
-          create: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              path: { calendar_id: 'cal_shared_1' },
-              params: {
-                idempotency_key: 'idem_1',
-                user_id_type: 'open_id',
-              },
-              data: {
-                summary: '架构评审',
-                description: '同步边界条件',
-                start_time: {
-                  timestamp: '1741850400',
-                  timezone: 'Asia/Shanghai',
-                },
-                end_time: {
-                  timestamp: '1741854000',
-                  timezone: 'Asia/Shanghai',
-                },
-              },
-            });
-            return {
-              code: 0,
-              data: {
-                event: {
-                  event_id: 'evt_create_1',
-                  summary: '架构评审',
-                },
-              },
-            };
-          }),
-          list: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              path: { calendar_id: 'cal_shared_1' },
-              params: {
-                page_size: 20,
-                page_token: 'page_1',
-                start_time: '2026-03-13T00:00:00Z',
-                end_time: '2026-03-14T00:00:00Z',
-                anchor_time: '2026-03-13T00:00:00Z',
-                sync_token: 'sync_1',
-                user_id_type: 'open_id',
-              },
-            });
-            return {
-              code: 0,
-              data: {
-                items: [{ event_id: 'evt_1', summary: '架构评审' }],
-                has_more: true,
-                page_token: 'page_2',
-                sync_token: 'sync_2',
-              },
-            };
-          }),
-          get: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              path: {
-                calendar_id: 'cal_shared_1',
-                event_id: 'evt_1',
-              },
-              params: {
-                need_attendee: true,
-                need_meeting_settings: false,
-                max_attendee_num: 50,
-                user_id_type: 'open_id',
-              },
-            });
-            return {
-              code: 0,
-              data: {
-                event: {
-                  event_id: 'evt_1',
-                  summary: '架构评审',
-                },
-              },
-            };
-          }),
-          patch: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              path: {
-                calendar_id: 'cal_shared_1',
-                event_id: 'evt_1',
-              },
-              params: {
-                user_id_type: 'open_id',
-              },
-              data: {
-                summary: '架构评审-更新',
-                need_notification: true,
-              },
-            });
-            return {
-              code: 0,
-              data: {
-                event: {
-                  event_id: 'evt_1',
-                  summary: '架构评审-更新',
-                },
-              },
-            };
-          }),
-          delete: vi.fn(async (payload) => {
-            expect(payload).toEqual({
-              path: {
-                calendar_id: 'cal_shared_1',
-                event_id: 'evt_1',
-              },
-              params: {
-                need_notification: 'true',
-              },
-            });
-            return {
-              code: 0,
-              data: {},
-            };
-          }),
-        },
-        freebusy: {
-          list: vi.fn(),
-        },
-      },
-    };
+    })).rejects.toThrow('shared calendar write commands are disabled; use calendar create-personal-event');
 
     await expect(runCommand({
       resource: 'calendar',
       action: 'create-event',
       args: {
         'calendar-id': 'cal_shared_1',
-        'body-json': '{"summary":"架构评审","description":"同步边界条件","start_time":{"timestamp":"1741850400","timezone":"Asia/Shanghai"},"end_time":{"timestamp":"1741854000","timezone":"Asia/Shanghai"}}',
-        'idempotency-key': 'idem_1',
-        'user-id-type': 'open_id',
+        'body-json': '{"summary":"架构评审"}',
       },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.create-event',
-      calendar_id: 'cal_shared_1',
-      event: {
-        event_id: 'evt_create_1',
-        summary: '架构评审',
-      },
-    });
-
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'list-events-v4',
-      args: {
-        'calendar-id': 'cal_shared_1',
-        'page-size': '20',
-        'page-token': 'page_1',
-        'time-min': '2026-03-13T00:00:00Z',
-        'time-max': '2026-03-14T00:00:00Z',
-        'anchor-time': '2026-03-13T00:00:00Z',
-        'sync-token': 'sync_1',
-        'user-id-type': 'open_id',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.list-events-v4',
-      calendar_id: 'cal_shared_1',
-      items: [{ event_id: 'evt_1', summary: '架构评审' }],
-      has_more: true,
-      page_token: 'page_2',
-      sync_token: 'sync_2',
-    });
-
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'get-event',
-      args: {
-        'calendar-id': 'cal_shared_1',
-        'event-id': 'evt_1',
-        'need-attendee': 'true',
-        'need-meeting-settings': 'false',
-        'max-attendee-num': '50',
-        'user-id-type': 'open_id',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.get-event',
-      calendar_id: 'cal_shared_1',
-      event_id: 'evt_1',
-      event: {
-        event_id: 'evt_1',
-        summary: '架构评审',
-      },
-    });
-
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'update-event',
-      args: {
-        'calendar-id': 'cal_shared_1',
-        'event-id': 'evt_1',
-        'body-json': '{"summary":"架构评审-更新","need_notification":true}',
-        'user-id-type': 'open_id',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.update-event',
-      calendar_id: 'cal_shared_1',
-      event_id: 'evt_1',
-      event: {
-        event_id: 'evt_1',
-        summary: '架构评审-更新',
-      },
-    });
-
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'delete-event',
-      args: {
-        'calendar-id': 'cal_shared_1',
-        'event-id': 'evt_1',
-        'need-notification': 'true',
-      },
-      sdkClient,
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'calendar.delete-event',
-      calendar_id: 'cal_shared_1',
-      event_id: 'evt_1',
-      deleted: true,
-    });
-  });
-
-  it('starts Feishu device auth and returns verification info', async () => {
-    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
-      expect(String(input)).toBe('https://accounts.feishu.cn/oauth/v1/device_authorization');
-      expect(init?.method).toBe('POST');
-      expect((init?.headers as Record<string, string>)?.Authorization).toBe(`Basic ${Buffer.from('cli_app:cli_secret').toString('base64')}`);
-      expect(String(init?.body)).toContain('client_id=cli_app');
-      expect(String(init?.body)).toContain('scope=calendar%3Acalendar+calendar%3Acalendar.event%3Acreate+offline_access');
-      return new Response(JSON.stringify({
-        device_code: 'dev_123',
-        user_code: 'ABCD-EFGH',
-        interval: 5,
-        expires_in: 900,
-        verification_uri: 'https://accounts.feishu.cn/device',
-        verification_uri_complete: 'https://accounts.feishu.cn/device?user_code=ABCD-EFGH',
-      }), {
-        status: 200,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const startedAt = Date.now();
-    const result = await runCommand({
-      resource: 'auth',
-      action: 'start-device-auth',
-      args: {
-        'gateway-user-id': 'ou_bind_1',
-        'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
-        'app-id': 'cli_app',
-        'app-secret': 'cli_secret',
-      },
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      operation: 'auth.start-device-auth',
-      gateway_user_id: 'ou_bind_1',
-      device_code: 'dev_123',
-      user_code: 'ABCD-EFGH',
-      interval: 5,
-      verification_uri: 'https://accounts.feishu.cn/device',
-      verification_uri_complete: 'https://accounts.feishu.cn/device?user_code=ABCD-EFGH',
-      requested_scopes: ['calendar:calendar', 'calendar:calendar.event:create', 'offline_access'],
-    });
-    expect(Number(result.expires_at)).toBeGreaterThanOrEqual(startedAt + 899_000);
-  });
-
-  it('polls Feishu device auth and returns pending status before approval', async () => {
-    const fetchMock = vi.fn(async (input: string | URL) => {
-      expect(String(input)).toBe('https://open.feishu.cn/open-apis/authen/v2/oauth/token');
-      return new Response(JSON.stringify({
-        error: 'authorization_pending',
-        error_description: 'user has not authorized yet',
-      }), {
-        status: 400,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(runCommand({
-      resource: 'auth',
-      action: 'poll-device-auth',
-      args: {
-        'gateway-user-id': 'ou_bind_1',
-        'device-code': 'dev_123',
-        'app-id': 'cli_app',
-        'app-secret': 'cli_secret',
-      },
-    })).resolves.toEqual({
-      ok: false,
-      operation: 'auth.poll-device-auth',
-      gateway_user_id: 'ou_bind_1',
-      device_code: 'dev_123',
-      status: 'authorization_pending',
-      authorized: false,
-      message: 'Feishu device authorization is still pending.',
-    });
-  });
-
-  it('polls Feishu device auth, stores binding, and returns binding metadata', async () => {
-    const bindingDbPath = path.join(os.tmpdir(), `feishu-binding-${Date.now()}.db`);
-    const fetchMock = vi.fn(async (input: string | URL) => {
-      const url = String(input);
-      if (url === 'https://open.feishu.cn/open-apis/authen/v2/oauth/token') {
-        return new Response(JSON.stringify({
-          code: 0,
-          data: {
-            access_token: 'user_access_1',
-            refresh_token: 'refresh_1',
-            expires_in: 7200,
-            scope: 'offline_access calendar:calendar',
-          },
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json; charset=utf-8' },
-        });
-      }
-      if (url === 'https://open.feishu.cn/open-apis/authen/v1/user_info') {
-        return new Response(JSON.stringify({
-          code: 0,
-          data: {
-            open_id: 'ou_feishu_1',
-            user_id: 'u_feishu_1',
-          },
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json; charset=utf-8' },
-        });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const startedAt = Date.now();
-    const result = await runCommand({
-      resource: 'auth',
-      action: 'poll-device-auth',
-      args: {
-        'gateway-user-id': 'ou_bind_1',
-        'device-code': 'dev_123',
-        'binding-db-path': bindingDbPath,
-        'app-id': 'cli_app',
-        'app-secret': 'cli_secret',
-      },
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      operation: 'auth.poll-device-auth',
-      gateway_user_id: 'ou_bind_1',
-      authorized: true,
-      binding: {
-        gateway_user_id: 'ou_bind_1',
-        feishu_open_id: 'ou_feishu_1',
-        feishu_user_id: 'u_feishu_1',
-      },
-    });
-    expect((result as { binding?: { expires_at?: number } }).binding?.expires_at).toBeGreaterThanOrEqual(startedAt + 7_199_000);
-    const binding = readFeishuUserBinding(bindingDbPath, 'ou_bind_1');
-    expect(binding).toMatchObject({
-      gatewayUserId: 'ou_bind_1',
-      accessToken: 'user_access_1',
-      refreshToken: 'refresh_1',
-      scopeSnapshot: 'offline_access calendar:calendar',
-    });
-  });
-
-  it('diagnoses when app scopes are present but the user binding is missing required scopes', async () => {
-    const bindingDbPath = path.join(os.tmpdir(), `feishu-binding-${Date.now()}-diag-user.db`);
-    seedFeishuUserBinding(bindingDbPath, {
-      gatewayUserId: 'ou_bind_1',
-      accessToken: 'user_access_1',
-      refreshToken: 'refresh_1',
-      expiresAt: Date.now() + 7_200_000,
-      scopeSnapshot: 'offline_access calendar:calendar',
-    });
-
-    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal') {
-        expect(init?.method).toBe('POST');
-        return new Response(JSON.stringify({
-          code: 0,
-          tenant_access_token: 'tenant_token_1',
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json; charset=utf-8' },
-        });
-      }
-      if (url === 'https://open.feishu.cn/open-apis/application/v6/applications/me?lang=zh_cn') {
-        expect((init?.headers as Record<string, string>)?.Authorization).toBe('Bearer tenant_token_1');
-        return new Response(JSON.stringify({
-          code: 0,
-          data: {
-            app: {
-              scopes: [
-                { scope: 'calendar:calendar', token_types: ['user'] },
-                { scope: 'calendar:calendar.event:create', token_types: ['user'] },
-              ],
-            },
-          },
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json; charset=utf-8' },
-        });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(runCommand({
-      resource: 'auth',
-      action: 'diagnose-permission',
-      args: {
-        'gateway-user-id': 'ou_bind_1',
-        'binding-db-path': bindingDbPath,
-        'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
-        'app-id': 'cli_app',
-        'app-secret': 'cli_secret',
-      },
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'auth.diagnose-permission',
-      gateway_user_id: 'ou_bind_1',
-      token_type: 'user',
-      required_scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
-      app_scope_query: {
-        ok: true,
-      },
-      app_missing_scopes: [],
-      user_granted_scopes: ['offline_access', 'calendar:calendar'],
-      user_missing_scopes: ['calendar:calendar.event:create'],
-      diagnosis: 'user_scope_missing',
-      message: 'The current Feishu user binding is missing required scopes, while the app already has them. Re-run device auth for this user, then retry the original command.',
-    });
-  });
-
-  it('diagnoses when the app itself is missing required scopes', async () => {
-    const bindingDbPath = path.join(os.tmpdir(), `feishu-binding-${Date.now()}-diag-app.db`);
-    seedFeishuUserBinding(bindingDbPath, {
-      gatewayUserId: 'ou_bind_1',
-      accessToken: 'user_access_1',
-      refreshToken: 'refresh_1',
-      expiresAt: Date.now() + 7_200_000,
-      scopeSnapshot: 'offline_access calendar:calendar',
-    });
-
-    const fetchMock = vi.fn(async (input: string | URL) => {
-      const url = String(input);
-      if (url === 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal') {
-        return new Response(JSON.stringify({
-          code: 0,
-          tenant_access_token: 'tenant_token_1',
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json; charset=utf-8' },
-        });
-      }
-      if (url === 'https://open.feishu.cn/open-apis/application/v6/applications/me?lang=zh_cn') {
-        return new Response(JSON.stringify({
-          code: 0,
-          data: {
-            app: {
-              scopes: [
-                { scope: 'calendar:calendar', token_types: ['user'] },
-              ],
-            },
-          },
-        }), {
-          status: 200,
-          headers: { 'content-type': 'application/json; charset=utf-8' },
-        });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(runCommand({
-      resource: 'auth',
-      action: 'diagnose-permission',
-      args: {
-        'gateway-user-id': 'ou_bind_1',
-        'binding-db-path': bindingDbPath,
-        'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
-        'app-id': 'cli_app',
-        'app-secret': 'cli_secret',
-      },
-    })).resolves.toEqual({
-      ok: true,
-      operation: 'auth.diagnose-permission',
-      gateway_user_id: 'ou_bind_1',
-      token_type: 'user',
-      required_scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
-      app_scope_query: {
-        ok: true,
-      },
-      app_missing_scopes: ['calendar:calendar.event:create'],
-      user_granted_scopes: ['offline_access', 'calendar:calendar'],
-      user_missing_scopes: ['calendar:calendar.event:create'],
-      diagnosis: 'app_scope_missing',
-      message: 'The Feishu app is missing required scopes. An app admin must enable them first, then the user should authorize again before retrying the original command.',
-    });
-  });
-
-  it('returns an authorization_required result for personal commands when binding is missing', async () => {
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'create-personal-event',
-      args: {
-        'gateway-user-id': 'ou_bind_1',
-        summary: '评审会',
-        'start-time': '2026-03-13T10:00:00+08:00',
-        'end-time': '2026-03-13T11:00:00+08:00',
-      },
-    })).resolves.toEqual({
-      ok: false,
-      operation: 'calendar.create-personal-event',
-      authorization_required: true,
-      reason: 'feishu_user_binding_missing',
-      gateway_user_id: 'ou_bind_1',
-      required_scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
-      next_action: {
-        resource: 'auth',
-        action: 'start-device-auth',
-        args: {
-          'gateway-user-id': 'ou_bind_1',
-          'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
-        },
-      },
-      message: 'Feishu user authorization required. Run auth start-device-auth, finish auth poll-device-auth, then retry the original command.',
-    });
-  });
-
-  it('returns an authorization_required result when the stored binding is missing the required calendar scopes', async () => {
-    const bindingDbPath = path.join(os.tmpdir(), `feishu-binding-${Date.now()}-missing-scope.db`);
-    seedFeishuUserBinding(bindingDbPath, {
-      gatewayUserId: 'ou_bind_1',
-      accessToken: 'user_access_1',
-      refreshToken: 'refresh_1',
-      expiresAt: Date.now() + 7_200_000,
-      scopeSnapshot: 'offline_access calendar:calendar',
-    });
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(runCommand({
-      resource: 'calendar',
-      action: 'create-personal-event',
-      args: {
-        'gateway-user-id': 'ou_bind_1',
-        'binding-db-path': bindingDbPath,
-        summary: '评审会',
-        'start-time': '2026-03-13T10:00:00+08:00',
-        'end-time': '2026-03-13T11:00:00+08:00',
-      },
-    })).resolves.toEqual({
-      ok: false,
-      operation: 'calendar.create-personal-event',
-      authorization_required: true,
-      reason: 'feishu_user_scope_missing',
-      gateway_user_id: 'ou_bind_1',
-      required_scopes: ['calendar:calendar', 'calendar:calendar.event:create'],
-      missing_scopes: ['calendar:calendar.event:create'],
-      next_action: {
-        resource: 'auth',
-        action: 'start-device-auth',
-        args: {
-          'gateway-user-id': 'ou_bind_1',
-          'required-scopes-json': '["calendar:calendar","calendar:calendar.event:create"]',
-        },
-      },
-      message: 'Feishu user authorization is missing required scopes. Run auth start-device-auth with the required scopes, finish auth poll-device-auth, then retry the original command.',
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    })).rejects.toThrow('shared calendar write commands are disabled; use calendar create-personal-event');
   });
 
   it('creates a personal calendar event with an explicit user access token', async () => {
     const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
-      expect(String(input)).toBe('https://open.feishu.cn/open-apis/calendar/v4/calendars/primary/events');
-      expect(init?.method).toBe('POST');
-      expect((init?.headers as Record<string, string>)?.Authorization).toBe('Bearer user_access_1');
-      expect(JSON.parse(String(init?.body))).toEqual({
-        summary: '评审会',
-        description: '同步设计结论',
-        start_time: {
-          date_time: '2026-03-13T10:00:00+08:00',
-          timezone: 'Asia/Shanghai',
-        },
-        end_time: {
-          date_time: '2026-03-13T11:00:00+08:00',
-          timezone: 'Asia/Shanghai',
-        },
-      });
-      return new Response(JSON.stringify({
-        code: 0,
-        data: {
-          event: {
-            event_id: 'evt_personal_1',
-            summary: '评审会',
+      const url = String(input);
+      if (url === 'https://open.feishu.cn/open-apis/calendar/v4/calendars?page_size=100' && init?.method === 'GET') {
+        expect((init?.headers as Record<string, string>)?.Authorization).toBe('Bearer user_access_1');
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            calendar_list: [{ calendar_id: 'cal_primary_1', summary: '主日历', is_primary: true }],
           },
-        },
-      }), {
-        status: 200,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      });
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (url === 'https://open.feishu.cn/open-apis/calendar/v4/calendars/cal_primary_1/events' && init?.method === 'POST') {
+        expect((init?.headers as Record<string, string>)?.Authorization).toBe('Bearer user_access_1');
+        expect(JSON.parse(String(init?.body))).toEqual({
+          summary: '评审会',
+          description: '同步设计结论',
+          start_time: {
+            timestamp: '1773367200',
+            timezone: 'Asia/Shanghai',
+          },
+          end_time: {
+            timestamp: '1773370800',
+            timezone: 'Asia/Shanghai',
+          },
+        });
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            event: {
+              event_id: 'evt_personal_1',
+              summary: '评审会',
+            },
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url} ${String(init?.method ?? 'GET')}`);
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -1545,11 +894,13 @@ describe('feishu-openapi SDK-backed command groups', () => {
     })).resolves.toEqual({
       ok: true,
       operation: 'calendar.create-personal-event',
+      calendar_id: 'cal_primary_1',
       event: {
         event_id: 'evt_personal_1',
         summary: '评审会',
       },
     });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('creates and lists personal tasks with an explicit user access token', async () => {
@@ -1625,7 +976,102 @@ describe('feishu-openapi SDK-backed command groups', () => {
     });
   });
 
-  it('creates, lists, gets, updates, and creates subtasks for tasks', async () => {
+  it('normalizes personal task list results when Feishu returns tasks instead of items', async () => {
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'https://open.feishu.cn/open-apis/task/v2/tasks?page_size=20' && init?.method === 'GET') {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            tasks: [{ guid: 'task_guid_2', summary: '兼容 tasks 字段' }],
+            has_more: false,
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCommand({
+      resource: 'task',
+      action: 'list-personal-tasks',
+      args: {
+        'user-access-token': 'user_access_1',
+        'page-size': '20',
+      },
+    })).resolves.toEqual({
+      ok: true,
+      operation: 'task.list-personal-tasks',
+      items: [{ guid: 'task_guid_2', summary: '兼容 tasks 字段' }],
+      has_more: false,
+      page_token: null,
+    });
+  });
+
+  it('retries personal task list with fallback filters when the default query is empty', async () => {
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'https://open.feishu.cn/open-apis/task/v2/tasks?page_size=20' && init?.method === 'GET') {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            items: [],
+            has_more: false,
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (url === 'https://open.feishu.cn/open-apis/task/v2/tasks?page_size=20&completed=false' && init?.method === 'GET') {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            items: [],
+            has_more: false,
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (url === 'https://open.feishu.cn/open-apis/task/v2/tasks?page_size=20&completed=false&type=task' && init?.method === 'GET') {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            items: [{ guid: 'task_guid_3', summary: '回退过滤命中' }],
+            has_more: false,
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCommand({
+      resource: 'task',
+      action: 'list-personal-tasks',
+      args: {
+        'user-access-token': 'user_access_1',
+        'page-size': '20',
+      },
+    })).resolves.toEqual({
+      ok: true,
+      operation: 'task.list-personal-tasks',
+      items: [{ guid: 'task_guid_3', summary: '回退过滤命中' }],
+      has_more: false,
+      page_token: null,
+      query_variant: 'completed=false&type=task',
+    });
+  });
+
+    it('creates, lists, gets, updates, and creates subtasks for tasks', async () => {
     const sdkClient = {
       im: { message: { get: vi.fn(), list: vi.fn() } },
       docs: { v1: { content: { get: vi.fn() } } },
@@ -3769,8 +3215,11 @@ describe('feishu-openapi SDK-backed command groups', () => {
       if (input === 'https://open.feishu.cn/open-apis/cardkit/v1/cards') {
         expect(init?.method).toBe('POST');
         expect(JSON.parse(String(init?.body))).toEqual({
-          schema: '2.0',
-          header: { title: { tag: 'plain_text', content: '状态卡片' } },
+          type: 'card_json',
+          data: JSON.stringify({
+            schema: '2.0',
+            header: { title: { tag: 'plain_text', content: '状态卡片' } },
+          }),
         });
         return new Response(JSON.stringify({
           code: 0,
@@ -3842,6 +3291,58 @@ describe('feishu-openapi SDK-backed command groups', () => {
       ok: true,
       operation: 'card.create',
       data: { card_id: 'card_1' },
+    });
+
+    fetchMock.mockReset();
+    fetchMock.mockImplementationOnce(async (input: string, init?: RequestInit) => {
+      expect(input).toBe('https://open.feishu.cn/open-apis/cardkit/v1/cards');
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        type: 'card_json',
+        data: JSON.stringify({
+          schema: '2.0',
+          header: { title: { tag: 'plain_text', content: '状态卡片' } },
+        }),
+      });
+      return new Response(JSON.stringify({
+        code: 400,
+        msg: 'body is nil',
+      }), {
+        status: 400,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }).mockImplementationOnce(async (input: string, init?: RequestInit) => {
+      expect(input).toBe('https://open.feishu.cn/open-apis/cardkit/v1/cards');
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        data: {
+          type: 'card_json',
+          data: JSON.stringify({
+            schema: '2.0',
+            header: { title: { tag: 'plain_text', content: '状态卡片' } },
+          }),
+        },
+      });
+      return new Response(JSON.stringify({
+        code: 0,
+        data: { card_id: 'card_retry_1' },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    });
+
+    await expect(runCommand({
+      resource: 'card',
+      action: 'create',
+      args: {
+        'body-json': '{"schema":"2.0","header":{"title":{"tag":"plain_text","content":"状态卡片"}}}',
+      },
+      token: 'tenant_token',
+    })).resolves.toEqual({
+      ok: true,
+      operation: 'card.create',
+      data: { card_id: 'card_retry_1' },
     });
 
     await expect(runCommand({
@@ -4219,6 +3720,132 @@ describe('feishu-openapi SDK-backed command groups', () => {
       operation: 'contact.batch-get-user-id',
       data: {
         user_list: [{ user_id: 'ou_1', email: 'rui@example.com' }],
+      },
+    });
+  });
+
+    it('rejects approval list-instances as unsupported', async () => {
+    await expect(runCommand({
+      resource: 'approval',
+      action: 'list-instances',
+      args: {},
+      token: 'tenant_token',
+    })).rejects.toThrow('unsupported command: approval list-instances');
+  });
+
+  it('normalizes calendar list and event time compatibility for user-token flows', async () => {
+    const expectedStart = String(Math.floor(Date.parse('2026-03-13T10:00:00+08:00') / 1000));
+    const expectedEnd = String(Math.floor(Date.parse('2026-03-13T11:00:00+08:00') / 1000));
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === 'https://open.feishu.cn/open-apis/calendar/v4/calendars' && init?.method === 'GET') {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            calendar_list: [{ calendar_id: 'cal_1', summary: '主日历' }],
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (input === `https://open.feishu.cn/open-apis/calendar/v4/calendars/cal_1/events?start_time=${expectedStart}&end_time=${expectedEnd}` && init?.method === 'GET') {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            items: [{ event_id: 'evt_1', summary: '时间兼容测试' }],
+            has_more: false,
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCommand({
+      resource: 'calendar',
+      action: 'list-calendars',
+      args: {
+        'user-access-token': 'user_access_1',
+        'page-size': '10',
+      },
+    })).resolves.toEqual({
+      ok: true,
+      operation: 'calendar.list-calendars',
+      items: [{ calendar_id: 'cal_1', summary: '主日历' }],
+      has_more: false,
+      page_token: null,
+      sync_token: null,
+    });
+
+    await expect(runCommand({
+      resource: 'calendar',
+      action: 'list-events-v4',
+      args: {
+        'user-access-token': 'user_access_1',
+        'calendar-id': 'cal_1',
+        'time-min': '2026-03-13T10:00:00+08:00',
+        'time-max': '2026-03-13T11:00:00+08:00',
+      },
+    })).resolves.toEqual({
+      ok: true,
+      operation: 'calendar.list-events-v4',
+      calendar_id: 'cal_1',
+      items: [{ event_id: 'evt_1', summary: '时间兼容测试' }],
+      has_more: false,
+      page_token: null,
+      sync_token: null,
+    });
+  });
+
+  it('reports cancelled semantics when deleting a calendar event only cancels it', async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === 'https://open.feishu.cn/open-apis/calendar/v4/calendars/cal_1/events/evt_1' && init?.method === 'DELETE') {
+        return new Response(JSON.stringify({ code: 0, data: {} }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      if (input === 'https://open.feishu.cn/open-apis/calendar/v4/calendars/cal_1/events/evt_1' && init?.method === 'GET') {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            event: {
+              event_id: 'evt_1',
+              status: 'cancelled',
+            },
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json; charset=utf-8' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runCommand({
+      resource: 'calendar',
+      action: 'delete-event',
+      args: {
+        'user-access-token': 'user_access_1',
+        'calendar-id': 'cal_1',
+        'event-id': 'evt_1',
+      },
+    })).resolves.toEqual({
+      ok: true,
+      operation: 'calendar.delete-event',
+      calendar_id: 'cal_1',
+      event_id: 'evt_1',
+      result: 'cancelled',
+      deleted: false,
+      cancelled: true,
+      status: 'cancelled',
+      event: {
+        event_id: 'evt_1',
+        status: 'cancelled',
       },
     });
   });

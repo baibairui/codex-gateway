@@ -62,7 +62,7 @@ Follow these defaults unless the user explicitly asks for something else.
 ### Calendar
 
 - For the current user's own calendar, default to `calendar create-personal-event`.
-- Do not use `calendar create-event` unless the user explicitly wants a shared calendar and you already have `calendar-id`.
+- Shared calendar write commands are disabled in this gateway. Do not use `calendar create-event` or `calendar create-calendar`.
 - If the user says "帮我建日程", "在我的日历里加一个会", or "给我安排一个会议", treat that as a personal calendar request.
 - Reuse `--gateway-user-id` or `GATEWAY_USER_ID` for the current chat user. Do not ask the user to manually provide their own gateway user id if it is already available in the environment.
 - If personal calendar auth is missing, run the device auth flow with the command's required scopes and retry the same personal command after authorization succeeds.
@@ -137,7 +137,7 @@ Use curated commands for common work:
 - `wiki list-spaces` / `wiki list-nodes` / `wiki get-node` / `wiki create-node` / `wiki move-node` / `wiki update-title` / `wiki get-task`
 - `doc get-content`
 - `bitable list-tables` / `bitable search-records` / `bitable create-record` / `bitable update-record`
-- `calendar create-personal-event` / `calendar list-calendars` / `calendar create-calendar` / `calendar get-calendar` / `calendar update-calendar` / `calendar delete-calendar` / `calendar list-events` / `calendar create-event` / `calendar list-events-v4` / `calendar get-event` / `calendar update-event` / `calendar delete-event` / `calendar freebusy`
+- `calendar create-personal-event` / `calendar list-calendars` / `calendar get-calendar` / `calendar update-calendar` / `calendar delete-calendar` / `calendar list-events` / `calendar list-events-v4` / `calendar get-event` / `calendar update-event` / `calendar delete-event` / `calendar freebusy`
 - `task create-personal-task` / `task list-personal-tasks` / `task get-personal-task` / `task update-personal-task` / `task delete-personal-task` / `task create` / `task update` / `task delete` / `task add-members` / `task remove-members` / `task add-reminders` / `task remove-reminders` / `task add-dependencies` / `task remove-dependencies` / `task list-subtasks` / `task list-tasklists` / `task add-tasklist` / `task remove-tasklist`
 - `tasklist create` / `tasklist list` / `tasklist get` / `tasklist update` / `tasklist delete` / `tasklist tasks` / `tasklist add-members` / `tasklist remove-members`
 - `drive list-files` / `drive create-folder` / `drive get-meta` / `drive copy-file` / `drive move-file` / `drive delete-file` / `drive create-shortcut` / `drive get-public-permission` / `drive patch-public-permission` / `drive list-permission-members` / `drive create-permission-member` / `drive update-permission-member` / `drive delete-permission-member` / `drive check-member-auth` / `drive transfer-owner` / `drive list-comments` / `drive batch-query-comments` / `drive create-comment` / `drive patch-comment`
@@ -221,30 +221,7 @@ node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task create-
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs task list-personal-tasks --gateway-user-id ou_bind_1 --page-size 20
 ```
 
-Do not switch to `calendar create-event` or shared `task create` just because those commands also exist. The personal commands are the safer default for the current chat user.
-
-Create or manage a shared calendar through the official application API:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar create-calendar --body-json '{"summary":"项目协同","description":"跨团队共享日历","permissions":"private","color":5}'
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar get-calendar --calendar-id cal_shared_1
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar update-calendar --calendar-id cal_shared_1 --body-json '{"summary":"项目协同-更新","color":7}'
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar delete-calendar --calendar-id cal_shared_1
-```
-
-These commands stay in the skill layer and use the official calendar application APIs with the app or tenant token already configured for the gateway.
-
-Only use this shared calendar path when the user explicitly wants a shared or project calendar, or when they already gave you the target `calendar-id`.
-
-Create or manage a shared calendar event through the official application API:
-
-```bash
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar create-event --calendar-id cal_shared_1 --body-json '{"summary":"架构评审","start_time":{"timestamp":"1741850400","timezone":"Asia/Shanghai"},"end_time":{"timestamp":"1741854000","timezone":"Asia/Shanghai"}}'
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar list-events-v4 --calendar-id cal_shared_1 --time-min "2026-03-13T00:00:00Z" --time-max "2026-03-14T00:00:00Z"
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar get-event --calendar-id cal_shared_1 --event-id evt_xxx
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar update-event --calendar-id cal_shared_1 --event-id evt_xxx --body-json '{"summary":"架构评审-更新"}'
-node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs calendar delete-event --calendar-id cal_shared_1 --event-id evt_xxx
-```
+Do not switch to shared calendar write commands. In this gateway, `calendar create-event` and `calendar create-calendar` are intentionally disabled so "我的日程"只能落到个人命令。
 
 These commands stay in the skill layer and use the official calendar application APIs with the app or tenant token already configured for the gateway.
 
@@ -367,6 +344,8 @@ Create a card entity:
 ```bash
 node ./.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs card create --body-json '{"schema":"2.0","header":{"title":{"tag":"plain_text","content":"状态卡片"}}}'
 ```
+
+The CLI accepts raw message-card JSON here and wraps it into the CardKit `type/data` payload automatically.
 
 ## Workflow
 

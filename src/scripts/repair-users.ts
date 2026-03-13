@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { AgentWorkspaceManager } from '../services/agent-workspace-manager.js';
 import { installFeishuCanvasSkill } from '../services/feishu-canvas-skill.js';
-import { installFeishuOfficialOpsSkill } from '../services/feishu-official-ops-skill.js';
+import { installFeishuOfficialOpsSkill, syncManagedFeishuOfficialOpsSkills } from '../services/feishu-official-ops-skill.js';
 import { installGatewayBrowserSkill } from '../services/gateway-browser-skill.js';
 import { installReminderToolSkill } from '../services/reminder-tool-skill.js';
 
@@ -49,7 +49,8 @@ function run(): void {
   // 初始化全局 memory 骨架，保证目录结构存在。
   const workspaceManager = new AgentWorkspaceManager(agentsDir);
 
-  // 修复默认工作区（占位 default 所在根目录）的内置技能和规则。
+  // 先强制刷新共享 skill 副本，再修复默认工作区（占位 default 所在根目录）的内置技能和规则。
+  syncManagedFeishuOfficialOpsSkills({ roots: [path.join(agentsDir, '.codex', 'skills')] });
   repairWorkspace(agentsDir);
   workspaceManager.repairWorkspaceScaffold(agentsDir);
 

@@ -32,6 +32,7 @@ const EXCLUDED_TOP_LEVEL = new Set([
   '.DS_Store',
   '.deploy-backups',
 ]);
+const isSelfPublish = SOURCE_DIR === TARGET_DIR;
 
 function log(message) {
   process.stdout.write(`==> ${message}\n`);
@@ -167,9 +168,13 @@ async function main() {
   fs.mkdirSync(backupSnapshot, { recursive: true });
   copyRecursive(TARGET_DIR, backupSnapshot);
 
-  log('Syncing workspace into live directory');
-  removeMissingTargets(SOURCE_DIR, TARGET_DIR);
-  copyRecursive(SOURCE_DIR, TARGET_DIR);
+  if (isSelfPublish) {
+    log('Skipping workspace sync because source and target are the same directory');
+  } else {
+    log('Syncing workspace into live directory');
+    removeMissingTargets(SOURCE_DIR, TARGET_DIR);
+    copyRecursive(SOURCE_DIR, TARGET_DIR);
+  }
 
   log('Installing dependencies');
   run(npmBin, ['ci'], TARGET_DIR);
@@ -183,7 +188,11 @@ async function main() {
   if (testFiles.length === 0) {
     fail(`no test files found under ${testsDir}`);
   }
-  run(npxBin, ['vitest', 'run', '--exclude', 'workspace/**', ...testFiles], TARGET_DIR);
+  run(
+    npxBin,
+    ['vitest', 'run', '--exclude', 'workspace/**', '--exclude', '.deploy-backups/**', ...testFiles],
+    TARGET_DIR,
+  );
 
   log('Building project');
   run(npmBin, ['run', 'build'], TARGET_DIR);

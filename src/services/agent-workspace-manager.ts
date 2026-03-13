@@ -812,7 +812,7 @@ function renderFeishuOpsPlaybook(): string {
     '## Guardrails',
     '- 未实际调用 API 前，不得说“已创建”。',
     '- 不要让用户填写任何登录、回调地址或个人授权相关配置。',
-    '- 对“我的日程”不要误用共享 `calendar create-event`；对“我的待办”不要误用共享 `task create`。',
+    '- 对“我的日程”只允许走 `calendar create-personal-event`；共享 `calendar create-event` / `calendar create-calendar` 在此网关中已禁用。对“我的待办”不要误用共享 `task create`。',
     '- 对 scope 报错不要停在“可能是两种情况”；如果错误里已经带了 scope，继续运行 `auth diagnose-permission`，并把缺失 scope 回填到 `auth start-device-auth`，不要反问用户要不要继续。',
     '- 遇到错误必须带上真实错误信息和下一步建议。',
     '',

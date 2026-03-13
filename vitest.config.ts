@@ -5,6 +5,7 @@ export default defineConfig({
     exclude: [
       ...configDefaults.exclude,
       '.data/**',
+      '.deploy-backups/**',
     ],
   },
 });

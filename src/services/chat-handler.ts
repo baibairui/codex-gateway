@@ -507,6 +507,42 @@ function buildIdentityPatchPrompt(identityContent: string): string {
 
 const BROWSER_HANDOFF_TRIGGER_PROMPT = '浏览器人工接管触发条件包括但不限于：登录、验证码、扫码、支付确认、权限弹窗、高风险提交、页面目标歧义；出现这些情况时不要硬做完，而要明确请求用户接管或确认。';
 
+function buildFeishuPersonalOpsGuardrails(userPrompt: string): string[] {
+  const prompt = userPrompt.trim();
+  if (!prompt) {
+    return [];
+  }
+
+  const mentionsPersonalCalendar = /我的(日历|日程)|帮我建日程|给我安排(一个)?会议|在我的日历里|给我加一个会/.test(prompt);
+  const mentionsPersonalTask = /我的待办|给我记个任务|帮我建个待办|帮我加个待办|给我创建待办/.test(prompt);
+
+  if (!mentionsPersonalCalendar && !mentionsPersonalTask) {
+    return [];
+  }
+
+  const lines = [
+    '15. 当前用户自己的日历/待办必须走个人命令，不得为了完成结果改走应用身份的共享命令。',
+  ];
+
+  if (mentionsPersonalCalendar) {
+    lines.push(
+      '15.1 当前请求属于“当前用户自己的日历”，必须使用 `calendar create-personal-event`。',
+      '15.2 不要改走 `calendar create-event`，也不要先创建共享日历再往里写事件，除非用户明确要求共享日历或已经提供 `calendar-id`。',
+      '15.3 如果个人日历返回 `authorization_required` 或缺 scope，继续执行 `auth start-device-auth` / `auth poll-device-auth` / `auth diagnose-permission`，不要回退到应用身份创建。',
+    );
+  }
+
+  if (mentionsPersonalTask) {
+    lines.push(
+      '15.4 当前请求属于“当前用户自己的待办”，必须使用 `task create-personal-task` 等个人命令。',
+      '15.5 不要改走共享 `task create` / `tasklist create`，除非用户明确要求共享任务对象或已经提供共享对象标识。',
+      '15.6 如果个人待办返回 `authorization_required` 或缺 scope，继续执行对应 device auth 诊断与重试，不要回退到应用身份创建。',
+    );
+  }
+
+  return lines;
+}
+
 function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
   return [
     '你必须遵循以下飞书回发协议：',
@@ -532,6 +568,7 @@ function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
     `12.4 ${BROWSER_HANDOFF_TRIGGER_PROMPT}`,
     '13. image/file/audio/media/sticker/share_chat/share_user 只在用户明确要求发送对应类型，或你已经拿到可发送资源（如 key、本地路径、分享对象ID）时使用。',
     '14. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 post 或 interactive。',
+    ...buildFeishuPersonalOpsGuardrails(userPrompt),
     '',
     '用户输入如下：',
     userPrompt,

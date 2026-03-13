@@ -49,6 +49,21 @@ describe('offline deployment scripts', () => {
     expect(script).toContain("printf '可选实例:\\n' >&2");
   });
 
+
+
+  it('publish-workspace avoids syncing when source and target are the same directory', () => {
+    const script = readScript(path.join('bin', 'publish-workspace.mjs'));
+
+    expect(script).toContain('const isSelfPublish = SOURCE_DIR === TARGET_DIR');
+    expect(script).toContain("Skipping workspace sync because source and target are the same directory");
+  });
+
+  it('publish-workspace excludes deploy backups from vitest runs', () => {
+    const script = readScript(path.join('bin', 'publish-workspace.mjs'));
+
+    expect(script).toContain("'--exclude', '.deploy-backups/**'");
+  });
+
   it('deploy-new.sh creates instances from an uploaded release package instead of cloning remotely', () => {
     const script = readScript('deploy-new.sh');
 
