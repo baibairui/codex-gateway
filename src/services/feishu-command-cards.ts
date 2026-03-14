@@ -17,7 +17,8 @@ interface FeishuCardButton {
 
 interface FeishuValueButton {
   label: string;
-  value: Record<string, unknown>;
+  value?: Record<string, unknown>;
+  multiUrl?: string;
   type?: 'default' | 'primary' | 'danger';
 }
 
@@ -328,27 +329,11 @@ function buildFeishuFieldGrid(fields: FeishuCardField[]): Record<string, unknown
 }
 
 function buildFeishuTipsNote(content: string): Record<string, unknown> {
-  return {
-    tag: 'note',
-    elements: [
-      {
-        tag: 'plain_text',
-        content,
-      },
-    ],
-  };
+  return buildFeishuTextBlock(content);
 }
 
 function buildFeishuLeadNote(content: string): Record<string, unknown> {
-  return {
-    tag: 'note',
-    elements: [
-      {
-        tag: 'plain_text',
-        content,
-      },
-    ],
-  };
+  return buildFeishuTextBlock(content);
 }
 
 function extractIndexedLines(text: string): string[] {
@@ -749,21 +734,40 @@ function buildCommandButtonRows(buttons: FeishuCardButton[], buttonsPerRow = 2):
   })), buttonsPerRow);
 }
 
+function buildFeishuButtonElement(button: FeishuValueButton): Record<string, unknown> {
+  const element: Record<string, unknown> = {
+    tag: 'button',
+    type: button.type ?? 'default',
+    text: {
+      tag: 'plain_text',
+      content: button.label,
+    },
+  };
+  if (button.value) {
+    element.value = button.value;
+  }
+  if (button.multiUrl) {
+    element.multi_url = {
+      url: button.multiUrl,
+    };
+  }
+  return element;
+}
+
 function buildValueButtonRows(buttons: FeishuValueButton[], buttonsPerRow = 2): Array<Record<string, unknown>> {
   const rows: Array<Record<string, unknown>> = [];
   const step = Math.max(1, buttonsPerRow);
   for (let i = 0; i < buttons.length; i += step) {
     const chunk = buttons.slice(i, i + step);
     rows.push({
-      tag: 'action',
-      actions: chunk.map((item) => ({
-        tag: 'button',
-        type: item.type ?? 'default',
-        text: {
-          tag: 'plain_text',
-          content: item.label,
-        },
-        value: item.value,
+      tag: 'column_set',
+      flex_mode: 'flow',
+      columns: chunk.map((item) => ({
+        tag: 'column',
+        width: 'weighted',
+        weight: 1,
+        vertical_align: 'top',
+        elements: [buildFeishuButtonElement(item)],
       })),
     });
   }
@@ -1021,22 +1025,13 @@ export function buildFeishuOpenCodeOauthMessage(input: {
         { label: '登录渠道', value: providerLabel },
         { label: '授权链接', value: input.url },
       ]),
-      {
-        tag: 'action',
-        actions: [
-          {
-            tag: 'button',
-            type: 'primary',
-            text: {
-              tag: 'plain_text',
-              content: '打开授权链接',
-            },
-            multi_url: {
-              url: input.url,
-            },
-          },
-        ],
-      },
+      ...buildValueButtonRows([
+        {
+          label: '打开授权链接',
+          type: 'primary',
+          multiUrl: input.url,
+        },
+      ], 1),
     ],
   });
 }
@@ -1293,32 +1288,17 @@ export function buildFeishuUserAuthMessage(input: {
         { label: '状态检查', value: authStatusUrl },
       ]),
       buildFeishuTipsNote('这是飞书个人身份授权，不是 Codex CLI 的 /login。'),
-      {
-        tag: 'action',
-        actions: [
-          {
-            tag: 'button',
-            type: 'primary',
-            text: {
-              tag: 'plain_text',
-              content: '去飞书授权',
-            },
-            multi_url: {
-              url: authStartUrl,
-            },
-          },
-          {
-            tag: 'button',
-            text: {
-              tag: 'plain_text',
-              content: '查看授权状态',
-            },
-            multi_url: {
-              url: authStatusUrl,
-            },
-          },
-        ],
-      },
+      ...buildValueButtonRows([
+        {
+          label: '去飞书授权',
+          type: 'primary',
+          multiUrl: authStartUrl,
+        },
+        {
+          label: '查看授权状态',
+          multiUrl: authStatusUrl,
+        },
+      ]),
     ],
   });
 }
@@ -1348,22 +1328,7 @@ export function buildFeishuPersonalAuthUnavailableMessage(input?: {
         { label: '下一步', value: '请让管理员为当前服务启用飞书个人权限连接后，再重试该请求' },
       ]),
       buildFeishuTipsNote('这不是 /login 问题，而是当前环境尚未启用“以你的身份访问飞书个人能力”。'),
-      {
-        tag: 'action',
-        actions: [
-          {
-            tag: 'button',
-            text: {
-              tag: 'plain_text',
-              content: '知道了',
-            },
-            type: 'default',
-            value: {
-              gateway_action: 'noop',
-            },
-          },
-        ],
-      },
+      buildFeishuTipsNote('了解当前状态后，可直接关闭此消息。'),
     ],
   });
 }

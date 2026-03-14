@@ -5,6 +5,44 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createChatHandler } from '../src/services/chat-handler.js';
 
+type FeishuCardElement = Record<string, unknown>;
+type FeishuCardButton = {
+  tag?: string;
+  type?: string;
+  text?: { content?: string };
+  value?: Record<string, unknown>;
+  multi_url?: { url?: string };
+};
+
+function getFeishuCardElements(payload: string): FeishuCardElement[] {
+  const parsed = JSON.parse(payload) as {
+    content?: {
+      schema?: string;
+      body?: {
+        elements?: FeishuCardElement[];
+      };
+    };
+  };
+  expect(parsed.content?.schema).toBe('2.0');
+  return parsed.content?.body?.elements ?? [];
+}
+
+function extractFeishuButtons(elements: FeishuCardElement[]): FeishuCardButton[] {
+  return elements.flatMap((item) => {
+    if (item.tag === 'button') {
+      return [item as FeishuCardButton];
+    }
+    if (item.tag === 'form') {
+      return extractFeishuButtons(Array.isArray(item.elements) ? item.elements as FeishuCardElement[] : []);
+    }
+    if (item.tag === 'column_set') {
+      const columns = Array.isArray(item.columns) ? item.columns as FeishuCardElement[] : [];
+      return columns.flatMap((column) => extractFeishuButtons(Array.isArray(column.elements) ? column.elements as FeishuCardElement[] : []));
+    }
+    return [];
+  });
+}
+
 function createSessionStore() {
   const currentAgent = new Map<string, string>();
   const threads = new Map<string, string>();
@@ -964,7 +1002,6 @@ local_audio_path=${sourcePath}`,
       msg_type?: string;
       content?: {
         header?: { title?: { content?: string } };
-        elements?: Array<{ tag?: string; actions?: Array<{ text?: { content?: string } }> }>;
       };
     };
     expect(providerParsed.__gateway_message__).toBe(true);
@@ -973,9 +1010,7 @@ local_audio_path=${sourcePath}`,
     expect(helpParsed.__gateway_message__).toBe(true);
     expect(helpParsed.msg_type).toBe('interactive');
     expect(helpParsed.content?.header?.title?.content).toBe('命令帮助');
-    const helpButtons = (helpParsed.content?.elements ?? [])
-      .filter((item) => item.tag === 'action')
-      .flatMap((item) => item.actions ?? [])
+    const helpButtons = extractFeishuButtons(getFeishuCardElements(helpPayload))
       .map((item) => item.text?.content ?? '');
     expect(helpButtons).not.toContain('运行器切换');
     expect(helpButtons).not.toContain('⬅️ 上一页');
@@ -1178,26 +1213,26 @@ local_audio_path=${sourcePath}`,
     expect(typeof parsed.content).toBe('object');
     const card = parsed.content as {
       header?: { title?: { content?: string } };
-      elements?: Array<{ content?: string }>;
     };
+    const elements = getFeishuCardElements(payload);
     expect(card.header?.title?.content).toBe('命令帮助');
-    const merged = (card.elements ?? []).map((item) => String(item.content ?? '')).join('\n');
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const merged = elements
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String(item.content ?? ''))
+      .join('\n');
     expect(merged).toContain('帮助目录');
     expect(merged).toContain('会话与 Agent · 1/3');
     expect(merged).toContain('快捷操作');
-    const noteContents = (card.elements ?? [])
-      .filter((item) => (item as { tag?: string }).tag === 'note')
-      .flatMap((item) => ((item as { elements?: Array<{ content?: string }> }).elements ?? []).map((element) => String(element.content ?? '')));
-    expect(noteContents).not.toContain('按功能分组浏览可用命令，并直接点击执行常用操作。');
-    const fieldGrid = (card.elements ?? []).find((item) => (item as { tag?: string }).tag === 'div') as {
+    expect(elements.some((item) => item.tag === 'note')).toBe(false);
+    expect(merged).not.toContain('按功能分组浏览可用命令，并直接点击执行常用操作。');
+    const fieldGrid = elements.find((item) => (item as { tag?: string }).tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前分组**'))).toBe(true);
-    const actionElements = (card.elements ?? []).filter((item) => (item as { tag?: string }).tag === 'action') as Array<{
-      actions?: Array<{ text?: { content?: string }; value?: { gateway_cmd?: string } }>;
-    }>;
-    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
-    const labels = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.text?.content));
+    const buttons = extractFeishuButtons(elements);
+    const cmds = buttons.map((button) => button.value?.gateway_cmd);
+    const labels = buttons.map((button) => button.text?.content);
     expect(labels).toContain('框架管理');
     expect(cmds).toContain('/provider');
     expect(cmds).toContain('/sessions');
@@ -1223,18 +1258,19 @@ local_audio_path=${sourcePath}`,
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
     const parsed = JSON.parse(payload) as {
       content?: {
-        elements?: Array<{ content?: string }>;
+        header?: { title?: { content?: string } };
       };
     };
-    const card = parsed.content ?? { elements: [] };
-    const merged = (card.elements ?? []).map((item) => String(item.content ?? '')).join('\n');
+    const elements = getFeishuCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const merged = elements
+      .filter((item) => item.tag === 'markdown')
+      .map((item) => String(item.content ?? ''))
+      .join('\n');
     expect(merged).toContain('工作区与运维 · 3/3');
     expect(merged).not.toContain('/deploy-workspace - 发布当前 agent 工作区');
     expect(merged).not.toContain('/publish-workspace - 发布当前 agent 工作区');
-    const actionElements = (card.elements ?? []).filter((item) => (item as { tag?: string }).tag === 'action') as Array<{
-      actions?: Array<{ value?: { gateway_cmd?: string } }>;
-    }>;
-    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    const cmds = extractFeishuButtons(elements).map((button) => button.value?.gateway_cmd);
     expect(cmds).toContain('/help 2');
     expect(cmds).toContain('/help 3');
   });
@@ -1272,22 +1308,20 @@ local_audio_path=${sourcePath}`,
     expect(parsed.msg_type).toBe('interactive');
     const card = parsed.content as {
       header?: { title?: { content?: string } };
-      elements?: Array<{ content?: string; tag?: string; actions?: Array<{ value?: { gateway_cmd?: string } }> }>;
     };
+    const elements = getFeishuCardElements(payload);
     expect(card.header?.title?.content).toBe('联网搜索');
-    const markdownContents = (card.elements ?? [])
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const markdownContents = elements
       .filter((item) => item.tag === 'markdown')
       .map((item) => String(item.content ?? ''));
     expect(markdownContents.join('\n')).toContain('**当前状态**');
-    const fieldGrid = (card.elements ?? []).find((item) => item.tag === 'div') as {
+    const fieldGrid = elements.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**联网搜索**'))).toBe(true);
-    const actionElements = (card.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ value?: { gateway_cmd?: string } }>;
-    }>;
-    expect(actionElements).toHaveLength(1);
-    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    const buttons = extractFeishuButtons(elements);
+    const cmds = buttons.map((button) => button.value?.gateway_cmd);
     expect(cmds).toContain('/search on');
     expect(cmds).toContain('/search off');
   });
@@ -1325,14 +1359,14 @@ local_audio_path=${sourcePath}`,
       msg_type?: string;
       content?: {
         header?: { title?: { content?: string } };
-        elements?: Array<{ tag?: string; actions?: Array<{ text?: { content?: string }; value?: Record<string, unknown> }> }>;
       };
     };
     expect(parsed.__gateway_message__).toBe(true);
     expect(parsed.msg_type).toBe('interactive');
     expect(parsed.content?.header?.title?.content).toBe('登录授权');
-    const actionRows = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action');
-    const buttons = actionRows.flatMap((item) => item.actions ?? []);
+    const elements = getFeishuCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const buttons = extractFeishuButtons(elements);
     const labels = buttons.map((button) => String(button.text?.content ?? ''));
     expect(labels).toContain('设备授权登录');
     expect(labels).toContain('API URL / Key 登录');
@@ -1416,14 +1450,9 @@ local_audio_path=${sourcePath}`,
     await handler({ channel: 'feishu', userId: 'u1', content: '/search on' });
 
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as {
-      content?: { elements?: Array<{ tag?: string; actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }> }> };
-    };
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }>;
-    }>;
-    const offAction = actionElements
-      .flatMap((item) => item.actions ?? [])
+    const elements = getFeishuCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const offAction = extractFeishuButtons(elements)
       .find((item) => item.value?.gateway_cmd === '/search off');
     expect(offAction?.type).toBe('danger');
   });
@@ -1463,20 +1492,19 @@ local_audio_path=${sourcePath}`,
 
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
     const parsed = JSON.parse(payload) as { content?: { header?: { template?: string }; elements?: Array<Record<string, unknown>> } };
+    const elements = getFeishuCardElements(payload);
     expect(parsed.content?.header?.template).toBe('turquoise');
-    const markdownContents = (parsed.content?.elements ?? [])
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const markdownContents = elements
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**Skills**');
     expect(markdownContents.join('\n')).toContain('**技能**');
-    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+    const fieldGrid = elements.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**范围**'))).toBe(true);
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ value?: { gateway_cmd?: string } }>;
-    }>;
-    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    const cmds = extractFeishuButtons(elements).map((button) => button.value?.gateway_cmd);
     expect(cmds).toContain('/skills');
     expect(cmds).toContain('/skills global');
     expect(cmds).toContain('/skills agent');
@@ -1510,24 +1538,21 @@ local_audio_path=${sourcePath}`,
     await handler({ channel: 'feishu', userId: 'u1', content: '/sessions' });
 
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-    const markdownContents = (parsed.content?.elements ?? [])
+    const elements = getFeishuCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const markdownContents = elements
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**会话切换**');
-    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+    const fieldGrid = elements.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**会话数量**'))).toBe(true);
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前会话**'))).toBe(true);
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
-    }>;
-    const switchCurrent = actionElements
-      .flatMap((item) => item.actions ?? [])
+    const buttons = extractFeishuButtons(elements);
+    const switchCurrent = buttons
       .find((action) => action.value?.gateway_cmd === '/switch 1');
-    const switchOther = actionElements
-      .flatMap((item) => item.actions ?? [])
+    const switchOther = buttons
       .find((action) => action.value?.gateway_cmd === '/switch 2');
     expect(switchCurrent?.type).toBe('primary');
     expect(switchCurrent?.text?.content).toContain('当前会话');
@@ -1564,24 +1589,21 @@ local_audio_path=${sourcePath}`,
     await handler({ channel: 'feishu', userId: 'u1', content: '/agents' });
 
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-    const markdownContents = (parsed.content?.elements ?? [])
+    const elements = getFeishuCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const markdownContents = elements
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**Agent 切换**');
-    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+    const fieldGrid = elements.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**Agent 数量**'))).toBe(true);
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**当前 Agent**'))).toBe(true);
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
-    }>;
-    const useDefault = actionElements
-      .flatMap((item) => item.actions ?? [])
+    const buttons = extractFeishuButtons(elements);
+    const useDefault = buttons
       .find((action) => action.value?.gateway_cmd === '/agent use 1');
-    const useFrontend = actionElements
-      .flatMap((item) => item.actions ?? [])
+    const useFrontend = buttons
       .find((action) => action.value?.gateway_cmd === '/agent use 2');
     expect(useDefault?.type).toBe('primary');
     expect(useDefault?.text?.content).toContain('默认');
@@ -1612,19 +1634,17 @@ local_audio_path=${sourcePath}`,
     await handler({ channel: 'feishu', userId: 'u1', content: '/agent' });
 
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-    const markdownContents = (parsed.content?.elements ?? [])
+    const elements = getFeishuCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const markdownContents = elements
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**Agent**');
-    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+    const fieldGrid = elements.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**工作区**'))).toBe(true);
-    const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-      actions?: Array<{ value?: { gateway_cmd?: string } }>;
-    }>;
-    const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+    const cmds = extractFeishuButtons(elements).map((button) => button.value?.gateway_cmd);
     expect(cmds).toContain('/agents');
     expect(cmds).toContain('/sessions');
   });
@@ -1661,19 +1681,17 @@ local_audio_path=${sourcePath}`,
       await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
 
       const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-      const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-      const markdownContents = (parsed.content?.elements ?? [])
+      const elements = getFeishuCardElements(payload);
+      expect(elements.some((item) => item.tag === 'action')).toBe(false);
+      const markdownContents = elements
         .filter((item) => item.tag === 'markdown')
         .map((item) => String((item as { content?: unknown }).content ?? ''));
       expect(markdownContents.join('\n')).toContain('**当前模型**');
       expect(markdownContents.join('\n')).toContain('**可选模型**');
-      const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-        actions?: Array<{ type?: string; text?: { content?: string }; value?: { gateway_cmd?: string } }>;
-      }>;
-      const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+      const buttons = extractFeishuButtons(elements);
+      const cmds = buttons.map((button) => button.value?.gateway_cmd);
       expect(cmds.some((cmd) => typeof cmd === 'string' && cmd.startsWith('/model ') && cmd !== '/model gpt-5-codex')).toBe(true);
-      const currentModelAction = actionElements
-        .flatMap((item) => item.actions ?? [])
+      const currentModelAction = buttons
         .find((action) => String(action.text?.content ?? '').includes('当前 ·'));
       expect(currentModelAction?.text?.content).toBe('当前 · gpt-5-codex');
       expect(currentModelAction?.type).toBe('primary');
@@ -1711,17 +1729,14 @@ local_audio_path=${sourcePath}`,
       await handler({ channel: 'feishu', userId: 'u1', content: '/model gpt-5' });
 
       const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-      const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-      const markdownContents = (parsed.content?.elements ?? [])
+      const elements = getFeishuCardElements(payload);
+      expect(elements.some((item) => item.tag === 'action')).toBe(false);
+      const markdownContents = elements
         .filter((item) => item.tag === 'markdown')
         .map((item) => String((item as { content?: unknown }).content ?? ''));
       expect(markdownContents.join('\n')).toContain('**当前模型**');
       expect(markdownContents.join('\n')).toContain('**可选模型**');
-      const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-        actions?: Array<{ type?: string; value?: { gateway_cmd?: string } }>;
-      }>;
-      const currentModelAction = actionElements
-        .flatMap((item) => item.actions ?? [])
+      const currentModelAction = extractFeishuButtons(elements)
         .find((action) => action.value?.gateway_cmd === '/model');
       expect(currentModelAction?.type).toBe('primary');
     });
@@ -1796,15 +1811,14 @@ local_audio_path=${sourcePath}`,
       await handler({ channel: 'feishu', userId: 'u1', content: '/model' });
 
       const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-      const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-      const noteContents = (parsed.content?.elements ?? [])
-        .filter((item) => item.tag === 'note')
-        .flatMap((item) => ((item as { elements?: Array<{ content?: string }> }).elements ?? []).map((element) => String(element.content ?? '')));
-      expect(noteContents).toContain('还有更多可见模型，点击下方按钮继续查看。');
-      const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-        actions?: Array<{ value?: { gateway_cmd?: string } }>;
-      }>;
-      const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+      const elements = getFeishuCardElements(payload);
+      expect(elements.some((item) => item.tag === 'action')).toBe(false);
+      expect(elements.some((item) => item.tag === 'note')).toBe(false);
+      const markdownContents = elements
+        .filter((item) => item.tag === 'markdown')
+        .map((item) => String((item as { content?: unknown }).content ?? ''));
+      expect(markdownContents.join('\n')).toContain('还有更多可见模型，点击下方按钮继续查看。');
+      const cmds = extractFeishuButtons(elements).map((button) => button.value?.gateway_cmd);
       expect(cmds).toContain('/model page 2');
     });
   });
@@ -1841,20 +1855,18 @@ local_audio_path=${sourcePath}`,
       await handler({ channel: 'feishu', userId: 'u1', content: '/model page 2' });
 
       const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-      const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-      const markdownContents = (parsed.content?.elements ?? [])
+      const elements = getFeishuCardElements(payload);
+      expect(elements.some((item) => item.tag === 'action')).toBe(false);
+      const markdownContents = elements
         .filter((item) => item.tag === 'markdown')
         .map((item) => String((item as { content?: unknown }).content ?? ''));
       expect(markdownContents.join('\n')).toContain('模型翻页');
       expect(markdownContents.join('\n')).toContain('模型翻页');
-      const actionElements = (parsed.content?.elements ?? []).filter((item) => item.tag === 'action') as Array<{
-        actions?: Array<{ text?: { content?: string }; value?: { gateway_cmd?: string } }>;
-      }>;
-      const cmds = actionElements.flatMap((item) => (item.actions ?? []).map((action) => action.value?.gateway_cmd));
+      const buttons = extractFeishuButtons(elements);
+      const cmds = buttons.map((button) => button.value?.gateway_cmd);
       expect(cmds).toContain('/model page 1');
       expect(cmds).toContain('/model page 2');
-      const pageModelAction = actionElements
-        .flatMap((item) => item.actions ?? [])
+      const pageModelAction = buttons
         .find((action) => action.value?.gateway_cmd === '/model page-model-10');
       expect(pageModelAction?.text?.content).toBe('page-model-10');
     });
@@ -1892,12 +1904,13 @@ local_audio_path=${sourcePath}`,
     await handler({ channel: 'feishu', userId: 'u1', content: '/skills disable global using-superpowers' });
 
     const payload = String(sendText.mock.calls[0]?.[2] ?? '');
-    const parsed = JSON.parse(payload) as { content?: { elements?: Array<Record<string, unknown>> } };
-    const markdownContents = (parsed.content?.elements ?? [])
+    const elements = getFeishuCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const markdownContents = elements
       .filter((item) => item.tag === 'markdown')
       .map((item) => String((item as { content?: unknown }).content ?? ''));
     expect(markdownContents.join('\n')).toContain('**执行成功**');
-    const fieldGrid = parsed.content?.elements?.find((item) => item.tag === 'div') as {
+    const fieldGrid = elements.find((item) => item.tag === 'div') as {
       fields?: Array<{ text?: { content?: string } }>;
     } | undefined;
     expect(fieldGrid?.fields?.some((field) => String(field.text?.content ?? '').includes('**状态**'))).toBe(true);
@@ -2218,7 +2231,7 @@ local_audio_path=${sourcePath}`,
     await handler({ channel: 'feishu', userId: 'u1', content: 'hello' });
 
     const prompt = run.mock.calls[0]?.[0]?.prompt as string;
-    expect(prompt).toContain('简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。');
+    expect(prompt).toContain('简单一句话优先 text；多段说明/列表/摘要、浏览器阶段性进度、阻塞说明和完成总结优先 interactive。');
     expect(prompt).toContain('若是在汇报浏览器执行中的阶段性进度');
     expect(prompt).toContain('Action/Evidence/Result/Next step');
     expect(prompt).toContain('若是在请求用户接管浏览器步骤');
@@ -2230,6 +2243,10 @@ local_audio_path=${sourcePath}`,
     expect(prompt).toContain('若要更新已发送的飞书消息，可输出 op=update');
     expect(prompt).toContain('若要撤回已发送的飞书消息，可输出 op=recall');
     expect(prompt).toContain('"message_id":"<飞书消息ID>"');
+    expect(prompt).toContain('若使用飞书 interactive 自定义 schema 2.0 卡片，禁止使用 `tag:"action"` 或 `tag:\'action\'`。');
+    expect(prompt).toContain('需要按钮行时，改用 `column_set` + `column` + `button`，表单提交继续使用 `form` + `button` + `action_type:"form_submit"`。');
+    expect(prompt).not.toContain('回发飞书 post 时，若只是普通富文本段落，可直接把 content 写成字符串');
+    expect(prompt).not.toContain('多段说明/列表/摘要优先 post');
     expect(prompt).toContain('如果不确定该用哪种类型，优先退回 text');
   });
 
@@ -2474,5 +2491,53 @@ local_audio_path=${sourcePath}`,
     expect(sanitized).toBeTruthy();
     expect(sanitized).not.toContain('shared-memory');
     expect(sanitized).not.toContain('agent.md');
+  });
+
+  it('streams feishu snapshots through the dedicated sender and skips a duplicate final flush', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sendStreamingText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const nowValues = [100, 1000, 2000, 3000];
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => nowValues.shift() ?? 4000);
+
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: vi.fn(async (input: { onMessage?: (text: string) => void }) => {
+          input.onMessage?.('第一段');
+          input.onMessage?.('第二段');
+          return { threadId: 'thread_1', rawOutput: '' };
+        }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      sendStreamingText,
+    });
+
+    try {
+      await handler({ channel: 'feishu', userId: 'u1', content: 'hello' });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(sendStreamingText).toHaveBeenCalledTimes(2);
+    expect(sendStreamingText.mock.calls[0]?.[0]).toBe('feishu');
+    expect(sendStreamingText.mock.calls[0]?.[1]).toBe('u1');
+    expect(sendStreamingText.mock.calls[0]?.[2]).toBe(sendStreamingText.mock.calls[1]?.[2]);
+    expect(sendStreamingText.mock.calls[0]?.[3]).toBe('默认助手 ·\n第一段');
+    expect(sendStreamingText.mock.calls[0]?.[4]).toBe(false);
+    expect(sendStreamingText.mock.calls[1]?.[3]).toBe('默认助手 ·\n第一段默认助手 ·\n第二段');
+    expect(sendStreamingText.mock.calls[1]?.[4]).toBe(false);
+    expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n第一段');
+    expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n第二段');
   });
 });

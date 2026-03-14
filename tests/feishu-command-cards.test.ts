@@ -20,6 +20,30 @@ function getCardElements(payload: string): Array<Record<string, unknown>> {
   return parsed.content?.body?.elements ?? [];
 }
 
+function extractButtons(elements: Array<Record<string, unknown>>): Array<{
+  text?: { content?: string };
+  value?: Record<string, unknown>;
+  multi_url?: { url?: string };
+}> {
+  return elements.flatMap((item) => {
+    if (item.tag === 'button') {
+      return [item];
+    }
+    if (item.tag === 'form') {
+      return extractButtons(Array.isArray(item.elements) ? item.elements as Array<Record<string, unknown>> : []);
+    }
+    if (item.tag === 'column_set') {
+      const columns = Array.isArray(item.columns) ? item.columns as Array<Record<string, unknown>> : [];
+      return columns.flatMap((column) => extractButtons(Array.isArray(column.elements) ? column.elements as Array<Record<string, unknown>> : []));
+    }
+    return [];
+  }) as Array<{
+    text?: { content?: string };
+    value?: Record<string, unknown>;
+    multi_url?: { url?: string };
+  }>;
+}
+
 describe('buildFeishuLoginChoiceMessage', () => {
   it('renders both device auth and API login actions', () => {
     const payload = buildFeishuLoginChoiceMessage();
@@ -30,14 +54,11 @@ describe('buildFeishuLoginChoiceMessage', () => {
 
     expect(parsed.__gateway_message__).toBe(true);
     expect(parsed.msg_type).toBe('interactive');
-    const actions = getCardElements(payload)
-      .filter((item) => item.tag === 'action')
-      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
-        text?: { content?: string };
-        value?: Record<string, unknown>;
-      }>;
-    expect(actions.some((item) => item.text?.content === '设备授权登录' && item.value?.gateway_action === 'codex_login.start_device_auth')).toBe(true);
-    expect(actions.some((item) => item.text?.content === 'API URL / Key 登录' && item.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
+    const elements = getCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const buttons = extractButtons(elements);
+    expect(buttons.some((item) => item.text?.content === '设备授权登录' && item.value?.gateway_action === 'codex_login.start_device_auth')).toBe(true);
+    expect(buttons.some((item) => item.text?.content === 'API URL / Key 登录' && item.value?.gateway_action === 'codex_login.open_api_form')).toBe(true);
   });
 
   it('hides device auth when provider does not support it', () => {
@@ -46,13 +67,11 @@ describe('buildFeishuLoginChoiceMessage', () => {
       providerLabel: 'OpenCode',
       supportsDeviceAuth: false,
     });
-    const actions = getCardElements(payload)
-      .filter((item) => item.tag === 'action')
-      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
-        text?: { content?: string };
-      }>;
-    expect(actions.some((item) => item.text?.content === '设备授权登录')).toBe(false);
-    expect(actions.some((item) => item.text?.content === 'API URL / Key 登录')).toBe(true);
+    const elements = getCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const buttons = extractButtons(elements);
+    expect(buttons.some((item) => item.text?.content === '设备授权登录')).toBe(false);
+    expect(buttons.some((item) => item.text?.content === 'API URL / Key 登录')).toBe(true);
   });
 
   it('shows only api login for opencode in feishu', () => {
@@ -61,15 +80,13 @@ describe('buildFeishuLoginChoiceMessage', () => {
       providerLabel: 'OpenCode',
       supportsDeviceAuth: false,
     });
-    const actions = getCardElements(payload)
-      .filter((item) => item.tag === 'action')
-      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
-        text?: { content?: string };
-      }>;
+    const elements = getCardElements(payload);
+    const buttons = extractButtons(elements);
 
-    expect(actions.some((item) => item.text?.content === 'OpenAI')).toBe(false);
-    expect(actions.some((item) => item.text?.content === 'Anthropic')).toBe(false);
-    expect(actions.filter((item) => item.text?.content === 'API URL / Key 登录')).toHaveLength(1);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    expect(buttons.some((item) => item.text?.content === 'OpenAI')).toBe(false);
+    expect(buttons.some((item) => item.text?.content === 'Anthropic')).toBe(false);
+    expect(buttons.filter((item) => item.text?.content === 'API URL / Key 登录')).toHaveLength(1);
   });
 });
 
@@ -116,13 +133,10 @@ describe('buildFeishuOpenCodeOauthMessage', () => {
 
     expect(parsed.__gateway_message__).toBe(true);
     expect(parsed.msg_type).toBe('interactive');
-    const actions = getCardElements(payload)
-      .filter((item) => item.tag === 'action')
-      .flatMap((item) => Array.isArray(item.actions) ? item.actions : []) as Array<{
-        text?: { content?: string };
-        multi_url?: { url?: string };
-      }>;
-    expect(actions.some((item) => item.text?.content === '打开授权链接' && item.multi_url?.url === 'https://auth.example.com/oauth/start')).toBe(true);
+    const elements = getCardElements(payload);
+    expect(elements.some((item) => item.tag === 'action')).toBe(false);
+    const buttons = extractButtons(elements);
+    expect(buttons.some((item) => item.text?.content === '打开授权链接' && item.multi_url?.url === 'https://auth.example.com/oauth/start')).toBe(true);
   });
 });
 

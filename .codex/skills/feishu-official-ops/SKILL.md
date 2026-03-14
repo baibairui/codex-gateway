@@ -91,6 +91,12 @@ Follow these defaults unless the user explicitly asks for something else.
 - For DocX and Wiki writes, success means a real object was created or updated and the API returned the real document or node identifiers.
 - A chat markdown answer is not a successful write.
 
+### Card
+
+- For custom Feishu schema 2.0 cards, do not use `body.elements[*].tag = "action"`. Feishu no longer accepts that container.
+- When a card needs buttons, use `column_set` / `column` with `tag: "button"`, or use `form` with `button` + `action_type: "form_submit"`.
+- If a template card can express the requirement, prefer the template route over handwritten custom card JSON.
+
 ## Command Strategy
 
 Choose commands in this order:

@@ -193,21 +193,13 @@ export class FeishuApi {
   ): Promise<string | undefined> {
     const receiveTarget = resolveFeishuReceiveTarget(target);
     const textContent = requireNonEmptyText(content, 'feishu send failed: text content is required');
-    const cardPayload = buildAgentMarkdownCardContent(textContent);
-    if (cardPayload) {
-      return this.sendSingleMessage(receiveTarget, {
-        msgType: 'interactive',
-        content: cardPayload,
-        replyToMessageId: options?.replyToMessageId,
-        replyInThread: options?.replyInThread,
-      });
-    }
-    const chunks = splitFeishuTextByUtf8Bytes(textContent);
+    const markdownContent = extractAgentMarkdownCardBody(textContent) ?? textContent;
+    const chunks = splitFeishuTextByUtf8Bytes(markdownContent);
     let lastMessageId: string | undefined;
     for (const chunk of chunks) {
       lastMessageId = await this.sendSingleMessage(receiveTarget, {
-        msgType: 'post',
-        content: buildMarkdownPostContent(chunk),
+        msgType: 'interactive',
+        content: buildMarkdownCardContent(chunk),
         replyToMessageId: options?.replyToMessageId,
         replyInThread: options?.replyInThread,
       });
@@ -227,17 +219,10 @@ export class FeishuApi {
         extractTextContent(message.content),
         'feishu send failed: text content is required',
       );
-      const chunks = splitFeishuTextByUtf8Bytes(textContent);
-      let lastMessageId: string | undefined;
-      for (const chunk of chunks) {
-        lastMessageId = await this.sendSingleMessage(receiveTarget, {
-          msgType: 'text',
-          content: { text: chunk },
-          replyToMessageId: message.replyToMessageId,
-          replyInThread: message.replyInThread,
-        });
-      }
-      return lastMessageId;
+      return this.sendText(receiveTarget, textContent, {
+        replyToMessageId: message.replyToMessageId,
+        replyInThread: message.replyInThread,
+      });
     }
 
     return this.sendSingleMessage(receiveTarget, {
@@ -262,11 +247,12 @@ export class FeishuApi {
     if (!normalizedMessageId) {
       throw new Error('feishu update failed: messageId is required');
     }
-    const payload = await this.resolveOutgoingContentPayload(msgType, content);
+    const transportMessage = normalizeFeishuTransportMessage(msgType, content);
+    const payload = await this.resolveOutgoingContentPayload(transportMessage.msgType, transportMessage.content);
     const response = await this.sdkClient.im.message.update({
       path: { message_id: normalizedMessageId },
       data: {
-        msg_type: msgType,
+        msg_type: transportMessage.msgType,
         content: payload,
       },
     });
@@ -414,10 +400,11 @@ export class FeishuApi {
     target: FeishuReceiveTarget,
     message: FeishuOutgoingMessage,
   ): Promise<string | undefined> {
+    const transportMessage = normalizeFeishuTransportMessage(message.msgType, message.content);
     let lastError: Error | undefined;
     let lastMessageId: string | undefined;
     log.info('feishu send start', {
-      msgType: message.msgType,
+      msgType: transportMessage.msgType,
       receiveIdType: target.receiveIdType,
       receiveId: target.receiveId,
       hasReplyToMessageId: !!message.replyToMessageId,
@@ -426,10 +413,10 @@ export class FeishuApi {
     });
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const content = await this.resolveOutgoingContentPayload(message.msgType, message.content);
+        const content = await this.resolveOutgoingContentPayload(transportMessage.msgType, transportMessage.content);
         log.debug('feishu send payload resolved', {
           attempt,
-          msgType: message.msgType,
+          msgType: transportMessage.msgType,
           contentPreview: clipText(content),
         });
         if (message.replyToMessageId) {
@@ -438,7 +425,7 @@ export class FeishuApi {
               path: { message_id: message.replyToMessageId },
               data: {
                 content,
-                msg_type: message.msgType,
+                msg_type: transportMessage.msgType,
                 reply_in_thread: message.replyInThread === true,
                 uuid: randomUUID(),
               },
@@ -457,7 +444,7 @@ export class FeishuApi {
           } catch (replyError) {
             lastError = toError(replyError);
             log.warn('feishu reply failed, fallback to create', {
-              msgType: message.msgType,
+              msgType: transportMessage.msgType,
               replyToMessageId: message.replyToMessageId,
               error: lastError.message,
             });
@@ -469,7 +456,7 @@ export class FeishuApi {
           },
           data: {
             receive_id: target.receiveId,
-            msg_type: message.msgType,
+            msg_type: transportMessage.msgType,
             content,
             uuid: randomUUID(),
           },
@@ -491,7 +478,7 @@ export class FeishuApi {
         lastError = error instanceof Error ? error : new Error(String(error));
         log.warn('feishu send exception', {
           attempt,
-          msgType: message.msgType,
+          msgType: transportMessage.msgType,
           receiveIdType: target.receiveIdType,
           receiveId: target.receiveId,
           error: lastError.message,
@@ -508,7 +495,7 @@ export class FeishuApi {
     }
 
     log.error('feishu send exhausted retries', {
-      msgType: message.msgType,
+      msgType: transportMessage.msgType,
       receiveIdType: target.receiveIdType,
       receiveId: target.receiveId,
       replyToMessageId: message.replyToMessageId ?? '(none)',
@@ -685,6 +672,13 @@ function extractTextContent(content: FeishuOutgoingMessage['content']): string {
   return typeof text === 'string' ? text : '';
 }
 
+function extractMarkdownTextContent(content: FeishuOutgoingMessage['content']): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  return firstString(content.content, content.text) ?? '';
+}
+
 function resolveFeishuReceiveTarget(target: string | FeishuReceiveTarget): FeishuReceiveTarget {
   if (typeof target === 'string') {
     const receiveId = target.trim();
@@ -735,6 +729,28 @@ function normalizeMessageUpdateInput(
   return inputOrMessageId;
 }
 
+function normalizeFeishuTransportMessage(
+  msgType: string,
+  content: FeishuOutgoingMessage['content'],
+): {
+  msgType: string;
+  content: FeishuOutgoingMessage['content'];
+} {
+  if (msgType === 'markdown') {
+    return {
+      msgType: 'interactive',
+      content: buildMarkdownCardContent(extractMarkdownTextContent(content) || '(empty markdown)'),
+    };
+  }
+  if (msgType === 'post') {
+    return {
+      msgType: 'interactive',
+      content: buildMarkdownCardContent(flattenFeishuPostContent(content)),
+    };
+  }
+  return { msgType, content };
+}
+
 function resolveSimpleContent(msgType: string, value: string): Record<string, string> {
   if (msgType === 'image') {
     return { image_key: value };
@@ -755,6 +771,56 @@ function resolveSimpleContent(msgType: string, value: string): Record<string, st
     return buildSimplePostContent(value) as unknown as Record<string, string>;
   }
   return { text: value };
+}
+
+function flattenFeishuPostContent(content: FeishuOutgoingMessage['content']): string {
+  if (typeof content === 'string') {
+    return content.trim() || '(empty post)';
+  }
+  const record = asRecord(content);
+  if (!record) {
+    return '(empty post)';
+  }
+  const locale = asRecord(record.zh_cn) ?? record;
+  const parts: string[] = [];
+  const title = firstString(locale.title);
+  if (title) {
+    parts.push(title);
+  }
+  const rows = Array.isArray(locale.content) ? locale.content : [];
+  for (const row of rows) {
+    if (!Array.isArray(row)) {
+      continue;
+    }
+    const line = row
+      .map((item) => flattenFeishuPostNode(asRecord(item)))
+      .filter(Boolean)
+      .join('')
+      .trim();
+    if (line) {
+      parts.push(line);
+    }
+  }
+  const fallbackText = firstString(locale.text, record.text);
+  return parts.join('\n\n') || fallbackText || '(empty post)';
+}
+
+function flattenFeishuPostNode(node: Record<string, unknown> | undefined): string {
+  if (!node) {
+    return '';
+  }
+  const tag = firstString(node.tag)?.toLowerCase();
+  if (tag === 'text' || tag === 'md') {
+    return firstString(node.text) ?? '';
+  }
+  if (tag === 'a') {
+    return firstString(node.text, node.href) ?? '';
+  }
+  if (tag === 'at') {
+    const mention = firstString(node.user_name, node.user_id);
+    return mention ? `@${mention}` : '';
+  }
+  return '';
 }
 
 function resolveFeishuLocalUploadPath(msgType: string, content: Record<string, unknown>): string | undefined {
@@ -859,16 +925,7 @@ function buildMarkdownPostContent(text: string): Record<string, unknown> {
   };
 }
 
-function buildAgentMarkdownCardContent(text: string): Record<string, unknown> | undefined {
-  const match = text.match(/^(.+?) ·\n([\s\S]+)$/);
-  if (!match) {
-    return undefined;
-  }
-  const headerTitle = match[1]?.trim();
-  const body = match[2]?.trim();
-  if (!headerTitle || !body) {
-    return undefined;
-  }
+function buildMarkdownCardContent(markdownText: string): Record<string, unknown> {
   return {
     schema: '2.0',
     config: {
@@ -878,9 +935,114 @@ function buildAgentMarkdownCardContent(text: string): Record<string, unknown> | 
       elements: [
         {
           tag: 'markdown',
-          content: body,
+          content: markdownText,
         },
       ],
+    },
+  };
+}
+
+function extractAgentMarkdownCardBody(text: string): string | undefined {
+  const match = text.match(/^(.+?) ·\n([\s\S]+)$/);
+  if (!match) {
+    return undefined;
+  }
+  const headerTitle = match[1]?.trim();
+  const body = match[2]?.trim();
+  if (!headerTitle || !body) {
+    return undefined;
+  }
+  return body;
+}
+
+function extractFeishuNoteText(elements: unknown[]): string {
+  return elements
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => firstString(item.content, item.text) ?? '')
+    .filter(Boolean)
+    .join('\n');
+}
+
+function normalizeFeishuCardElement(value: unknown): Array<Record<string, unknown>> {
+  const element = asRecord(value);
+  if (!element) {
+    return [];
+  }
+  if (element.tag === 'note') {
+    const parts = Array.isArray(element.elements) ? element.elements : [];
+    const content = extractFeishuNoteText(parts);
+    if (!content) {
+      return [];
+    }
+    return [{
+      tag: 'markdown',
+      content,
+    }];
+  }
+  if (element.tag === 'action') {
+    const actions = Array.isArray(element.actions) ? element.actions : [];
+    const columns = actions
+      .map((action) => asRecord(action))
+      .filter((item): item is Record<string, unknown> => Boolean(item))
+      .map((action) => ({
+        tag: 'column',
+        width: 'weighted',
+        weight: 1,
+        vertical_align: 'top',
+        elements: [normalizeFeishuButtonElement(action)],
+      }));
+    if (columns.length === 0) {
+      return [];
+    }
+    return [{
+      tag: 'column_set',
+      flex_mode: 'flow',
+      columns,
+    }];
+  }
+  const next = { ...element };
+  if (element.tag === 'form' && Array.isArray(element.elements)) {
+    next.elements = normalizeFeishuCardElements(element.elements);
+  } else if (element.tag === 'column_set' && Array.isArray(element.columns)) {
+    next.columns = element.columns
+      .map((column) => asRecord(column))
+      .filter((item): item is Record<string, unknown> => Boolean(item))
+      .map((column) => {
+        if (!Array.isArray(column.elements)) {
+          return column;
+        }
+        return {
+          ...column,
+          elements: normalizeFeishuCardElements(column.elements),
+        };
+      });
+  } else if (element.tag === 'column' && Array.isArray(element.elements)) {
+    next.elements = normalizeFeishuCardElements(element.elements);
+  }
+  return [next];
+}
+
+function normalizeFeishuCardElements(elements: unknown[]): Array<Record<string, unknown>> {
+  return elements.flatMap((item) => normalizeFeishuCardElement(item));
+}
+
+function normalizeFeishuButtonElement(button: Record<string, unknown>): Record<string, unknown> {
+  return button.tag === 'button'
+    ? { ...button }
+    : { ...button, tag: 'button' };
+}
+
+function normalizeFeishuInteractiveCardPayload(content: Record<string, unknown>): Record<string, unknown> {
+  const body = asRecord(content.body);
+  if (!body || !Array.isArray(body.elements)) {
+    return content;
+  }
+  return {
+    ...content,
+    body: {
+      ...body,
+      elements: normalizeFeishuCardElements(body.elements),
     },
   };
 }
@@ -918,8 +1080,9 @@ function normalizeStructuredOutgoingContent(msgType: string, content: Record<str
       if (cardLink) {
         normalized.card_link = cardLink;
       }
-      return normalized;
+      return normalizeFeishuInteractiveCardPayload(normalized);
     }
+    return normalizeFeishuInteractiveCardPayload(content);
   }
   if (msgType === 'post') {
     const text = firstString(content.text);

@@ -24,7 +24,7 @@ describe('FeishuApi', () => {
     vi.restoreAllMocks();
   });
 
-  it('sends plain text via post+md and preserves chunking', async () => {
+  it('sends plain text as interactive cards and preserves chunking', async () => {
     const createCalls: Array<{
       receive_id_type: string;
       receive_id: string;
@@ -64,12 +64,16 @@ describe('FeishuApi', () => {
     expect(createCalls.length).toBeGreaterThan(1);
     expect(createCalls.every((call) => call.receive_id_type === 'open_id')).toBe(true);
     expect(createCalls.every((call) => call.receive_id === 'ou_a')).toBe(true);
-    expect(createCalls.every((call) => call.msg_type === 'post')).toBe(true);
+    expect(createCalls.every((call) => call.msg_type === 'interactive')).toBe(true);
     expect(createCalls.every((call) => {
       const payload = JSON.parse(call.content) as {
-        zh_cn?: { content?: Array<Array<{ tag?: string; text?: string }>> };
+        schema?: string;
+        body?: { elements?: Array<{ tag?: string; content?: string }> };
       };
-      return payload.zh_cn?.content?.[0]?.[0]?.tag === 'md';
+      return payload.schema === '2.0'
+        && payload.body?.elements?.[0]?.tag === 'markdown'
+        && typeof payload.body.elements[0]?.content === 'string'
+        && payload.body.elements[0].content.length > 0;
     })).toBe(true);
   });
 
@@ -131,6 +135,48 @@ describe('FeishuApi', () => {
         }),
       },
     ]);
+  });
+
+  it('splits long agent-visible replies into multiple interactive cards', async () => {
+    const createCalls: Array<{ msg_type?: string; content?: string }> = [];
+    const sdkClient = {
+      im: {
+        message: {
+          create: vi.fn(async (payload: {
+            data: { msg_type?: string; content?: string };
+          }) => {
+            createCalls.push(payload.data);
+            return { code: 0, msg: 'ok' };
+          }),
+          reply: vi.fn(),
+        },
+        image: { create: vi.fn() },
+        file: { create: vi.fn() },
+        messageResource: { get: vi.fn() },
+      },
+    };
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient,
+    });
+
+    await api.sendText('ou_a', `默认助手 ·\n${'你好hello'.repeat(300)}`);
+
+    expect(createCalls.length).toBeGreaterThan(1);
+    expect(createCalls.every((call) => call.msg_type === 'interactive')).toBe(true);
+    expect(createCalls.every((call) => {
+      const payload = JSON.parse(call.content ?? '{}') as {
+        schema?: string;
+        body?: { elements?: Array<{ tag?: string; content?: string }> };
+      };
+      return payload.schema === '2.0'
+        && payload.body?.elements?.[0]?.tag === 'markdown'
+        && typeof payload.body.elements[0]?.content === 'string'
+        && payload.body.elements[0].content.length > 0;
+    })).toBe(true);
   });
 
   it('replies to source feishu message via sdk reply', async () => {
@@ -226,9 +272,20 @@ describe('FeishuApi', () => {
     });
 
     expect(replyCalls).toHaveLength(1);
-    expect(replyCalls[0]).toMatchObject({
-      content: JSON.stringify({ text: 'thread reply' }),
-      reply_in_thread: true,
+    expect(replyCalls[0]?.reply_in_thread).toBe(true);
+    expect(JSON.parse(replyCalls[0]?.content ?? '{}')).toEqual({
+      schema: '2.0',
+      config: {
+        wide_screen_mode: true,
+      },
+      body: {
+        elements: [
+          {
+            tag: 'markdown',
+            content: 'thread reply',
+          },
+        ],
+      },
     });
   });
 
@@ -344,6 +401,184 @@ describe('FeishuApi', () => {
     });
   });
 
+  it('migrates legacy action rows in interactive cards into column_set buttons', async () => {
+    const createCalls: Array<{ msg_type: string; content: string }> = [];
+    const sdkClient = {
+      im: {
+        message: {
+          create: vi.fn(async (payload: { data: { msg_type: string; content: string } }) => {
+            createCalls.push(payload.data);
+            return { code: 0, msg: 'ok' };
+          }),
+          reply: vi.fn(),
+        },
+        image: { create: vi.fn() },
+        file: { create: vi.fn() },
+        messageResource: { get: vi.fn() },
+      },
+    };
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient,
+    });
+
+    await api.sendMessage('ou_a', {
+      msgType: 'interactive',
+      content: {
+        schema: '2.0',
+        body: {
+          elements: [
+            {
+              tag: 'markdown',
+              content: '**执行成功**',
+            },
+            {
+              tag: 'action',
+              actions: [
+                {
+                  tag: 'button',
+                  type: 'primary',
+                  text: {
+                    tag: 'plain_text',
+                    content: '查看帮助',
+                  },
+                  value: {
+                    gateway_cmd: '/help',
+                  },
+                },
+                {
+                  tag: 'button',
+                  text: {
+                    tag: 'plain_text',
+                    content: '打开链接',
+                  },
+                  multi_url: {
+                    url: 'https://example.com',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(JSON.parse(createCalls[0]?.content ?? '{}')).toEqual({
+      schema: '2.0',
+      body: {
+        elements: [
+          {
+            tag: 'markdown',
+            content: '**执行成功**',
+          },
+          {
+            tag: 'column_set',
+            flex_mode: 'flow',
+            columns: [
+              {
+                tag: 'column',
+                width: 'weighted',
+                weight: 1,
+                vertical_align: 'top',
+                elements: [
+                  {
+                    tag: 'button',
+                    type: 'primary',
+                    text: {
+                      tag: 'plain_text',
+                      content: '查看帮助',
+                    },
+                    value: {
+                      gateway_cmd: '/help',
+                    },
+                  },
+                ],
+              },
+              {
+                tag: 'column',
+                width: 'weighted',
+                weight: 1,
+                vertical_align: 'top',
+                elements: [
+                  {
+                    tag: 'button',
+                    text: {
+                      tag: 'plain_text',
+                      content: '打开链接',
+                    },
+                    multi_url: {
+                      url: 'https://example.com',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it('migrates legacy note blocks in interactive cards into markdown elements', async () => {
+    const createCalls: Array<{ msg_type: string; content: string }> = [];
+    const sdkClient = {
+      im: {
+        message: {
+          create: vi.fn(async (payload: { data: { msg_type: string; content: string } }) => {
+            createCalls.push(payload.data);
+            return { code: 0, msg: 'ok' };
+          }),
+          reply: vi.fn(),
+        },
+        image: { create: vi.fn() },
+        file: { create: vi.fn() },
+        messageResource: { get: vi.fn() },
+      },
+    };
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient,
+    });
+
+    await api.sendMessage('ou_a', {
+      msgType: 'interactive',
+      content: {
+        schema: '2.0',
+        body: {
+          elements: [
+            {
+              tag: 'note',
+              elements: [
+                {
+                  tag: 'plain_text',
+                  content: '查看可用 agent 列表，并在不同工作区之间切换。',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(JSON.parse(createCalls[0]?.content ?? '{}')).toEqual({
+      schema: '2.0',
+      body: {
+        elements: [
+          {
+            tag: 'markdown',
+            content: '查看可用 agent 列表，并在不同工作区之间切换。',
+          },
+        ],
+      },
+    });
+  });
+
   it('updates interactive messages using template shorthand', async () => {
     const updateCalls: Array<{
       message_id: string;
@@ -410,7 +645,7 @@ describe('FeishuApi', () => {
     ]);
   });
 
-  it('normalizes post text shorthand before sending', async () => {
+  it('normalizes post text shorthand into an interactive markdown card before sending', async () => {
     const createCalls: Array<{ msg_type: string; content: string }> = [];
     const sdkClient = {
       im: {
@@ -439,12 +674,118 @@ describe('FeishuApi', () => {
       content: '今天完成了网关改造',
     });
 
+    expect(createCalls[0]?.msg_type).toBe('interactive');
     expect(JSON.parse(createCalls[0]?.content ?? '{}')).toEqual({
-      zh_cn: {
-        title: '',
-        content: [[{ tag: 'text', text: '今天完成了网关改造' }]],
+      schema: '2.0',
+      config: {
+        wide_screen_mode: true,
+      },
+      body: {
+        elements: [
+          {
+            tag: 'markdown',
+            content: '今天完成了网关改造',
+          },
+        ],
       },
     });
+  });
+
+  it('normalizes markdown messages into interactive markdown cards before sending', async () => {
+    const createCalls: Array<{ msg_type: string; content: string }> = [];
+    const sdkClient = {
+      im: {
+        message: {
+          create: vi.fn(async (payload: { data: { msg_type: string; content: string } }) => {
+            createCalls.push(payload.data);
+            return { code: 0, msg: 'ok' };
+          }),
+          reply: vi.fn(),
+        },
+        image: { create: vi.fn() },
+        file: { create: vi.fn() },
+        messageResource: { get: vi.fn() },
+      },
+    };
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient,
+    });
+
+    await api.sendMessage('ou_a', {
+      msgType: 'markdown',
+      content: '# 标题\n- 列表',
+    });
+
+    expect(createCalls[0]?.msg_type).toBe('interactive');
+    expect(JSON.parse(createCalls[0]?.content ?? '{}')).toEqual({
+      schema: '2.0',
+      config: {
+        wide_screen_mode: true,
+      },
+      body: {
+        elements: [
+          {
+            tag: 'markdown',
+            content: '# 标题\n- 列表',
+          },
+        ],
+      },
+    });
+  });
+
+  it('flattens structured post payloads into interactive markdown cards', async () => {
+    const createCalls: Array<{ msg_type: string; content: string }> = [];
+    const sdkClient = {
+      im: {
+        message: {
+          create: vi.fn(async (payload: { data: { msg_type: string; content: string } }) => {
+            createCalls.push(payload.data);
+            return { code: 0, msg: 'ok' };
+          }),
+          reply: vi.fn(),
+        },
+        image: { create: vi.fn() },
+        file: { create: vi.fn() },
+        messageResource: { get: vi.fn() },
+      },
+    };
+
+    const api = new FeishuApi({
+      appId: 'cli_xxx',
+      appSecret: 'yyy',
+      timeoutMs: 2000,
+      sdkClient,
+    });
+
+    await api.sendMessage('ou_a', {
+      msgType: 'post',
+      content: {
+        zh_cn: {
+          title: '日报',
+          content: [
+            [
+              { tag: 'text', text: '今天完成 A' },
+              { tag: 'md', text: '\n- 修复卡片\n- 补测试' },
+            ],
+          ],
+        },
+      },
+    });
+
+    expect(createCalls[0]?.msg_type).toBe('interactive');
+    const payload = JSON.parse(createCalls[0]?.content ?? '{}') as {
+      schema?: string;
+      body?: { elements?: Array<{ tag?: string; content?: string }> };
+    };
+    expect(payload.schema).toBe('2.0');
+    expect(payload.body?.elements?.[0]?.tag).toBe('markdown');
+    expect(payload.body?.elements?.[0]?.content).toContain('日报');
+    expect(payload.body?.elements?.[0]?.content).toContain('今天完成 A');
+    expect(payload.body?.elements?.[0]?.content).toContain('- 修复卡片');
   });
 
   it('normalizes uppercase msgType before sending', async () => {
@@ -477,8 +818,21 @@ describe('FeishuApi', () => {
     });
 
     expect(createCalls).toHaveLength(1);
-    expect(createCalls[0]?.msg_type).toBe('text');
-    expect(createCalls[0]?.content).toBe(JSON.stringify({ text: 'hello' }));
+    expect(createCalls[0]?.msg_type).toBe('interactive');
+    expect(JSON.parse(createCalls[0]?.content ?? '{}')).toEqual({
+      schema: '2.0',
+      config: {
+        wide_screen_mode: true,
+      },
+      body: {
+        elements: [
+          {
+            tag: 'markdown',
+            content: 'hello',
+          },
+        ],
+      },
+    });
   });
 
   it('rejects empty text content before calling sdk', async () => {

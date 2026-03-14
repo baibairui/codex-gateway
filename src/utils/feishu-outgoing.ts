@@ -15,20 +15,8 @@ export function normalizeFeishuStructuredMessage(
       : (typeof content.text === 'string' ? content.text : ''));
   const normalized = markdownText.trim();
   return {
-    msgType: 'post',
-    content: {
-      zh_cn: {
-        title: '',
-        content: [
-          [
-            {
-              tag: 'md',
-              text: normalized || '(empty markdown)',
-            },
-          ],
-        ],
-      },
-    },
+    msgType: 'markdown',
+    content: normalized || '(empty markdown)',
   };
 }
 

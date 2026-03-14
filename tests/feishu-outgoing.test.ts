@@ -3,22 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { isFeishuUpdateMessageType, normalizeFeishuStructuredMessage } from '../src/utils/feishu-outgoing.js';
 
 describe('normalizeFeishuStructuredMessage', () => {
-  it('rewrites markdown messages as post messages with md tags for Feishu rendering', () => {
+  it('preserves markdown messages for downstream card-only Feishu rendering', () => {
     expect(normalizeFeishuStructuredMessage('markdown', '# 标题\n- 列表')).toEqual({
-      msgType: 'post',
-      content: {
-        zh_cn: {
-          title: '',
-          content: [
-            [
-              {
-                tag: 'md',
-                text: '# 标题\n- 列表',
-              },
-            ],
-          ],
-        },
-      },
+      msgType: 'markdown',
+      content: '# 标题\n- 列表',
     });
   });
 

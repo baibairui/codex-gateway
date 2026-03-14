@@ -575,15 +575,18 @@ function buildFeishuOutboundMessageProtocolPrompt(userPrompt: string): string {
     '7. 若用户输入中包含 local_image_path/local_file_path/local_audio_path/local_media_path/local_sticker_path，必须先读取对应本地文件并给出分析结果，不要先追问目标。',
     '8. 若明确需要回发飞书非文本消息，且你已经拿到本地文件路径，可在 JSON content 中直接提供 local_image_path/local_file_path/local_audio_path/local_media_path，网关会自动上传后发送。',
     '9. 回发飞书 interactive 时，可优先使用简写 content：{"template_id":"...","template_variable":{...}}，网关会自动转换为模板卡片格式。',
-    '10. 回发飞书 post 时，若只是普通富文本段落，可直接把 content 写成字符串，网关会自动转换为基础 post 格式。',
+    '9.1 若使用飞书 interactive 自定义 schema 2.0 卡片，禁止使用 `tag:"action"` 或 `tag:\'action\'`。',
+    '9.1.1 飞书已不再支持 `action` 这个 schema 2.0 容器。',
+    '9.2 需要按钮行时，改用 `column_set` + `column` + `button`，表单提交继续使用 `form` + `button` + `action_type:"form_submit"`。',
+    '10. 回发飞书 structured markdown 或 post 时，网关会统一转换为 interactive 卡片；新回复不要再把 post 当成首选格式。',
     '11. 回发飞书 sticker 时，若已有本地贴纸文件，可直接提供 local_sticker_path，网关会自动上传后发送。',
-    '12. 选择消息类型时遵循：简单一句话优先 text；多段说明/列表/摘要优先 post；需要强结构化展示、模板卡片或交互按钮时用 interactive。',
-    '12.1 若是在汇报浏览器执行中的阶段性进度，且内容天然包含 Action/Evidence/Result/Next step 这类多段结构，优先使用 post，不要把多段进度压成一条 text。',
-    '12.2 若是在请求用户接管浏览器步骤，或说明阻塞原因、风险点、待确认项，且内容天然是多段说明/清单，优先使用 post。',
-    '12.3 若是在汇报浏览器任务已完成，并需要总结已执行动作、最终结果、产出物和后续建议，且内容天然是多段摘要，优先使用 post。',
+    '12. 选择消息类型时遵循：简单一句话优先 text；多段说明/列表/摘要、浏览器阶段性进度、阻塞说明和完成总结优先 interactive。',
+    '12.1 若是在汇报浏览器执行中的阶段性进度，且内容天然包含 Action/Evidence/Result/Next step 这类多段结构，优先使用 interactive，并在卡片 markdown 中分段呈现。',
+    '12.2 若是在请求用户接管浏览器步骤，或说明阻塞原因、风险点、待确认项，且内容天然是多段说明/清单，优先使用 interactive。',
+    '12.3 若是在汇报浏览器任务已完成，并需要总结已执行动作、最终结果、产出物和后续建议，且内容天然是多段摘要，优先使用 interactive。',
     `12.4 ${BROWSER_HANDOFF_TRIGGER_PROMPT}`,
     '13. image/file/audio/media/sticker/share_chat/share_user 只在用户明确要求发送对应类型，或你已经拿到可发送资源（如 key、本地路径、分享对象ID）时使用。',
-    '14. 如果不确定该用哪种类型，优先退回 text，不要为了“看起来高级”滥用 post 或 interactive。',
+    '14. 如果不确定该用哪种类型，优先退回 text；一旦需要结构化展示，优先 interactive，不要再把 post 当默认选项。',
     '',
     '用户输入如下：',
     userPrompt,
@@ -1602,6 +1605,7 @@ ${clipMessage(text, 500)}
       const streamId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       let streamedText = '';
       let lastFeishuStreamFlushAt = 0;
+      let lastFeishuStreamSnapshot = '';
       // 普通对话始终使用当前可见 agent，初始化引导仅通过显式引导流程触发，
       // 避免 memory-onboarding 线程长期劫持后续会话。
       runtimeAgent = currentAgent;
@@ -1686,14 +1690,18 @@ ${clipMessage(userVisibleOutput, 500)}
             }
             lastFeishuStreamFlushAt = now;
             const snapshot = streamedText;
-            lastStreamSend = deps.sendStreamingText(channel, userId, streamId, snapshot, false).catch(async (err) => {
-              log.error('handleText onMessage 推送失败', err);
-              try {
-                await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
-              } catch (fallbackErr) {
-                log.error('handleText onMessage fallback 推送失败', fallbackErr);
-              }
-            });
+            lastStreamSend = deps.sendStreamingText(channel, userId, streamId, snapshot, false)
+              .then(() => {
+                lastFeishuStreamSnapshot = snapshot;
+              })
+              .catch(async (err) => {
+                log.error('handleText onMessage 推送失败', err);
+                try {
+                  await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+                } catch (fallbackErr) {
+                  log.error('handleText onMessage fallback 推送失败', fallbackErr);
+                }
+              });
             return;
           }
           lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch(async (err) => {
@@ -1707,10 +1715,10 @@ ${clipMessage(userVisibleOutput, 500)}
         },
       });
       const elapsed = Date.now() - startTime;
-      if (channel === 'feishu' && deps.sendStreamingText && streamedText) {
+      await lastStreamSend;
+      if (channel === 'feishu' && deps.sendStreamingText && streamedText && streamedText !== lastFeishuStreamSnapshot) {
         await deps.sendStreamingText(channel, userId, streamId, streamedText, true);
       }
-      await lastStreamSend;
       if (!sawAgentOutput) {
         await sendAgentProgress(deps, channel, userId, runtimeAgent, 'done');
       }

@@ -373,79 +373,17 @@ function enqueueOutboundSend(
   return next;
 }
 
-const handleChatText = createChatHandler({
-  sessionStore,
-  rateLimitStore,
-  codexRunner,
-  codexHomeDir: resolveRunnerHomeDir(config.codexProvider),
-  agentWorkspaceManager,
-  workspacePublisher,
-  runnerEnabled: config.runnerEnabled,
-  defaultProvider: config.codexProvider,
-  resolveDefaultModel: resolveChatDefaultModel,
-  resolveRunner,
-  defaultSearch: config.codexSearch,
-  reminderDbPath,
-  sendText,
-  openCodeAuthFlowManager,
-  speechService: createSpeechService({
-    speech: config.speech,
-    apiTimeoutMs: config.apiTimeoutMs,
-  }),
-});
-
-const reminderStore = new ReminderStore(reminderDbPath);
-const reminderDispatcher = new ReminderDispatcher({
-  store: reminderStore,
-  sendText,
-  onTriggerAgent: async (reminder) => {
-    const sessionUserKey = resolveUserKey(reminder.userId);
-    await runInUserQueue(sessionUserKey, async () => {
-      await handleChatText({
-        channel: reminder.channel,
-        userId: reminder.userId,
-        content: reminder.message,
-        reminderTrigger: {
-          reminderId: reminder.id,
-          message: reminder.message,
-          sourceAgentId: reminder.sourceAgentId,
-        },
-      });
-    });
-  },
-});
-
-const memorySteward = new MemorySteward({
-  sessionStore,
-  agentWorkspaceManager,
-  codexRunner,
-  enabled: config.memoryStewardEnabled,
-  intervalMs: config.memoryStewardIntervalHours * 60 * 60_000,
-  model: config.codexModel,
-});
-
-const app = createApp({
-  wecomEnabled: config.wecomEnabled,
-  feishuEnabled: config.feishuEnabled,
-  feishuAppId: config.feishuAppId,
-  feishuAppSecret: config.feishuAppSecret,
-  wecomCrypto,
-  allowFrom: config.allowFrom,
-  internalApiToken,
-  gatewayRootDir,
-  browserAutomation,
-  feishuVerificationToken: config.feishuVerificationToken,
-  feishuLongConnection: feishuStatusSummary.mode === 'long-connection',
-  feishuGroupRequireMention: feishuStatusSummary.groupRequireMention,
-  feishuDocBaseUrlConfigured: feishuStatusSummary.docBaseUrlConfigured,
-  feishuStartupHelpEnabled: feishuStatusSummary.startupHelpEnabled,
-  feishuStartupHelpAdminConfigured: feishuStatusSummary.startupHelpAdminConfigured,
-  isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
-  handleText: appDepsHandleText,
-  handleFeishuCardAction: appDepsHandleFeishuCardAction,
-});
-
 async function sendText(channel: 'wecom' | 'feishu', userId: string, content: string): Promise<void> {
+  await enqueueSendText(channel, userId, content);
+}
+
+async function sendStreamingText(
+  channel: 'wecom' | 'feishu',
+  userId: string,
+  _streamId: string,
+  content: string,
+  _done: boolean,
+): Promise<void> {
   await enqueueSendText(channel, userId, content);
 }
 
@@ -548,6 +486,79 @@ async function enqueueSendText(channel: 'wecom' | 'feishu', userId: string, cont
     });
   });
 }
+
+const handleChatText = createChatHandler({
+  sessionStore,
+  rateLimitStore,
+  codexRunner,
+  codexHomeDir: resolveRunnerHomeDir(config.codexProvider),
+  agentWorkspaceManager,
+  workspacePublisher,
+  runnerEnabled: config.runnerEnabled,
+  defaultProvider: config.codexProvider,
+  resolveDefaultModel: resolveChatDefaultModel,
+  resolveRunner,
+  defaultSearch: config.codexSearch,
+  reminderDbPath,
+  sendText,
+  sendStreamingText,
+  openCodeAuthFlowManager,
+  speechService: createSpeechService({
+    speech: config.speech,
+    apiTimeoutMs: config.apiTimeoutMs,
+  }),
+});
+
+const reminderStore = new ReminderStore(reminderDbPath);
+const reminderDispatcher = new ReminderDispatcher({
+  store: reminderStore,
+  sendText,
+  onTriggerAgent: async (reminder) => {
+    const sessionUserKey = resolveUserKey(reminder.userId);
+    await runInUserQueue(sessionUserKey, async () => {
+      await handleChatText({
+        channel: reminder.channel,
+        userId: reminder.userId,
+        content: reminder.message,
+        reminderTrigger: {
+          reminderId: reminder.id,
+          message: reminder.message,
+          sourceAgentId: reminder.sourceAgentId,
+        },
+      });
+    });
+  },
+});
+
+const memorySteward = new MemorySteward({
+  sessionStore,
+  agentWorkspaceManager,
+  codexRunner,
+  enabled: config.memoryStewardEnabled,
+  intervalMs: config.memoryStewardIntervalHours * 60 * 60_000,
+  model: config.codexModel,
+});
+
+const app = createApp({
+  wecomEnabled: config.wecomEnabled,
+  feishuEnabled: config.feishuEnabled,
+  feishuAppId: config.feishuAppId,
+  feishuAppSecret: config.feishuAppSecret,
+  wecomCrypto,
+  allowFrom: config.allowFrom,
+  internalApiToken,
+  gatewayRootDir,
+  browserAutomation,
+  feishuVerificationToken: config.feishuVerificationToken,
+  feishuLongConnection: feishuStatusSummary.mode === 'long-connection',
+  feishuGroupRequireMention: feishuStatusSummary.groupRequireMention,
+  feishuDocBaseUrlConfigured: feishuStatusSummary.docBaseUrlConfigured,
+  feishuStartupHelpEnabled: feishuStatusSummary.startupHelpEnabled,
+  feishuStartupHelpAdminConfigured: feishuStatusSummary.startupHelpAdminConfigured,
+  isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
+  handleText: appDepsHandleText,
+  handleFeishuCardAction: appDepsHandleFeishuCardAction,
+});
 
 async function enrichInboundContent(channel: 'wecom' | 'feishu', content: string): Promise<InboundEnrichResult> {
   if (channel !== 'feishu' || !feishuApi) {
