@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { DesktopManager } from '../src/services/desktop-manager.js';
+import { createNutJsDesktopAutomationAdapter, DesktopManager } from '../src/services/desktop-manager.js';
 
 describe('DesktopManager', () => {
   it('launches apps through open -a', async () => {
@@ -53,6 +53,53 @@ describe('DesktopManager', () => {
     expect(filePath).toBe(path.join(tempDir, 'desktop-step.png'));
     expect(path.isAbsolute(filePath)).toBe(true);
     expect(adapter.screenshot).toHaveBeenCalledWith(path.join(tempDir, 'desktop-step.png'));
+  });
+
+  it('maps hotkeys and screenshots through the nut.js adapter', async () => {
+    const pressKey = vi.fn(async () => undefined);
+    const releaseKey = vi.fn(async () => undefined);
+    const capture = vi.fn(async () => '/tmp/desktop-step.png');
+    const nutJs = {
+      mouse: {
+        setPosition: vi.fn(async () => undefined),
+        click: vi.fn(async () => undefined),
+        doubleClick: vi.fn(async () => undefined),
+        drag: vi.fn(async () => undefined),
+      },
+      keyboard: {
+        type: vi.fn(async () => undefined),
+        pressKey,
+        releaseKey,
+      },
+      screen: {
+        capture,
+      },
+      straightTo: vi.fn(async (target) => [target]),
+      Point: class Point {
+        constructor(public x: number, public y: number) {}
+      },
+      Button: {
+        LEFT: 'LEFT',
+        RIGHT: 'RIGHT',
+      },
+      FileType: {
+        PNG: '.png',
+      },
+      Key: {
+        LeftCmd: 'LeftCmd',
+        LeftShift: 'LeftShift',
+        Return: 'Return',
+      },
+    };
+
+    const adapter = await createNutJsDesktopAutomationAdapter(nutJs as never);
+
+    await adapter.hotkey(['Meta', 'Shift', 'Enter']);
+    await adapter.screenshot('/tmp/desktop-step.png');
+
+    expect(pressKey).toHaveBeenCalledWith('LeftCmd', 'LeftShift', 'Return');
+    expect(releaseKey).toHaveBeenCalledWith('LeftCmd', 'LeftShift', 'Return');
+    expect(capture).toHaveBeenCalledWith('desktop-step', '.png', '/tmp');
   });
 });
 

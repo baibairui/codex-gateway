@@ -610,6 +610,26 @@ codexclaw help
 - 不允许在页面状态未知时连续点击或连续输入
 - 只允许走 gateway 的 `browser_*` MCP 工具链路
 
+### 桌面软件操作规范
+
+当前已支持通过 `gateway-desktop` skill 执行 macOS 桌面动作，定位是“给已有视觉 agent 一只手”，不是再造一套桌面视觉 agent。
+
+边界：
+
+- 仅支持 macOS
+- 仅操作前台可见应用
+- 仅提供启动应用、激活应用、鼠标、键盘、拖拽、截图这类原子动作
+- 不提供控件树读取、OCR、后台窗口操作或任意 shell 执行
+
+首次使用前，需要给运行 gateway 的宿主应用授予：
+
+- `辅助功能 (Accessibility)`
+- `屏幕录制 (Screen Recording)`
+
+这里的宿主应用通常是 `Terminal`、`iTerm`、`Warp` 或 `VS Code` 内置终端。
+
+这个能力不新增用户侧 `.env` 配置；内部 API 地址和鉴权 token 都由 gateway 在运行时自动注入给 agent 进程。
+
 ### 提醒与定时任务
 
 定时任务不需要专门记命令，直接使用自然语言即可。

@@ -35,6 +35,8 @@ interface DesktopManagerOptions {
   screenshotDir?: string;
 }
 
+type NutJsLike = typeof import('@nut-tree-fork/nut-js');
+
 export class DesktopManager {
   private readonly adapter: DesktopAutomationAdapter;
   private readonly commandRunner: CommandRunner;
@@ -104,10 +106,103 @@ export class DesktopManager {
   }
 }
 
+export async function createNutJsDesktopAutomationAdapter(nutJsModule?: NutJsLike): Promise<DesktopAutomationAdapter> {
+  const nutJs = nutJsModule ?? await import('@nut-tree-fork/nut-js');
+
+  return {
+    async moveMouse(coordinate) {
+      await nutJs.mouse.setPosition(new nutJs.Point(coordinate.x, coordinate.y));
+    },
+    async click(input) {
+      if (input.coordinate) {
+        await nutJs.mouse.setPosition(new nutJs.Point(input.coordinate.x, input.coordinate.y));
+      }
+      const button = (input.button === 'right' ? nutJs.Button.RIGHT : nutJs.Button.LEFT) as import('@nut-tree-fork/nut-js').Button;
+      if (input.double) {
+        await nutJs.mouse.doubleClick(button);
+        return;
+      }
+      await nutJs.mouse.click(button);
+    },
+    async drag(input) {
+      await nutJs.mouse.setPosition(new nutJs.Point(input.from.x, input.from.y));
+      const path = await nutJs.straightTo(new nutJs.Point(input.to.x, input.to.y));
+      await nutJs.mouse.drag(path);
+    },
+    async typeText(text) {
+      await nutJs.keyboard.type(text);
+    },
+    async pressKey(key) {
+      const mapped = mapNutKey(nutJs, key);
+      await nutJs.keyboard.pressKey(mapped);
+      await nutJs.keyboard.releaseKey(mapped);
+    },
+    async hotkey(keys) {
+      const mapped = keys.map((key) => mapNutKey(nutJs, key));
+      await nutJs.keyboard.pressKey(...mapped);
+      await nutJs.keyboard.releaseKey(...mapped);
+    },
+    async screenshot(filePath) {
+      const parsed = path.parse(filePath);
+      await nutJs.screen.capture(parsed.name, nutJs.FileType.PNG, parsed.dir);
+    },
+  };
+}
+
 async function defaultCommandRunner(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   const result = await execFileAsync(file, args);
   return {
     stdout: result.stdout,
     stderr: result.stderr,
   };
+}
+
+function mapNutKey(nutJs: NutJsLike, key: string): import('@nut-tree-fork/nut-js').Key {
+  const normalized = key.trim();
+  switch (normalized.toLowerCase()) {
+    case 'meta':
+    case 'cmd':
+    case 'command':
+      return nutJs.Key.LeftCmd;
+    case 'shift':
+      return nutJs.Key.LeftShift;
+    case 'ctrl':
+    case 'control':
+      return nutJs.Key.LeftControl;
+    case 'alt':
+    case 'option':
+      return nutJs.Key.LeftAlt;
+    case 'enter':
+    case 'return':
+      return nutJs.Key.Return;
+    case 'tab':
+      return nutJs.Key.Tab;
+    case 'space':
+      return nutJs.Key.Space;
+    case 'up':
+    case 'arrowup':
+      return nutJs.Key.Up;
+    case 'down':
+    case 'arrowdown':
+      return nutJs.Key.Down;
+    case 'left':
+    case 'arrowleft':
+      return nutJs.Key.Left;
+    case 'right':
+    case 'arrowright':
+      return nutJs.Key.Right;
+    default: {
+      if (/^[a-z]$/i.test(normalized)) {
+        return nutJs.Key[normalized.toUpperCase() as keyof typeof nutJs.Key] as import('@nut-tree-fork/nut-js').Key;
+      }
+      if (/^[0-9]$/.test(normalized)) {
+        return nutJs.Key[`Num${normalized}` as keyof typeof nutJs.Key] as import('@nut-tree-fork/nut-js').Key;
+      }
+      const direct = nutJs.Key[normalized as keyof typeof nutJs.Key];
+      if (direct !== undefined) {
+        return direct as import('@nut-tree-fork/nut-js').Key;
+      }
+      throw new Error(`Unsupported desktop key: ${key}`);
+    }
+  }
 }
