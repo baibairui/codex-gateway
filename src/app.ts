@@ -18,6 +18,8 @@ interface AppDeps {
   feishuVerificationToken?: string;
   feishuLongConnection?: boolean;
   feishuGroupRequireMention?: boolean;
+  feishuBotOpenId?: string;
+  feishuBotName?: string;
   feishuDocBaseUrlConfigured?: boolean;
   feishuStartupHelpEnabled?: boolean;
   feishuStartupHelpAdminConfigured?: boolean;
@@ -55,6 +57,8 @@ interface AppDeps {
 interface FeishuEventDeps {
   allowFrom: string;
   feishuGroupRequireMention?: boolean;
+  feishuBotOpenId?: string;
+  feishuBotName?: string;
   isDuplicateMessage: (msgId?: string) => boolean;
   handleText: AppDeps['handleText'];
   handleFeishuCardAction?: AppDeps['handleFeishuCardAction'];
@@ -150,11 +154,13 @@ function shouldHandleFeishuMessage(input: {
   rawContent: string;
   mentions: unknown;
   requireMentionInGroup: boolean;
+  botOpenId?: string;
+  botName?: string;
 }): boolean {
   if (!input.requireMentionInGroup || input.chatType === 'p2p' || !input.chatType) {
     return true;
   }
-  if (Array.isArray(input.mentions) && input.mentions.length > 0) {
+  if (hasFeishuBotMention(input.mentions, input.botOpenId, input.botName)) {
     return true;
   }
   const parsed = parseJsonObject(input.rawContent);
@@ -165,9 +171,47 @@ function shouldHandleFeishuMessage(input: {
     return true;
   }
   if (input.messageType.trim().toLowerCase() === 'post') {
+    if (hasFeishuBotMention(input.mentions, input.botOpenId, input.botName)) {
+      return true;
+    }
+    if (input.botOpenId || input.botName) {
+      return false;
+    }
     return hasFeishuPostAtTag(parsed);
   }
   return false;
+}
+
+function hasFeishuBotMention(mentions: unknown, botOpenId?: string, botName?: string): boolean {
+  if (!Array.isArray(mentions) || mentions.length === 0) {
+    return false;
+  }
+  const targetOpenId = botOpenId?.trim();
+  const targetName = botName?.trim();
+  return mentions.some((item) => {
+    const mention = asObject(item);
+    if (!mention) {
+      return false;
+    }
+    const mentionName = typeof mention.name === 'string' ? mention.name.trim() : '';
+    if (targetName && mentionName === targetName) {
+      return true;
+    }
+    const mentionIdValue = mention.id;
+    if (targetOpenId) {
+      if (typeof mentionIdValue === 'string' && mentionIdValue.trim() === targetOpenId) {
+        return true;
+      }
+      const mentionIdObject = asObject(mentionIdValue);
+      if (typeof mentionIdObject?.open_id === 'string' && mentionIdObject.open_id.trim() === targetOpenId) {
+        return true;
+      }
+      if (typeof mention.open_id === 'string' && mention.open_id.trim() === targetOpenId) {
+        return true;
+      }
+    }
+    return false;
+  });
 }
 
 export function dispatchFeishuMessageReceiveEvent(
@@ -194,6 +238,8 @@ export function dispatchFeishuMessageReceiveEvent(
     rawContent,
     mentions,
     requireMentionInGroup: deps.feishuGroupRequireMention !== false,
+    botOpenId: deps.feishuBotOpenId,
+    botName: deps.feishuBotName,
   })) {
     log.info('飞书群消息忽略：未命中 @ 触发条件', {
       openId,
@@ -692,6 +738,9 @@ export function createApp(deps: AppDeps) {
         const event = (body.event ?? {}) as Record<string, unknown>;
         const result = dispatchFeishuMessageReceiveEvent({
           allowFrom: deps.allowFrom,
+          feishuGroupRequireMention: deps.feishuGroupRequireMention,
+          feishuBotOpenId: deps.feishuBotOpenId,
+          feishuBotName: deps.feishuBotName,
           isDuplicateMessage: deps.isDuplicateMessage,
           handleText: deps.handleText,
         }, event);
