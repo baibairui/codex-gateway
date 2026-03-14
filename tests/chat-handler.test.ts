@@ -687,7 +687,7 @@ local_image_path=${sourcePath}`,
     expect(fs.readFileSync(match![1], 'utf8')).toBe('fake-image');
   });
 
-  it('injects a transcript block into the prompt when speech service processes inbound audio', async () => {
+  it('uses transcript text as the effective query when speech service continues inbound audio', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-handler-inbound-audio-'));
@@ -704,8 +704,9 @@ local_image_path=${sourcePath}`,
     });
     sessionStore.setCurrentAgent('u1', 'a1');
     const run = vi.fn(async () => ({ threadId: 'thread_audio_1', rawOutput: '' }));
-    const processInboundAudio = vi.fn(async ({ prompt }: { prompt: string }) => ({
-      prompt: `${prompt}\n[语音输入转写]\nsource=feishu\ntranscript=你好，帮我总结一下`,
+    const processInboundAudio = vi.fn(async () => ({
+      type: 'continue' as const,
+      prompt: '你好，帮我总结一下',
     }));
     const handler = createChatHandler({
       sessionStore,
@@ -746,8 +747,65 @@ local_audio_path=${sourcePath}`,
 
     const runInput = run.mock.calls[0]?.[0];
     const prompt = String(runInput?.prompt ?? '');
-    expect(prompt).toContain('[语音输入转写]');
-    expect(prompt).toContain('transcript=你好，帮我总结一下');
+    expect(prompt).toContain('你好，帮我总结一下');
+    expect(prompt).not.toContain('[语音输入转写]');
+    expect(prompt).not.toContain(sourcePath);
+  });
+
+  it('replies immediately and skips codex when speech service returns a direct reply', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-handler-inbound-audio-reply-'));
+    const workspaceDir = path.join(tempDir, 'workspace');
+    const sourceDir = path.join(tempDir, 'gateway-cache');
+    const sourcePath = path.join(sourceDir, 'sample.ogg');
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(sourcePath, Buffer.from('fake-audio'));
+    sessionStore.createAgent('u1', {
+      agentId: 'a1',
+      name: '测试Agent',
+      workspaceDir,
+    });
+    sessionStore.setCurrentAgent('u1', 'a1');
+    const run = vi.fn(async () => ({ threadId: 'thread_audio_1', rawOutput: '' }));
+    const processInboundAudio = vi.fn(async () => ({
+      type: 'reply' as const,
+      message: '你好，帮我总结一下',
+    }));
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      speechService: {
+        processInboundAudio,
+      },
+    });
+
+    await handler({
+      channel: 'feishu',
+      userId: 'u1',
+      content: `[飞书语音] file_key=file_1 duration=3200 file_name=voice.ogg mime_type=audio/ogg
+message_id=om_1
+[飞书附件元数据]
+local_audio_path=${sourcePath}`,
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '测试Agent ·\n你好，帮我总结一下');
   });
   it('falls back to visible default agent when current agent is hidden onboarding agent', async () => {
     const sendText = vi.fn(async () => undefined);
