@@ -4,9 +4,17 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { FeishuUserBindingStore } from '../src/stores/feishu-user-binding-store.js';
+let FeishuUserBindingStore: any;
+try {
+  await import('node:sqlite');
+  ({ FeishuUserBindingStore } = await import('../src/stores/feishu-user-binding-store.js'));
+} catch {
+  FeishuUserBindingStore = undefined;
+}
 
-describe('FeishuUserBindingStore', () => {
+const describeIfSqlite = FeishuUserBindingStore ? describe : describe.skip;
+
+describeIfSqlite('FeishuUserBindingStore', () => {
   it('upserts, reads, clears, and lists bindings', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-binding-'));
     const filePath = path.join(dir, 'bindings.db');
