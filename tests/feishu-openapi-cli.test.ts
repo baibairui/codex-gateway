@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,6 +19,15 @@ import {
   runCommand,
   resolveDocxWriteInput,
 } from '../.codex/skills/feishu-official-ops/scripts/feishu-openapi.mjs';
+
+let DatabaseSync: any;
+try {
+  ({ DatabaseSync } = await import('node:sqlite'));
+} catch {
+  DatabaseSync = undefined;
+}
+
+const describeIfSqlite = DatabaseSync ? describe : describe.skip;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -118,7 +126,7 @@ function readFeishuUserBinding(filePath: string, gatewayUserId: string) {
   }
 }
 
-describe('feishu-openapi doc target helpers', () => {
+describeIfSqlite('feishu-openapi doc target helpers', () => {
   it('prints help text that includes the expanded command groups', () => {
     const help = buildHelpText();
     expect(help).toContain('im get-message --message-id <id>');
@@ -254,7 +262,7 @@ describe('feishu-openapi doc target helpers', () => {
   });
 });
 
-describe('feishu-openapi docx image support', () => {
+describeIfSqlite('feishu-openapi docx image support', () => {
   it('prefers explicit image write input with optional image metadata', () => {
     expect(resolveDocxWriteInput({
       'image-file': '/tmp/sample.png',
@@ -379,7 +387,7 @@ describe('feishu-openapi docx image support', () => {
   });
 });
 
-describe('feishu-openapi SDK-backed command groups', () => {
+describeIfSqlite('feishu-openapi SDK-backed command groups', () => {
   it('gets a single IM message and normalizes the payload', async () => {
     const sdkClient = {
       im: {

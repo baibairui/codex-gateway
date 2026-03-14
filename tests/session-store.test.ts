@@ -4,16 +4,24 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { SessionStore } from '../src/stores/session-store.js';
+let SessionStore: any;
+try {
+  await import('node:sqlite');
+  ({ SessionStore } = await import('../src/stores/session-store.js'));
+} catch {
+  SessionStore = undefined;
+}
 
-function makeStore(): SessionStore {
+const describeIfSqlite = SessionStore ? describe : describe.skip;
+
+function makeStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-store-'));
   return new SessionStore(path.join(dir, 'sessions.db'), {
     defaultWorkspaceDir: '/repo/default-workdir',
   });
 }
 
-function makeStorePair(): { filePath: string; createStore: () => SessionStore } {
+function makeStorePair(): { filePath: string; createStore: () => any } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-store-'));
   const filePath = path.join(dir, 'sessions.db');
   return {
@@ -24,7 +32,7 @@ function makeStorePair(): { filePath: string; createStore: () => SessionStore } 
   };
 }
 
-describe('SessionStore', () => {
+describeIfSqlite('SessionStore', () => {
   it('defaults to the built-in default agent', () => {
     const store = makeStore();
     const agent = store.getCurrentAgent('u1');

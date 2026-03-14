@@ -28,6 +28,7 @@ import { installFeishuCanvasSkill } from './services/feishu-canvas-skill.js';
 import { installGatewayBrowserSkill, syncManagedGlobalSkills } from './services/gateway-browser-skill.js';
 import { OpenCodeAuthFlowManager, buildOpenCodeAuthSessionKey } from './services/opencode-auth-flow.js';
 import { pushFeishuStartupHelp } from './services/startup-help.js';
+import { createSpeechService } from './services/speech-service-factory.js';
 import { WeComApi } from './services/wecom-api.js';
 import { FeishuApi } from './services/feishu-api.js';
 import { WeComCrypto } from './utils/wecom-crypto.js';
@@ -387,6 +388,10 @@ const handleChatText = createChatHandler({
   reminderDbPath,
   sendText,
   openCodeAuthFlowManager,
+  speechService: createSpeechService({
+    speech: config.speech,
+    apiTimeoutMs: config.apiTimeoutMs,
+  }),
 });
 
 const reminderStore = new ReminderStore(reminderDbPath);

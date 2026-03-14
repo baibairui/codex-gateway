@@ -2,10 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const rootDir = path.resolve(import.meta.dirname, '..');
+const backupRootDir = path.resolve(import.meta.dirname, '..');
+const repoRootDir = path.resolve(import.meta.dirname, '../../..');
 
 function readScript(relPath: string): string {
-  return fs.readFileSync(path.join(rootDir, relPath), 'utf8');
+  const backupPath = path.join(backupRootDir, relPath);
+  if (fs.existsSync(backupPath)) {
+    return fs.readFileSync(backupPath, 'utf8');
+  }
+  return fs.readFileSync(path.join(repoRootDir, relPath), 'utf8');
 }
 
 describe('offline deployment scripts', () => {

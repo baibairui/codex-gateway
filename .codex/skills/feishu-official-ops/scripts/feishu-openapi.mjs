@@ -2,12 +2,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import process from 'node:process';
-import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { Client as LarkClient, Domain as LarkDomain, LoggerLevel as LarkLoggerLevel } from '@larksuiteoapi/node-sdk';
 import { buildDocxChildrenFromConvertPayload, buildDocxCreateNodes } from './docx-markdown.mjs';
 
+const require = createRequire(import.meta.url);
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
 const FEISHU_AUTH_BASE = 'https://open.feishu.cn/open-apis';
 const FEISHU_API_CATALOG_URL = 'https://open.feishu.cn/api_explorer/v1/api_catalog';
@@ -2123,6 +2124,7 @@ function upsertFeishuUserBinding(filePath, input) {
 
 function openFeishuUserBindingDb(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const DatabaseSync = getDatabaseSyncCtor();
   const db = new DatabaseSync(filePath);
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -2140,6 +2142,18 @@ function openFeishuUserBindingDb(filePath) {
     );
   `);
   return db;
+}
+
+function getDatabaseSyncCtor() {
+  try {
+    const sqlite = require('node:sqlite');
+    if (sqlite?.DatabaseSync) {
+      return sqlite.DatabaseSync;
+    }
+  } catch {
+    // Fall through to the shared error below.
+  }
+  throw new Error('node:sqlite is not available in the current Node runtime');
 }
 
 function getFeishuUserBindingFromDb(db, gatewayUserId) {

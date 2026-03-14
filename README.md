@@ -286,6 +286,27 @@ curl http://127.0.0.1:3000/healthz
 - `MEMORY_STEWARD_ENABLED=true`：默认开启后台记忆管家
 - `MEMORY_STEWARD_INTERVAL_HOURS=1`：默认每小时运行一次
 
+### 语音转写（Stage 1）
+
+- `SPEECH_ENABLED=true`：启用入站语音转写
+- `SPEECH_MODE=transcribe_and_reply|transcribe_only`
+- `SPEECH_STT_PROVIDER`：当前实现支持 `openai-compatible`
+- `SPEECH_STT_BASE_URL`：可选，默认 `https://api.openai.com/v1`
+- `SPEECH_STT_API_KEY_ENV`：读取 API Key 的环境变量名，默认 `OPENAI_API_KEY`
+- `SPEECH_STT_MODEL`：默认 `gpt-4o-mini-transcribe`
+- `SPEECH_AUDIO_MAX_SIZE_MB`
+- `SPEECH_AUDIO_MAX_DURATION_SEC`
+- `SPEECH_AUDIO_ALLOWED_MIME_TYPES`
+
+当前阶段的行为：
+
+- 入站语音先做 STT，再进入现有文本处理链路
+- `transcribe_and_reply`：把转写文本直接当作 query 继续交给 agent
+- `transcribe_only`：只把转写文本回给用户，不调用 agent
+- 当前首个完整闭环基于飞书入站语音；企微仍保留既有语音消息收发能力，但本阶段不包含新的企微入站下载链路
+- 当前不支持“把 agent 的文本回答自动合成为语音”
+- 如果 agent 已经拿到了 `local_audio_path`，仍然可以按既有能力回发音频文件
+
 ## 飞书接入
 
 飞书适合没有公网回调条件、或者更希望直接利用长连接模式的部署方式。
@@ -332,6 +353,7 @@ codexclaw doctor
 
 - 入站二进制消息会先下载到本地，再把 `local_*_path` 注入给 Codex
 - 当模型明确回发非文本且提供 `local_image_path/local_file_path/local_audio_path/local_media_path` 时，网关会先上传到飞书，再发送对应消息类型
+- 若启用 `SPEECH_ENABLED=true`，飞书入站 `audio` 还会在进入 agent 前先做一次 STT；`transcribe_only` 模式下不会调用 agent
 
 推送行为：
 
@@ -403,6 +425,7 @@ WECOM_ENABLED=false
 
 - 入站非文本消息会把 `media_id` 等关键信息注入给 Codex
 - 当模型明确回发企微非文本且提供 `local_image_path/local_file_path/local_audio_path/local_media_path` 时，网关会先上传素材，再发送对应消息类型
+- 当前阶段不会把 agent 的文本答案自动合成为企微语音；如需回发语音，仍需提供已有的 `local_audio_path`
 
 ## 登录与授权
 

@@ -108,7 +108,11 @@ interface SpeechServiceLike {
     channel: Channel;
     userId: string;
     workspaceDir: string;
-  }): Promise<{ prompt: string } | undefined>;
+  }): Promise<
+    | { type: 'continue'; prompt: string }
+    | { type: 'reply'; message: string }
+    | undefined
+  >;
 }
 
 interface AgentWorkspaceManagerLike {
@@ -1627,7 +1631,14 @@ ${clipMessage(text, 500)}
         userId,
         workspaceDir: resolveAgentWorkdir(runtimeAgent),
       });
-      const runtimePrompt = buildOutboundMessageProtocolPrompt(channel, speechPrompt?.prompt ?? normalizedPrompt);
+      if (speechPrompt?.type === 'reply') {
+        await deps.sendText(channel, userId, formatAgentVisibleReply(runtimeAgent, speechPrompt.message));
+        return;
+      }
+      const runtimePrompt = buildOutboundMessageProtocolPrompt(
+        channel,
+        speechPrompt?.prompt ?? normalizedPrompt,
+      );
       await sendAgentProgress(deps, channel, userId, runtimeAgent, 'received');
       const runtimeProvider = getCurrentProvider(sessionUserKey, runtimeAgent.agentId);
       const activeRunner = getRunner(runtimeProvider);

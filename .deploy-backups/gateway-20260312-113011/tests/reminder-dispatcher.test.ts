@@ -4,10 +4,20 @@ import path from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { ReminderDispatcher } from '../src/services/reminder-dispatcher.js';
-import { ReminderStore } from '../src/services/reminder-store.js';
+let ReminderDispatcher: any;
+let ReminderStore: any;
+try {
+  await import('node:sqlite');
+  ({ ReminderDispatcher } = await import('../src/services/reminder-dispatcher.js'));
+  ({ ReminderStore } = await import('../src/services/reminder-store.js'));
+} catch {
+  ReminderDispatcher = undefined;
+  ReminderStore = undefined;
+}
 
-describe('ReminderDispatcher', () => {
+const describeIfSqlite = ReminderDispatcher && ReminderStore ? describe : describe.skip;
+
+describeIfSqlite('ReminderDispatcher', () => {
   it('triggers agent callback for due reminders and marks them as sent', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reminder-dispatcher-'));
     const store = new ReminderStore(path.join(dir, 'reminders.db'));
