@@ -246,6 +246,9 @@ describe('buildCodexChildEnv', () => {
           apiBaseUrl: 'http://127.0.0.1:3000/internal/browser',
           internalApiToken: 'token-123',
         },
+        desktopAutomation: {
+          apiBaseUrl: 'http://127.0.0.1:3000/internal/desktop',
+        },
         gatewayRootDir: '/opt/gateway',
         gatewayPublicBaseUrl: 'https://gateway.example.com',
         gatewayUserId: 'u1',
@@ -258,6 +261,7 @@ describe('buildCodexChildEnv', () => {
     expect(env.GATEWAY_REMINDER_USER_ID).toBe('u1');
     expect(env.GATEWAY_REMINDER_AGENT_ID).toBe('assistant');
     expect(env.GATEWAY_BROWSER_API_BASE).toBe('http://127.0.0.1:3000/internal/browser');
+    expect(env.GATEWAY_DESKTOP_API_BASE).toBe('http://127.0.0.1:3000/internal/desktop');
     expect(env.GATEWAY_INTERNAL_API_TOKEN).toBe('token-123');
     expect(env.GATEWAY_INTERNAL_API_BASE).toBe('http://127.0.0.1:3000/internal');
     expect(env.GATEWAY_ROOT_DIR).toBe('/opt/gateway');
@@ -463,6 +467,7 @@ describe('buildCodexSpawnSpec', () => {
         HOME: hostHome,
         PATH: '/usr/bin:/bin',
         GATEWAY_BROWSER_API_BASE: 'http://127.0.0.1:3000/internal/browser',
+        GATEWAY_DESKTOP_API_BASE: 'http://127.0.0.1:3000/internal/desktop',
         GATEWAY_INTERNAL_API_TOKEN: 'token-123',
         GATEWAY_REMINDER_DB_PATH: '/tmp/reminders.db',
       },
@@ -471,6 +476,7 @@ describe('buildCodexSpawnSpec', () => {
     });
 
     expect(spec.env.GATEWAY_BROWSER_API_BASE).toBe('http://127.0.0.1:3000/internal/browser');
+    expect(spec.env.GATEWAY_DESKTOP_API_BASE).toBe('http://127.0.0.1:3000/internal/desktop');
     expect(spec.env.GATEWAY_INTERNAL_API_TOKEN).toBe('token-123');
     expect(spec.env.GATEWAY_REMINDER_DB_PATH).toBe('/tmp/reminders.db');
   });
