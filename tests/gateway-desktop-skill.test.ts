@@ -59,6 +59,17 @@ describe('gateway-desktop-skill', () => {
     expect(skill).toContain('request confirmation');
   });
 
+  it('explains that missing desktop env means the gateway runtime is unavailable, not user config', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gateway-desktop-skill-'));
+    installGatewayDesktopSkill(dir);
+
+    const scriptFile = path.join(dir, '.codex', 'skills', 'gateway-desktop', 'scripts', 'gateway-desktop.mjs');
+    const script = fs.readFileSync(scriptFile, 'utf8');
+
+    expect(script).toContain('desktop gateway is unavailable in this session');
+    expect(script).toContain('Restart the gateway');
+  });
+
   it('syncs managed desktop skills into global skill roots', () => {
     const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'global-desktop-skills-a-'));
     const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'global-desktop-skills-b-'));

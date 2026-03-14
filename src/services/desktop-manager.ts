@@ -27,6 +27,13 @@ export interface DesktopAutomationAdapter {
   screenshot(filePath: string): Promise<void>;
 }
 
+interface DesktopWindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 type CommandRunner = (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
 interface DesktopManagerOptions {
@@ -101,8 +108,62 @@ export class DesktopManager {
     const filePath = path.isAbsolute(filename)
       ? filename
       : path.join(this.screenshotDir, filename);
-    await this.adapter.screenshot(filePath);
+
+    if (fs.existsSync(filePath)) {
+      fs.rmSync(filePath, { force: true });
+    }
+
+    const capturedNatively = await this.tryCaptureFrontmostWindow(filePath);
+    if (!capturedNatively) {
+      await this.adapter.screenshot(filePath);
+    }
+
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Desktop screenshot was not created at expected path: ${filePath}`);
+    }
     return filePath;
+  }
+
+  private async tryCaptureFrontmostWindow(filePath: string): Promise<boolean> {
+    const bounds = await this.readFrontmostWindowBounds().catch(() => undefined);
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
+      return false;
+    }
+
+    await this.commandRunner('screencapture', [
+      '-x',
+      '-R',
+      `${bounds.x},${bounds.y},${bounds.width},${bounds.height}`,
+      filePath,
+    ]);
+    return fs.existsSync(filePath);
+  }
+
+  private async readFrontmostWindowBounds(): Promise<DesktopWindowBounds | undefined> {
+    const result = await this.commandRunner('osascript', [
+      '-e',
+      [
+        'tell application "System Events"',
+        'tell (first application process whose frontmost is true)',
+        'tell front window',
+        'set p to position',
+        'set s to size',
+        'return (item 1 of p as text) & "," & (item 2 of p as text) & "," & (item 1 of s as text) & "," & (item 2 of s as text)',
+        'end tell',
+        'end tell',
+        'end tell',
+      ].join('\n'),
+    ]);
+    const numbers = result.stdout.match(/-?\d+/g)?.map((value) => Number(value)) ?? [];
+    if (numbers.length < 4 || numbers.some((value) => !Number.isFinite(value))) {
+      return undefined;
+    }
+    return {
+      x: numbers[0],
+      y: numbers[1],
+      width: numbers[2],
+      height: numbers[3],
+    };
   }
 }
 
@@ -144,7 +205,12 @@ export async function createNutJsDesktopAutomationAdapter(nutJsModule?: NutJsLik
     },
     async screenshot(filePath) {
       const parsed = path.parse(filePath);
-      await nutJs.screen.capture(parsed.name, nutJs.FileType.PNG, parsed.dir);
+      const capturedPath = path.resolve(
+        await nutJs.screen.capture(parsed.name, nutJs.FileType.PNG, parsed.dir),
+      );
+      if (capturedPath !== filePath) {
+        fs.renameSync(capturedPath, filePath);
+      }
     },
   };
 }

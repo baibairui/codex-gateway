@@ -1683,7 +1683,7 @@ ${clipMessage(userVisibleOutput, 500)}
           }
           sawAgentOutput = true;
           if (channel === 'feishu' && deps.sendStreamingText) {
-            streamedText += userVisibleOutput;
+            streamedText = userVisibleOutput;
             const now = Date.now();
             if (now - lastFeishuStreamFlushAt < 450) {
               return;

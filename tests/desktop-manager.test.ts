@@ -41,7 +41,15 @@ describe('DesktopManager', () => {
   it('stores screenshots in the configured directory and returns an absolute path', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-manager-'));
     const adapter = createAdapter();
-    const commandRunner = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    const commandRunner = vi.fn(async (file: string, args: string[]) => {
+      if (file === 'osascript') {
+        return { stdout: '10,20,800,600\n', stderr: '' };
+      }
+      if (file === 'screencapture') {
+        fs.writeFileSync(args[args.length - 1] as string, 'png');
+      }
+      return { stdout: '', stderr: '' };
+    });
     const manager = new DesktopManager({
       adapter,
       commandRunner,
@@ -52,7 +60,38 @@ describe('DesktopManager', () => {
 
     expect(filePath).toBe(path.join(tempDir, 'desktop-step.png'));
     expect(path.isAbsolute(filePath)).toBe(true);
-    expect(adapter.screenshot).toHaveBeenCalledWith(path.join(tempDir, 'desktop-step.png'));
+    expect(commandRunner).toHaveBeenCalledWith('screencapture', [
+      '-x',
+      '-R',
+      '10,20,800,600',
+      path.join(tempDir, 'desktop-step.png'),
+    ]);
+    expect(adapter.screenshot).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the adapter screenshot when native frontmost-window capture is unavailable', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-manager-'));
+    const screenshotPath = path.join(tempDir, 'desktop-step.png');
+    const adapter = createAdapter();
+    adapter.screenshot = vi.fn(async (filePath: string) => {
+      fs.writeFileSync(filePath, 'png');
+    });
+    const commandRunner = vi.fn(async (file: string) => {
+      if (file === 'osascript') {
+        throw new Error('System Events not allowed');
+      }
+      return { stdout: '', stderr: '' };
+    });
+    const manager = new DesktopManager({
+      adapter,
+      commandRunner,
+      screenshotDir: tempDir,
+    });
+
+    const filePath = await manager.takeScreenshot({ filename: 'desktop-step.png' });
+
+    expect(filePath).toBe(screenshotPath);
+    expect(adapter.screenshot).toHaveBeenCalledWith(screenshotPath);
   });
 
   it('maps hotkeys and screenshots through the nut.js adapter', async () => {
