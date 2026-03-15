@@ -2067,6 +2067,46 @@ local_audio_path=${sourcePath}`,
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('开始记忆初始化引导'));
   });
 
+  it('routes follow-up messages into the active memory onboarding thread after manual start', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const createWorkspace = vi.fn(() => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }));
+    const run = vi.fn(async (input: { prompt: string; threadId?: string }) => {
+      if (input.prompt.includes('记忆初始化引导 agent')) {
+        return { threadId: 'thread_onboarding', rawOutput: '' };
+      }
+      return { threadId: input.threadId ?? 'thread_default', rawOutput: '' };
+    });
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace,
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => true,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/agent init-memory' });
+    await handler({ channel: 'wecom', userId: 'u1', content: '我叫 Alice' });
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenLastCalledWith(expect.objectContaining({
+      threadId: 'thread_onboarding',
+      workdir: '/tmp',
+      prompt: expect.stringContaining('我叫 Alice'),
+    }));
+    expect(sessionStore.getCurrentAgent('u1').agentId).toBe('default');
+  });
+
   it('creates skill onboarding agent by command and switches to it', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
@@ -2172,6 +2212,51 @@ local_audio_path=${sourcePath}`,
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
       workdir: '/tmp/agent-5',
     }));
+  });
+
+  it('resumes a legacy named onboarding agent without restarting kickoff and routes the next reply to it', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    sessionStore.createAgent('u1', {
+      agentId: 'agent-5',
+      name: '记忆初始化引导',
+      workspaceDir: '/tmp/agent-5',
+    });
+    sessionStore.setSession('u1', 'agent-5', 'thread_existing');
+    const createWorkspace = vi.fn(() => ({ agentId: 'memory-onboarding', workspaceDir: '/tmp/memory-onboarding' }));
+    const run = vi.fn(async (input: { threadId?: string }) => ({
+      threadId: input.threadId ?? 'thread_new',
+      rawOutput: '',
+    }));
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace,
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => true,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/agent init-memory' });
+    await handler({ channel: 'wecom', userId: 'u1', content: '继续初始化' });
+
+    expect(createWorkspace).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread_existing',
+      workdir: '/tmp/agent-5',
+      prompt: expect.stringContaining('继续初始化'),
+    }));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('记忆初始化已在进行中'));
   });
 
   it('runs codex in the current agent workspace', async () => {

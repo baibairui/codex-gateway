@@ -29,12 +29,6 @@ interface AppDeps {
       data?: Record<string, unknown>;
     }>;
   };
-  desktopAutomation?: {
-    execute: (command: string, args: Record<string, unknown>) => Promise<{
-      text: string;
-      data?: Record<string, unknown>;
-    }>;
-  };
   isDuplicateMessage: (msgId?: string) => boolean;
   /**
    * 处理文本消息，业务回复统一走主动发消息 API，无需返回值。
@@ -331,7 +325,7 @@ export function createApp(deps: AppDeps) {
   if (feishuWebhookEnabled) {
     app.use('/feishu/callback', express.json({ type: '*/*' }));
   }
-  if (deps.browserAutomation || deps.desktopAutomation || deps.internalApiToken) {
+  if (deps.browserAutomation || deps.internalApiToken) {
     app.use('/internal', express.json({ type: 'application/json', limit: '2mb' }));
   }
 
@@ -450,46 +444,6 @@ export function createApp(deps: AppDeps) {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         log.warn('internal browser execute failed', {
-          command,
-          error: errorMessage,
-        });
-        res.status(400).json({ ok: false, error: errorMessage });
-      }
-    });
-  }
-
-  if (deps.desktopAutomation) {
-    const desktopAutomation = deps.desktopAutomation;
-    app.post('/internal/desktop/execute', async (req, res) => {
-      const remoteAddress = req.socket.remoteAddress;
-      const token = req.header('x-gateway-internal-token');
-      if (!deps.internalApiToken || token !== deps.internalApiToken || !isLoopbackAddress(remoteAddress)) {
-        log.warn('internal desktop execute rejected', {
-          remoteAddress: remoteAddress || '(empty)',
-          hasToken: Boolean(token),
-        });
-        res.status(403).json({ ok: false, error: 'forbidden' });
-        return;
-      }
-
-      const body = asObject(req.body);
-      const command = firstNonEmptyString(body?.command);
-      const args = asObject(body?.args) ?? {};
-      if (!command) {
-        res.status(400).json({ ok: false, error: 'missing command' });
-        return;
-      }
-
-      try {
-        const result = await desktopAutomation.execute(command, args);
-        res.json({
-          ok: true,
-          text: result.text,
-          data: result.data ?? null,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        log.warn('internal desktop execute failed', {
           command,
           error: errorMessage,
         });

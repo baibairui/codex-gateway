@@ -181,6 +181,14 @@ interface ReminderTriggerInput {
   sourceAgentId?: string;
 }
 
+interface ActiveMemoryOnboardingState {
+  onboardingAgent: AgentRecord;
+  targetAgent: {
+    agentId: string;
+    workspaceDir: string;
+  };
+}
+
 function clipMessage(message: string, maxLength = 1500): string {
   if (message.length <= maxLength) {
     return message;
@@ -686,6 +694,7 @@ function buildMemoryOnboardingKickoffPrompt(input: {
 export function createChatHandler(deps: ChatHandlerDeps) {
   const userSearchOverrides = new Map<string, boolean>();
   const onboardingKickoffInFlight = new Set<string>();
+  const activeMemoryOnboarding = new Map<string, ActiveMemoryOnboardingState>();
   const skillManager = deps.skillManager ?? new AgentSkillManager();
 
   function getCurrentProvider(userKey: string, agentId: string): 'codex' | 'opencode' {
@@ -740,6 +749,38 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     });
   }
 
+  function setActiveMemoryOnboarding(
+    userKey: string,
+    onboardingAgent: AgentRecord,
+    targetAgent: { agentId: string; workspaceDir: string },
+  ): void {
+    activeMemoryOnboarding.set(userKey, {
+      onboardingAgent,
+      targetAgent,
+    });
+  }
+
+  function getActiveMemoryOnboarding(userKey: string): ActiveMemoryOnboardingState | undefined {
+    return activeMemoryOnboarding.get(userKey);
+  }
+
+  function clearActiveMemoryOnboarding(userKey: string): void {
+    activeMemoryOnboarding.delete(userKey);
+  }
+
+  function isMemoryOnboardingComplete(
+    userKey: string,
+    state: ActiveMemoryOnboardingState,
+  ): boolean {
+    if (deps.agentWorkspaceManager.isSharedMemoryEmpty(userKey)) {
+      return false;
+    }
+    if (!deps.agentWorkspaceManager.isWorkspaceIdentityEmpty) {
+      return true;
+    }
+    return !deps.agentWorkspaceManager.isWorkspaceIdentityEmpty(state.targetAgent.workspaceDir);
+  }
+
   async function ensureIdentityBound(input: {
     channel: Channel;
     userId: string;
@@ -753,7 +794,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     const snapshot = deps.agentWorkspaceManager.getIdentitySnapshot
       ? deps.agentWorkspaceManager.getIdentitySnapshot(sessionUserKey, agent.workspaceDir)
       : deps.agentWorkspaceManager.getSharedMemorySnapshot?.(sessionUserKey);
-    if (!snapshot || isSystemAgentId(agent.agentId)) {
+    if (!snapshot || isSystemAgentRecord(agent)) {
       return {
         threadId: input.threadId,
         boundIdentityVersion: undefined,
@@ -1034,6 +1075,7 @@ ${clipMessage(prompt, 500)}
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
         });
+        clearActiveMemoryOnboarding(sessionUserKey);
         await deps.sendText(channel, userId, '❌ 初始化引导启动失败，请稍后重试，或发送任意消息继续。');
       } finally {
         onboardingKickoffInFlight.delete(sessionUserKey);
@@ -1129,6 +1171,7 @@ ${clipMessage(prompt, 500)}
         return;
       }
       if (commandResult.createAgentName) {
+        clearActiveMemoryOnboarding(sessionUserKey);
         const workspace = deps.agentWorkspaceManager.createWorkspace({
           userId: sessionUserKey,
           agentName: commandResult.createAgentName,
@@ -1151,16 +1194,20 @@ ${clipMessage(prompt, 500)}
         return;
       }
       if (commandResult.initMemoryAgent) {
-        const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, MEMORY_ONBOARDING_AGENT_ID);
+        const agent = ensureMemoryOnboardingAgent();
+        const onboardingThreadId = deps.sessionStore.getSession(sessionUserKey, agent.agentId);
         if (onboardingKickoffInFlight.has(sessionUserKey) && !onboardingThreadId) {
           await sendCommandText(renderMemoryOnboardingPendingMessage());
           return;
         }
+        setActiveMemoryOnboarding(sessionUserKey, agent, {
+          agentId: currentAgent.agentId,
+          workspaceDir: currentAgent.workspaceDir,
+        });
         if (onboardingThreadId) {
           await sendCommandText(renderMemoryOnboardingResumeMessage());
           return;
         }
-        const agent = ensureMemoryOnboardingAgent();
         await sendCommandText(renderMemoryOnboardingStartMessage('manual'));
         await startMemoryOnboarding(agent, currentModel, {
           reason: 'manual',
@@ -1169,6 +1216,7 @@ ${clipMessage(prompt, 500)}
         return;
       }
       if (commandResult.initSkillAgent) {
+        clearActiveMemoryOnboarding(sessionUserKey);
         const agent = ensureSkillOnboardingAgent();
         deps.sessionStore.setCurrentAgent(sessionUserKey, agent.agentId);
         const skillThreadId = deps.sessionStore.getSession(sessionUserKey, agent.agentId);
@@ -1316,6 +1364,7 @@ ${clipMessage(text, 500)}
           await sendCommandText('❌ 未找到目标 agent，请先发送 /agents 查看编号。');
           return;
         }
+        clearActiveMemoryOnboarding(sessionUserKey);
         deps.sessionStore.setCurrentAgent(sessionUserKey, resolved);
         const nextAgent = resolveRuntimeAgent(
           deps.agentWorkspaceManager,
@@ -1565,6 +1614,15 @@ ${clipMessage(text, 500)}
       return;
     }
 
+    const activeOnboarding = getActiveMemoryOnboarding(sessionUserKey);
+    const activeOnboardingThreadId = activeOnboarding
+      ? deps.sessionStore.getSession(sessionUserKey, activeOnboarding.onboardingAgent.agentId)
+      : undefined;
+    if (!commandResult.handled && activeOnboarding && onboardingKickoffInFlight.has(sessionUserKey) && !activeOnboardingThreadId) {
+      await deps.sendText(channel, userId, renderMemoryOnboardingPendingMessage());
+      return;
+    }
+
     const isSharedMemoryEmpty = deps.agentWorkspaceManager.isSharedMemoryEmpty(sessionUserKey);
     const isCurrentAgentIdentityEmpty = !isSystemAgentRecord(currentAgent)
       && !!deps.agentWorkspaceManager.isWorkspaceIdentityEmpty?.(currentAgent.workspaceDir);
@@ -1581,11 +1639,11 @@ ${clipMessage(text, 500)}
       && !isSystemAgentRecord(currentAgent)
       && !hasExplicitProviderSelection(sessionUserKey, currentAgent.agentId);
 
-    if (shouldStartMemoryOnboarding && !existingThreadId) {
+    if (!activeOnboarding && shouldStartMemoryOnboarding && !existingThreadId) {
       await deps.sendText(channel, userId, renderMemoryOnboardingSuggestion(onboardingReason));
     }
 
-    if (shouldPushStartupHelp) {
+    if (!activeOnboarding && shouldPushStartupHelp) {
       if (shouldRecommendProviderSelection) {
         const providerHelp = handleUserCommand('/provider').queryProvider
           ? [
@@ -1616,17 +1674,22 @@ ${clipMessage(text, 500)}
     }
 
     let sawAgentOutput = false;
-    let runtimeAgent = currentAgent;
+    let runtimeAgent = activeOnboarding
+      ? resolveRuntimeAgent(
+          deps.agentWorkspaceManager,
+          sessionUserKey,
+          activeOnboarding.onboardingAgent,
+        )
+      : currentAgent;
     try {
       let lastStreamSend: Promise<void> = Promise.resolve();
       const streamId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       let streamedText = '';
       let lastFeishuStreamFlushAt = 0;
       let lastFeishuStreamSnapshot = '';
-      // 普通对话始终使用当前可见 agent，初始化引导仅通过显式引导流程触发，
-      // 避免 memory-onboarding 线程长期劫持后续会话。
-      runtimeAgent = currentAgent;
-      const initialRuntimeThreadId = existingThreadId;
+      const initialRuntimeThreadId = activeOnboarding
+        ? activeOnboardingThreadId
+        : existingThreadId;
       const identityBinding = await ensureIdentityBound({
         channel,
         userId,
@@ -1636,7 +1699,7 @@ ${clipMessage(text, 500)}
         threadId: initialRuntimeThreadId,
       });
       const runtimeThreadId = identityBinding.threadId;
-      const runtimeSearch = runtimeAgent.agentId === MEMORY_ONBOARDING_AGENT_ID ? false : currentSearch;
+      const runtimeSearch = activeOnboarding ? false : currentSearch;
       log.debug('handleText 查询 session', {
         userId,
         agentId: runtimeAgent.agentId,
@@ -1687,7 +1750,7 @@ ${clipMessage(text, 500)}
         },
         onMessage: (text) => {
           const normalizedOutput = rewriteGatewayStructuredLocalPaths(text, resolveAgentWorkdir(runtimeAgent));
-          const rawVisibleOutput = isSystemAgentId(runtimeAgent.agentId) ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
+          const rawVisibleOutput = activeOnboarding ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
           const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, rawVisibleOutput);
           log.info(`
 ════════════════════════════════════════════════════════════
@@ -1756,6 +1819,9 @@ ${clipMessage(userVisibleOutput, 500)}
         prompt,
         identityBinding.boundIdentityVersion,
       );
+      if (activeOnboarding && isMemoryOnboardingComplete(sessionUserKey, activeOnboarding)) {
+        clearActiveMemoryOnboarding(sessionUserKey);
+      }
       log.debug('handleText session 已更新', {
         userId,
         agentId: runtimeAgent.agentId,

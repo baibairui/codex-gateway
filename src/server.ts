@@ -9,8 +9,6 @@ import { WorkspacePublisher } from './services/workspace-publisher.js';
 import { AgentWorkspaceManager } from './services/agent-workspace-manager.js';
 import { BrowserManager } from './services/browser-manager.js';
 import { createBrowserAutomationBackend } from './services/browser-service.js';
-import { DesktopManager, createNutJsDesktopAutomationAdapter } from './services/desktop-manager.js';
-import { createDesktopAutomationBackend } from './services/desktop-service.js';
 import { CodexRunner } from './services/codex-runner.js';
 import { createChatHandler } from './services/chat-handler.js';
 import { getCliProviderSpec, readCliHomeDefaultModel, runnerHomeDirName, writeCliApiLoginConfig } from './services/cli-provider.js';
@@ -111,10 +109,6 @@ const browserAutomation = config.browserAutomationEnabled
 const activeBrowserApiBaseUrl = config.browserAutomationEnabled
   ? `http://127.0.0.1:${config.port}/internal/browser`
   : undefined;
-const desktopAutomation = await createDesktopAutomation();
-const activeDesktopApiBaseUrl = desktopAutomation
-  ? `http://127.0.0.1:${config.port}/internal/desktop`
-  : undefined;
 const internalApiBaseUrl = `http://127.0.0.1:${config.port}/internal`;
 const feishuImageCacheDir = path.join(dataDir, 'feishu-images');
 fs.mkdirSync(codexHomeDir, { recursive: true });
@@ -149,7 +143,6 @@ const codexRunner = new CodexRunner({
   timeoutMaxMs: config.commandTimeoutMaxMs,
   timeoutPerCharMs: config.commandTimeoutPerCharMs,
   browserApiBaseUrl: activeBrowserApiBaseUrl,
-  desktopApiBaseUrl: activeDesktopApiBaseUrl,
   internalApiBaseUrl,
   internalApiToken,
   gatewayRootDir,
@@ -167,7 +160,6 @@ const opencodeRunner = new CodexRunner({
   timeoutMaxMs: config.commandTimeoutMaxMs,
   timeoutPerCharMs: config.commandTimeoutPerCharMs,
   browserApiBaseUrl: activeBrowserApiBaseUrl,
-  desktopApiBaseUrl: activeDesktopApiBaseUrl,
   internalApiBaseUrl,
   internalApiToken,
   gatewayRootDir,
@@ -558,7 +550,6 @@ const app = createApp({
   internalApiToken,
   gatewayRootDir,
   browserAutomation,
-  desktopAutomation,
   feishuVerificationToken: config.feishuVerificationToken,
   feishuLongConnection: feishuStatusSummary.mode === 'long-connection',
   feishuGroupRequireMention: feishuStatusSummary.groupRequireMention,
@@ -936,25 +927,4 @@ function listUserWorkspaceDirs(userDir: string): string[] {
   }
 
   return Array.from(new Set(output.map((dir) => path.resolve(dir))));
-}
-
-async function createDesktopAutomation() {
-  if (process.platform !== 'darwin') {
-    log.info('桌面自动化未启用', { reason: 'macos only' });
-    return undefined;
-  }
-
-  try {
-    const adapter = await createNutJsDesktopAutomationAdapter();
-    const manager = new DesktopManager({
-      adapter,
-      screenshotDir: path.join(dataDir, 'desktop', 'screenshots'),
-    });
-    return createDesktopAutomationBackend(manager);
-  } catch (error) {
-    log.warn('桌面自动化初始化失败', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
-  }
 }

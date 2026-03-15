@@ -15,10 +15,6 @@ export interface BrowserAutomationRuntimeConfig {
   internalApiToken: string;
 }
 
-export interface DesktopAutomationRuntimeConfig {
-  apiBaseUrl: string;
-}
-
 export interface CodexRunInput {
   prompt: string;
   threadId?: string;
@@ -72,7 +68,6 @@ interface CodexRunnerOptions {
   timeoutMaxMs?: number;
   timeoutPerCharMs?: number;
   browserApiBaseUrl?: string;
-  desktopApiBaseUrl?: string;
   internalApiBaseUrl?: string;
   internalApiToken?: string;
   gatewayRootDir?: string;
@@ -133,7 +128,6 @@ export class CodexRunner {
   private readonly timeoutMaxMs: number;
   private readonly timeoutPerCharMs: number;
   private readonly browserAutomation?: BrowserAutomationRuntimeConfig;
-  private readonly desktopAutomation?: DesktopAutomationRuntimeConfig;
   private readonly internalApiToken?: string;
   private readonly internalApiBaseUrl?: string;
   private readonly gatewayRootDir?: string;
@@ -154,16 +148,12 @@ export class CodexRunner {
     this.timeoutMaxMs = options.timeoutMaxMs ?? DEFAULT_TIMEOUT_MAX_MS;
     this.timeoutPerCharMs = options.timeoutPerCharMs ?? DEFAULT_TIMEOUT_PER_CHAR_MS;
     const browserApiBaseUrl = options.browserApiBaseUrl?.trim() || undefined;
-    const desktopApiBaseUrl = options.desktopApiBaseUrl?.trim() || undefined;
     const internalApiToken = options.internalApiToken?.trim() || undefined;
     this.browserAutomation = browserApiBaseUrl && internalApiToken
       ? {
           apiBaseUrl: browserApiBaseUrl,
           internalApiToken,
         }
-      : undefined;
-    this.desktopAutomation = desktopApiBaseUrl
-      ? { apiBaseUrl: desktopApiBaseUrl }
       : undefined;
     this.internalApiToken = internalApiToken;
     this.internalApiBaseUrl = options.internalApiBaseUrl?.trim() || undefined;
@@ -181,7 +171,6 @@ export class CodexRunner {
       timeoutMaxMs: this.timeoutMaxMs,
       timeoutPerCharMs: this.timeoutPerCharMs,
       browserApiBaseUrl: this.browserAutomation?.apiBaseUrl ?? '(disabled)',
-      desktopApiBaseUrl: this.desktopAutomation?.apiBaseUrl ?? '(disabled)',
       gatewayRootDir: this.gatewayRootDir ?? '(unset)',
       gatewayPublicBaseUrl: this.gatewayPublicBaseUrl ?? '(unset)',
       sandbox: this.sandbox,
@@ -198,7 +187,6 @@ export class CodexRunner {
       env: buildCodexChildEnv(process.env, {
         reminderToolContext: input.reminderToolContext,
         browserAutomation: this.browserAutomation,
-        desktopAutomation: this.desktopAutomation,
         gatewayRootDir: this.gatewayRootDir,
         gatewayPublicBaseUrl: input.gatewayPublicBaseUrl ?? this.gatewayPublicBaseUrl,
         gatewayUserId: input.gatewayUserId,
@@ -234,7 +222,6 @@ export class CodexRunner {
       prompt: timeoutHint,
       env: buildCodexChildEnv(process.env, {
         browserAutomation: this.browserAutomation,
-        desktopAutomation: this.desktopAutomation,
         gatewayRootDir: this.gatewayRootDir,
         internalApiToken: this.internalApiToken,
       }),
@@ -643,7 +630,6 @@ export function buildCodexChildEnv(
   input: {
     reminderToolContext?: CodexRunInput['reminderToolContext'];
     browserAutomation?: BrowserAutomationRuntimeConfig;
-    desktopAutomation?: DesktopAutomationRuntimeConfig;
     gatewayRootDir?: string;
     gatewayPublicBaseUrl?: string;
     gatewayUserId?: string;
@@ -664,9 +650,6 @@ export function buildCodexChildEnv(
 
   if (input.browserAutomation?.apiBaseUrl) {
     env.GATEWAY_BROWSER_API_BASE = input.browserAutomation.apiBaseUrl;
-  }
-  if (input.desktopAutomation?.apiBaseUrl) {
-    env.GATEWAY_DESKTOP_API_BASE = input.desktopAutomation.apiBaseUrl;
   }
   if (input.browserAutomation?.internalApiToken) {
     env.GATEWAY_INTERNAL_API_TOKEN = input.browserAutomation.internalApiToken;

@@ -47,12 +47,6 @@ async function startTestServer(options?: {
       data?: Record<string, unknown>;
     }>;
   };
-  desktopAutomation?: {
-    execute: (command: string, args: Record<string, unknown>) => Promise<{
-      text: string;
-      data?: Record<string, unknown>;
-    }>;
-  };
 }) {
   const app = createApp({
     wecomEnabled: true,
@@ -73,7 +67,6 @@ async function startTestServer(options?: {
     feishuAppSecret: options?.feishuAppSecret,
     gatewayRootDir: options?.gatewayRootDir,
     browserAutomation: options?.browserAutomation,
-    desktopAutomation: options?.desktopAutomation,
     isDuplicateMessage: () => false,
     handleText: options?.handleText ?? (async () => undefined),
     handleFeishuCardAction: options?.handleFeishuCardAction,
@@ -260,10 +253,10 @@ describe('createApp internal feishu user ops', () => {
 });
 
 describe('createApp internal desktop execute', () => {
-  it('rejects requests without the internal token', async () => {
+  it('does not expose the deprecated desktop gateway endpoint', async () => {
     const baseUrl = await startTestServer({
       internalApiToken: 'token-123',
-      desktopAutomation: {
+      browserAutomation: {
         execute: vi.fn(async () => ({ text: 'ok' })),
       },
     });
@@ -272,71 +265,12 @@ describe('createApp internal desktop execute', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
+        'x-gateway-internal-token': 'token-123',
       },
       body: JSON.stringify({ command: 'frontmost-app', args: {} }),
     });
-    const payload = await response.json() as { ok?: boolean; error?: string };
 
-    expect(response.status).toBe(403);
-    expect(payload).toEqual({ ok: false, error: 'forbidden' });
-  });
-
-  it('rejects missing command payloads', async () => {
-    const baseUrl = await startTestServer({
-      internalApiToken: 'token-123',
-      desktopAutomation: {
-        execute: vi.fn(async () => ({ text: 'ok' })),
-      },
-    });
-
-    const response = await fetch(`${baseUrl}/internal/desktop/execute`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-gateway-internal-token': 'token-123',
-      },
-      body: JSON.stringify({ args: {} }),
-    });
-    const payload = await response.json() as { ok?: boolean; error?: string };
-
-    expect(response.status).toBe(400);
-    expect(payload).toEqual({ ok: false, error: 'missing command' });
-  });
-
-  it('forwards command and args to the desktop backend', async () => {
-    const execute = vi.fn(async () => ({
-      text: 'frontmost app: Finder',
-      data: { frontmostApp: 'Finder' },
-    }));
-    const baseUrl = await startTestServer({
-      internalApiToken: 'token-123',
-      desktopAutomation: { execute },
-    });
-
-    const response = await fetch(`${baseUrl}/internal/desktop/execute`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-gateway-internal-token': 'token-123',
-      },
-      body: JSON.stringify({
-        command: 'frontmost-app',
-        args: {},
-      }),
-    });
-    const payload = await response.json() as {
-      ok?: boolean;
-      text?: string;
-      data?: Record<string, unknown>;
-    };
-
-    expect(response.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith('frontmost-app', {});
-    expect(payload).toEqual({
-      ok: true,
-      text: 'frontmost app: Finder',
-      data: { frontmostApp: 'Finder' },
-    });
+    expect(response.status).toBe(404);
   });
 });
 

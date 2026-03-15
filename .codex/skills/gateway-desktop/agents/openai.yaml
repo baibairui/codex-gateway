@@ -1,0 +1,6 @@
+interface:
+  display_name: "Gateway Desktop"
+  short_description: "Operate desktop applications through screenshot-guided local GUI actions."
+  default_prompt: "Use $gateway-desktop when the user wants desktop app operations."
+policy:
+  allow_implicit_invocation: true
