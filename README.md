@@ -59,6 +59,14 @@
 
 当前默认布局会把运行时规则放在 `.data/runtime/`，把用户长期身份放在 `.data/users/<user>/user.md`，把每个 agent 的长期身份放在 `.data/users/<user>/agents/<agent>/SOUL.md`，而短期上下文只留在 `.data/users/<user>/agents/<agent>/memory/daily/`。系统内部还会保留一个隐藏的 `.data/users/<user>/internal/memory-steward/`，专门负责整理身份和短期记忆，不作为用户直接切换的普通 agent。
 
+工作区内由 gateway 负责维护的核心文件包括：
+
+- `AGENTS.md`：工作区入口与 skill 路由
+- `README.md`：当前 agent 工作区说明
+- `SOUL.md`：当前 agent 的长期身份
+- `memory/daily/README.md`：短期记忆目录说明
+- `.codex/workspace.json`：工作区元数据
+
 ### 3. 渠道接入
 
 当前支持：
@@ -73,6 +81,7 @@
 通过本地 skill，agent 可以获得真实动作能力，例如：
 
 - 浏览器访问、点击、输入、截图、录屏
+- 桌面应用启动、激活、鼠标键盘操作、拖拽、截图
 - 提醒和定时任务
 - 飞书 OpenAPI 实际操作
 - 公开信息调研和结果沉淀
@@ -205,6 +214,11 @@ FEISHU_GROUP_REQUIRE_MENTION=true
 codexclaw doctor
 codexclaw up
 ```
+
+其中：
+
+- `codexclaw up` / `npm run dev` 会直接以 `tsx watch src/server.ts` 启动，适合开发期验证最新源码改动。
+- `codexclaw start` 会运行 `dist/server.js`，只适合生产或本地发布态验证；如果你改过 `src/` 但没重新 build，`start` 仍然会跑旧产物。
 
 生产模式：
 
@@ -568,6 +582,32 @@ codexclaw help
 
 ## Skill、浏览器与提醒能力
 
+### GUI 操作能力
+
+除了常规文本回复，gateway 还可以把 agent 的一部分能力落到真实 GUI 操作上，分为两类：
+
+- 浏览器 GUI：网页导航、点击、输入、下拉选择、标签页切换、截图、录屏。
+- 桌面 GUI：激活应用、启动应用、鼠标点击、键盘输入、拖拽、屏幕截图。
+
+这两类能力都不是让模型直接“裸调系统”，而是统一走 gateway 自己注入的 skill 和内部自动化接口，便于审计、复现和中途接管。
+
+适合的请求示例：
+
+```text
+打开浏览器进入 GitHub Actions 页面，看到登录或验证码时停下来等我
+```
+
+```text
+在 macOS 上打开一个桌面应用，输入这段文字，然后截图给我确认
+```
+
+共同行为边界：
+
+- 每次只执行一个小动作，再回报当前证据和下一步。
+- 遇到登录、验证码、扫码、支付确认、权限弹窗、高风险提交时，优先请求人工接管。
+- 不应在界面状态不明确时连续点击或连续输入。
+- 只允许走 gateway 注入的 GUI skill，不应自行发明新的自动化入口。
+
 ### Skill 命令
 
 ```text
@@ -611,6 +651,7 @@ codexclaw help
 - 同一动作最多重试 2 次
 - 不允许在页面状态未知时连续点击或连续输入
 - 只允许走 gateway 的 `browser_*` MCP 工具链路
+- 浏览器 GUI 更适合网页任务，不应用来模拟本地桌面软件操作
 
 ### 桌面软件操作规范
 
@@ -622,6 +663,7 @@ codexclaw help
 - 仅操作前台可见应用
 - 仅提供启动应用、激活应用、鼠标、键盘、拖拽、截图这类原子动作
 - 不提供控件树读取、OCR、后台窗口操作或任意 shell 执行
+- 桌面 GUI 更适合本地应用或系统界面，不应用来替代浏览器 skill 处理网页流程
 
 首次使用前，需要给运行 gateway 的宿主应用授予：
 
