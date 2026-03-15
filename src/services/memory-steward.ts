@@ -144,33 +144,32 @@ function buildStewardPrompt(
   workspace: SystemMemoryStewardWorkspaceRecord,
   agents: AgentListItem[],
 ): string {
-  const sharedMemoryDir = workspace.sharedMemoryDir;
-  const sharedDailyDir = path.join(sharedMemoryDir, 'daily');
   const agentLines = agents.map((agent, index) => (
     `${index + 1}. ${agent.name} (${agent.agentId})\n` +
     `   workspace: ${agent.workspaceDir}\n` +
-    `   memory: ${path.join(agent.workspaceDir, 'memory')}`
+    `   soul: ${path.join(agent.workspaceDir, 'SOUL.md')}\n` +
+    `   daily: ${path.join(agent.workspaceDir, 'memory', 'daily')}`
   ));
 
   return [
-    `你正在为用户 ${userId} 执行系统级记忆整理任务。`,
+    `你正在为用户 ${userId} 执行系统级身份整理任务。`,
     '',
     '目标：',
-    '- 检查 shared-memory 与各 agent 的 memory 目录。',
-    '- 只把跨会话稳定、未来还值得再读的信息整理进 shared-memory。',
-    '- 短期或不确定信息保留在 daily 目录。',
-    '- 高敏感信息不要直接写入长期记忆，改为记录到 steward-log.md，等待用户确认。',
+    '- 检查用户身份文件与各 agent 的身份文件、短期记忆目录。',
+    '- 只把跨会话稳定、未来还值得再读的信息整理进 user.md。',
+    '- 短期或不确定信息保留在各 agent 的 daily 目录。',
+    '- 高敏感信息不要直接写入长期身份，改为记录到 steward-log.md，等待用户确认。',
     '',
-    `shared-memory: ${sharedMemoryDir}`,
-    `shared daily: ${sharedDailyDir}`,
+    `user identity: ${workspace.userIdentityPath}`,
+    `runtime root: ${workspace.userDir}`,
     '',
     '当前用户的可见 agent 工作区：',
     ...agentLines,
     '',
     '执行要求：',
-    '- 先阅读 shared-memory 现有文件，避免重复和同义改写。',
-    '- 再检查各 agent 的 memory 目录，尤其是 `memory/daily/`。',
-    '- 更新 shared-memory 下的 `identity.md`、`profile.md`、`preferences.md`、`projects.md`、`relationships.md`、`decisions.md`、`open-loops.md`。',
+    '- 先阅读 user.md 现有内容，避免重复和同义改写。',
+    '- 再检查各 agent 的 `SOUL.md` 与 `memory/daily/`。',
+    '- 只更新 user.md；若发现某个 agent 身份漂移，在 steward-log.md 记录建议，不要默认重写对方 SOUL.md。',
     '- 在当前工作区写入或追加 `steward-log.md`，记录本轮新增、跳过和待确认项。',
     '- 不要输出给用户的解释性长文，直接修改文件即可。',
   ].join('\n');
