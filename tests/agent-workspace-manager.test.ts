@@ -22,7 +22,7 @@ describe('AgentWorkspaceManager', () => {
     expect(fs.existsSync(path.join(result.workspaceDir, 'memory', 'daily'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'workspace.json'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'gateway-browser', 'SKILL.md'))).toBe(true);
-    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'gateway-desktop', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'macos-gui-skill', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, '.codex', 'skills', 'reminder-tool', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(result.workspaceDir, 'agent.md'))).toBe(false);
     expect(fs.existsSync(path.join(result.workspaceDir, 'TOOLS.md'))).toBe(false);

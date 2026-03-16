@@ -561,7 +561,7 @@ function renderWorkspaceAgentsMd(
     '',
     '工具路由：',
     '- 浏览器任务：`./.codex/skills/gateway-browser/SKILL.md`',
-    '- 桌面任务：`./.codex/skills/gateway-desktop/SKILL.md`',
+    '- 桌面任务：`./.codex/skills/macos-gui-skill/SKILL.md`',
     '- 定时提醒：`./.codex/skills/reminder-tool/SKILL.md`',
     '- 飞书官方操作：`./.codex/skills/feishu-official-ops/SKILL.md`',
     '- 社媒调研：`./.codex/skills/social-intel/SKILL.md`',

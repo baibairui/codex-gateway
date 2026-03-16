@@ -592,7 +592,7 @@ codexclaw help
 这两类能力都不是让模型直接“裸调系统”，而是统一走受控 skill：
 
 - 浏览器 GUI 走 gateway 注入的浏览器能力链路。
-- 桌面 GUI 走 `gateway-desktop` 提供的本地直连脚本，在当前工作区内执行并保留截图证据。
+- 桌面 GUI 走 `macos-gui-skill` 提供的本地直连脚本，在当前工作区内执行并保留截图证据。
 
 适合的请求示例：
 
@@ -659,7 +659,7 @@ codexclaw help
 
 ### 桌面软件操作规范
 
-当前已支持通过 `gateway-desktop` skill 执行 macOS 桌面动作，定位是“给已有视觉 agent 一只手”，不是再造一套桌面视觉 agent。
+当前已支持通过 `macos-gui-skill` skill 执行 macOS 桌面动作，定位是“给已有视觉 agent 一只手”，不是再造一套桌面视觉 agent。
 
 推荐流程：
 
@@ -674,7 +674,7 @@ codexclaw help
 - 仅操作前台可见应用
 - 默认提供 `observe`、`act`，以及启动应用、激活应用、鼠标、键盘、拖拽、截图这类通用动作
 - `act` 只适合明显连续的 GUI 操作，不应用来封装带分支判断的长流程
-- 如确实需要 AppleScript 或 shell，也必须通过 `gateway-desktop` 自带命令执行，不应绕过 skill 直接操作系统；它们是兜底，不是默认首选
+- 如确实需要 AppleScript 或 shell，也必须通过 `macos-gui-skill` 自带命令执行，不应绕过 skill 直接操作系统；它们是兜底，不是默认首选
 - 不提供控件树读取、OCR 或后台窗口操作
 - 桌面 GUI 更适合本地应用或系统界面，不应用来替代浏览器 skill 处理网页流程
 
