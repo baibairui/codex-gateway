@@ -214,6 +214,13 @@ if (feishuApi) {
   log.debug('FeishuApi 已初始化');
 }
 
+const feishuBotIdentity = await resolveFeishuBotIdentity({
+  enabled: config.feishuEnabled,
+  appId: config.feishuAppId,
+  appSecret: config.feishuAppSecret,
+  timeoutMs: config.feishuApiTimeoutMs,
+});
+
 const wecomCrypto = config.wecomEnabled && config.token && config.encodingAesKey && config.corpId
   ? new WeComCrypto({
     token: config.token,
@@ -324,6 +331,87 @@ function resolveRuntimeDir(configuredDir: string | undefined, fallbackDir: strin
     return path.resolve(fallbackDir);
   }
   return path.resolve(configuredDir);
+}
+
+async function resolveFeishuBotIdentity(input: {
+  enabled: boolean;
+  appId?: string;
+  appSecret?: string;
+  timeoutMs: number;
+}): Promise<{ openId?: string; appName?: string }> {
+  if (!input.enabled || !input.appId || !input.appSecret) {
+    return {};
+  }
+  try {
+    const tokenResp = await fetchJsonWithTimeout('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify({
+        app_id: input.appId,
+        app_secret: input.appSecret,
+      }),
+    }, input.timeoutMs);
+    const token = typeof tokenResp?.tenant_access_token === 'string' ? tokenResp.tenant_access_token.trim() : '';
+    if (!token) {
+      log.warn('飞书机器人身份解析失败：tenant_access_token 为空');
+      return {};
+    }
+    const botResp = await fetchJsonWithTimeout('https://open.feishu.cn/open-apis/bot/v3/info', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }, input.timeoutMs);
+    const bot = asRecord(botResp?.bot);
+    const openId = typeof bot?.open_id === 'string' ? bot.open_id.trim() : '';
+    const appName = typeof bot?.app_name === 'string' ? bot.app_name.trim() : '';
+    if (!openId && !appName) {
+      log.warn('飞书机器人身份解析失败：bot open_id/app_name 为空');
+      return {};
+    }
+    log.info('飞书机器人身份已解析', {
+      feishuBotOpenId: openId || '(empty)',
+      feishuBotName: appName || '(empty)',
+    });
+    return {
+      openId: openId || undefined,
+      appName: appName || undefined,
+    };
+  } catch (error) {
+    log.warn('飞书机器人身份解析失败，回退 text_without_at_bot 判定', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {};
+  }
+}
+
+async function fetchJsonWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) {
+      throw new Error(`http ${response.status}`);
+    }
+    const code = typeof body.code === 'number' ? body.code : 0;
+    if (code !== 0) {
+      const msg = typeof body.msg === 'string' ? body.msg : 'unknown';
+      throw new Error(`feishu api ${code} ${msg}`);
+    }
+    return body;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function resolveGatewayRootDir(configuredDir: string | undefined): string {
@@ -553,6 +641,8 @@ const app = createApp({
   feishuVerificationToken: config.feishuVerificationToken,
   feishuLongConnection: feishuStatusSummary.mode === 'long-connection',
   feishuGroupRequireMention: feishuStatusSummary.groupRequireMention,
+  feishuBotOpenId: feishuBotIdentity.openId,
+  feishuBotName: feishuBotIdentity.appName,
   feishuDocBaseUrlConfigured: feishuStatusSummary.docBaseUrlConfigured,
   feishuStartupHelpEnabled: feishuStatusSummary.startupHelpEnabled,
   feishuStartupHelpAdminConfigured: feishuStatusSummary.startupHelpAdminConfigured,
@@ -645,6 +735,8 @@ app.listen(config.port, () => {
         dispatchFeishuMessageReceiveEvent({
           allowFrom: config.allowFrom,
           feishuGroupRequireMention: config.feishuGroupRequireMention,
+          feishuBotOpenId: feishuBotIdentity.openId,
+          feishuBotName: feishuBotIdentity.appName,
           isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
           handleText: async (input) => appDepsHandleText(input),
           handleFeishuCardAction: async (input) => appDepsHandleFeishuCardAction(input),
@@ -655,6 +747,8 @@ app.listen(config.port, () => {
         dispatchFeishuCardActionEvent({
           allowFrom: config.allowFrom,
           feishuGroupRequireMention: config.feishuGroupRequireMention,
+          feishuBotOpenId: feishuBotIdentity.openId,
+          feishuBotName: feishuBotIdentity.appName,
           isDuplicateMessage: (msgId) => dedupStore.isDuplicate(msgId),
           handleText: async (input) => appDepsHandleText(input),
           handleFeishuCardAction: async (input) => appDepsHandleFeishuCardAction(input),

@@ -727,6 +727,109 @@ describe('dispatchFeishuMessageReceiveEvent', () => {
       replyTargetType: 'chat_id',
     });
   });
+
+  it('accepts group messages with bot mention id when text_without_at_bot is absent', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      feishuGroupRequireMention: true,
+      feishuBotOpenId: 'ou_bot_1',
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_group_5' } },
+      message: {
+        message_id: 'om_group_5',
+        chat_id: 'oc_group_5',
+        chat_type: 'group',
+        message_type: 'text',
+        content: JSON.stringify({ text: '@_user_1 在吗' }),
+        mentions: [
+          {
+            key: '@_user_1',
+            id: 'ou_bot_1',
+            id_type: 'open_id',
+            name: '机器人',
+          },
+        ],
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).toHaveBeenCalledWith({
+      channel: 'feishu',
+      userId: 'ou_group_5',
+      content: '@_user_1 在吗',
+      sourceMessageId: 'om_group_5',
+      allowReply: true,
+      replyTargetId: 'oc_group_5',
+      replyTargetType: 'chat_id',
+    });
+  });
+
+  it('ignores group messages that only @ other users when mention trigger is enabled', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      feishuGroupRequireMention: true,
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_group_4' } },
+      message: {
+        message_id: 'om_group_4',
+        chat_id: 'oc_group_4',
+        chat_type: 'group',
+        message_type: 'text',
+        content: JSON.stringify({ text: '@张三 帮我看下' }),
+        mentions: [
+          {
+            key: '@_user_1',
+            id: { open_id: 'ou_other_user' },
+            name: '张三',
+            tenant_key: 'tenant_x',
+          },
+        ],
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).not.toHaveBeenCalled();
+  });
+
+  it('ignores group messages that @ others when bot open id is configured', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      feishuGroupRequireMention: true,
+      feishuBotOpenId: 'ou_bot_2',
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_group_6' } },
+      message: {
+        message_id: 'om_group_6',
+        chat_id: 'oc_group_6',
+        chat_type: 'group',
+        message_type: 'text',
+        content: JSON.stringify({ text: '@_user_1 帮忙看看' }),
+        mentions: [
+          {
+            key: '@_user_1',
+            id: 'ou_other_6',
+            id_type: 'open_id',
+            name: '其他同学',
+          },
+        ],
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).not.toHaveBeenCalled();
+  });
 });
 
 describe('dispatchFeishuCardActionEvent', () => {
