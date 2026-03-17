@@ -103,20 +103,36 @@ describe('buildFeishuApiLoginFormMessage', () => {
     const form = getCardElements(payload).find((item) => item.tag === 'form') as
       | {
           name?: string;
-          value?: Record<string, unknown>;
           elements?: Array<Record<string, unknown>>;
         }
       | undefined;
     expect(form?.name).toBe('codex_api_login');
-    expect(form?.value?.gateway_action).toBe('codex_login.submit_api_credentials');
     const inputs = (form?.elements ?? []).filter((item) => item.tag === 'input');
     expect(inputs.map((item) => item.name)).toEqual(['base_url', 'api_key', 'model']);
     expect(inputs.every((item) => item.label_position === 'top')).toBe(true);
+    expect(inputs.find((item) => item.name === 'base_url')?.default_value).toBe('https://codex.ai02.cn');
+    expect(inputs.find((item) => item.name === 'model')?.default_value).toBe('gpt-5.3-codex');
     const submitButton = (form?.elements ?? []).find((item) => item.tag === 'button') as
-      | { action_type?: string; name?: string }
+      | { action_type?: string; name?: string; value?: Record<string, unknown> }
       | undefined;
     expect(submitButton?.action_type).toBe('form_submit');
     expect(submitButton?.name).toBe('submit_api_login');
+    expect(submitButton?.value?.gateway_action).toBe('codex_login.submit_api_credentials');
+  });
+
+  it('pre-fills opencode base url and model as default values', () => {
+    const payload = buildFeishuApiLoginFormMessage({
+      provider: 'opencode',
+    });
+    const form = getCardElements(payload).find((item) => item.tag === 'form') as
+      | {
+          elements?: Array<Record<string, unknown>>;
+        }
+      | undefined;
+    const inputs = (form?.elements ?? []).filter((item) => item.tag === 'input');
+
+    expect(inputs.find((item) => item.name === 'base_url')?.default_value).toBe('https://api.openai.com/v1');
+    expect(inputs.find((item) => item.name === 'model')?.default_value).toBe('gpt-5');
   });
 });
 
@@ -156,13 +172,16 @@ describe('buildFeishuOpenCodeInputFallbackMessage', () => {
     const form = getCardElements(payload).find((item) => item.tag === 'form') as
       | {
           name?: string;
-          value?: Record<string, unknown>;
           elements?: Array<Record<string, unknown>>;
         }
       | undefined;
     expect(form?.name).toBe('opencode_oauth_input');
-    expect(form?.value?.gateway_action).toBe('opencode_login.submit_auth_input');
     const inputs = (form?.elements ?? []).filter((item) => item.tag === 'input');
     expect(inputs.map((item) => item.name)).toEqual(['auth_input']);
+    const submitButton = (form?.elements ?? []).find((item) => item.tag === 'button') as
+      | { value?: Record<string, unknown> }
+      | undefined;
+    expect(submitButton?.value?.gateway_action).toBe('opencode_login.submit_auth_input');
+    expect(submitButton?.value?.provider_id).toBe('openai');
   });
 });

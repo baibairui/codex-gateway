@@ -606,6 +606,77 @@ describe('createApp feishu callback', () => {
       },
     });
   });
+
+  it('merges feishu form_value into controlled card actions', async () => {
+    const handleText = vi.fn(async () => undefined);
+    const handleFeishuCardAction = vi.fn(async () => undefined);
+    const baseUrl = await startTestServer({
+      feishuVerificationToken: 'expected-token',
+      handleText,
+      handleFeishuCardAction,
+    });
+
+    const response = await fetch(`${baseUrl}/feishu/callback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        schema: '2.0',
+        header: {
+          token: 'expected-token',
+          event_type: 'card.action.trigger',
+        },
+        event: {
+          operator: {
+            operator_id: {
+              open_id: 'ou_card_5',
+            },
+          },
+          context: {
+            chat_id: 'oc_group_5',
+          },
+          action: {
+            value: {
+              gateway_action: 'codex_login.submit_api_credentials',
+            },
+            form_value: {
+              base_url: {
+                default_value: 'https://api.openai.com/v1',
+              },
+              api_key: {
+                value: 'sk-test',
+              },
+              model: {
+                default_value: 'gpt-5',
+              },
+            },
+          },
+        },
+      }),
+    });
+    const payload = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({});
+    expect(handleText).not.toHaveBeenCalled();
+    expect(handleFeishuCardAction).toHaveBeenCalledWith({
+      userId: 'ou_card_5',
+      chatId: 'oc_group_5',
+      publicBaseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
+      action: 'codex_login.submit_api_credentials',
+      value: {
+        gateway_action: 'codex_login.submit_api_credentials',
+        base_url: {
+          default_value: 'https://api.openai.com/v1',
+        },
+        api_key: {
+          value: 'sk-test',
+        },
+        model: {
+          default_value: 'gpt-5',
+        },
+      },
+    });
+  });
 });
 
 describe('dispatchFeishuMessageReceiveEvent', () => {

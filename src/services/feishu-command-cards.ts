@@ -1061,10 +1061,6 @@ export function buildFeishuOpenCodeInputFallbackMessage(input: {
       {
         tag: 'form',
         name: 'opencode_oauth_input',
-        value: {
-          gateway_action: 'opencode_login.submit_auth_input',
-          provider_id: input.provider,
-        },
         elements: [
           {
             tag: 'input',
@@ -1127,13 +1123,11 @@ export function buildFeishuApiLoginFormMessage(defaults?: {
       {
         tag: 'form',
         name: 'codex_api_login',
-        value: {
-          gateway_action: 'codex_login.submit_api_credentials',
-        },
         elements: [
           {
             tag: 'input',
             name: 'base_url',
+            default_value: baseUrl,
             label_position: 'top',
             label: {
               tag: 'plain_text',
@@ -1162,6 +1156,7 @@ export function buildFeishuApiLoginFormMessage(defaults?: {
           {
             tag: 'input',
             name: 'model',
+            default_value: model,
             label_position: 'top',
             label: {
               tag: 'plain_text',
