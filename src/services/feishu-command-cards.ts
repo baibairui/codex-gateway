@@ -1100,11 +1100,13 @@ export function buildFeishuApiLoginFormMessage(defaults?: {
   provider?: CliProvider;
   baseUrl?: string;
   model?: string;
+  reasoningEffort?: string;
 }): string {
   const provider = defaults?.provider ?? 'codex';
   const providerLabel = provider === 'opencode' ? 'OpenCode' : 'Codex';
   const baseUrl = defaults?.baseUrl?.trim() || (provider === 'opencode' ? 'https://api.openai.com/v1' : 'https://codex.ai02.cn');
   const model = defaults?.model?.trim() || (provider === 'opencode' ? 'gpt-5' : 'gpt-5.3-codex');
+  const reasoningEffort = defaults?.reasoningEffort?.trim() || '';
   return buildFeishuInteractiveMessage({
     config: {
       wide_screen_mode: true,
@@ -1120,6 +1122,9 @@ export function buildFeishuApiLoginFormMessage(defaults?: {
     elements: [
       buildFeishuTitleBlock(`写入 ${providerLabel} API 配置`, '提交后会覆盖当前项目内的登录配置。'),
       buildFeishuTipsNote(`建议填写：base_url=${baseUrl}，model=${model}`),
+      ...(provider === 'opencode'
+        ? [buildFeishuTipsNote('可选：reasoning effort 支持 none / minimal / low / medium / high / xhigh。')]
+        : []),
       {
         tag: 'form',
         name: 'codex_api_login',
@@ -1168,6 +1173,23 @@ export function buildFeishuApiLoginFormMessage(defaults?: {
             },
             max_length: 120,
           },
+          ...(provider === 'opencode'
+            ? [{
+                tag: 'input',
+                name: 'reasoning_effort',
+                default_value: reasoningEffort,
+                label_position: 'top',
+                label: {
+                  tag: 'plain_text',
+                  content: 'Reasoning Effort',
+                },
+                placeholder: {
+                  tag: 'plain_text',
+                  content: 'none | minimal | low | medium | high | xhigh',
+                },
+                max_length: 20,
+              } satisfies Record<string, unknown>]
+            : []),
           {
             tag: 'button',
             name: 'submit_api_login',
@@ -1203,6 +1225,7 @@ export function buildFeishuApiLoginResultMessage(input: {
   baseUrl?: string;
   model?: string;
   maskedApiKey?: string;
+  reasoningEffort?: string;
   message: string;
 }): string {
   const providerLabel = input.provider === 'opencode' ? 'OpenCode' : 'Codex';
@@ -1223,6 +1246,7 @@ export function buildFeishuApiLoginResultMessage(input: {
       buildFeishuFieldGrid([
         { label: 'API URL', value: input.baseUrl ?? '' },
         { label: 'Model', value: input.model ?? '' },
+        { label: 'Reasoning', value: input.reasoningEffort ?? '' },
         { label: 'API Key', value: input.maskedApiKey ?? (input.ok ? '已配置' : '') },
       ]),
       ...buildValueButtonRows(input.ok
@@ -1245,6 +1269,7 @@ export function buildFeishuApiLoginResultMessage(input: {
                 gateway_action: 'codex_login.open_api_form',
                 base_url: input.baseUrl ?? '',
                 model: input.model ?? '',
+                reasoning_effort: input.reasoningEffort ?? '',
               },
             },
           ]),

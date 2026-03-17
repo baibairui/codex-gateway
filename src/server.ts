@@ -838,6 +838,7 @@ async function appDepsHandleFeishuCardAction(input: {
       provider: runtimeProvider,
       baseUrl: extractCardField(input.value, 'base_url'),
       model: extractCardField(input.value, 'model'),
+      reasoningEffort: extractCardField(input.value, 'reasoning_effort'),
     }));
     return;
   }
@@ -850,6 +851,7 @@ async function appDepsHandleFeishuCardAction(input: {
         baseUrl: extractCardField(input.value, 'base_url') ?? '',
         apiKey: extractCardField(input.value, 'api_key') ?? '',
         model: extractCardField(input.value, 'model') ?? runtimeProviderSpec.defaultModel,
+        reasoningEffort: extractCardField(input.value, 'reasoning_effort'),
       });
       await sendText('feishu', input.userId, buildFeishuApiLoginResultMessage({
         provider: runtimeProvider,
@@ -858,6 +860,7 @@ async function appDepsHandleFeishuCardAction(input: {
         baseUrl: result.baseUrl,
         model: result.model,
         maskedApiKey: result.maskedApiKey,
+        reasoningEffort: result.reasoningEffort,
       }));
     } catch (error) {
       await sendText('feishu', input.userId, buildFeishuApiLoginResultMessage({
@@ -866,6 +869,7 @@ async function appDepsHandleFeishuCardAction(input: {
         message: error instanceof Error ? error.message : String(error),
         baseUrl: extractCardField(input.value, 'base_url') ?? '',
         model: extractCardField(input.value, 'model') ?? runtimeProviderSpec.defaultModel,
+        reasoningEffort: extractCardField(input.value, 'reasoning_effort'),
       }));
     }
     return;

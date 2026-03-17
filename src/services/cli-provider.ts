@@ -17,6 +17,7 @@ export interface CliApiLoginWriteInput {
   baseUrl: string;
   apiKey: string;
   model?: string;
+  reasoningEffort?: string;
 }
 
 export interface CliApiLoginWriteResult {
@@ -25,6 +26,7 @@ export interface CliApiLoginWriteResult {
   baseUrl: string;
   model: string;
   maskedApiKey: string;
+  reasoningEffort?: string;
 }
 
 const PROVIDERS: Record<CliProvider, CliProviderSpec> = {
@@ -160,6 +162,7 @@ export async function writeCliApiLoginConfig(input: CliApiLoginWriteInput): Prom
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const apiKey = normalizeApiKey(input.apiKey);
   const rawModel = normalizeModel(input.model ?? providerSpec.defaultModel);
+  const reasoningEffort = normalizeReasoningEffort(input.reasoningEffort);
   const cliHomeDir = path.resolve(input.cliHomeDir);
   fs.mkdirSync(cliHomeDir, { recursive: true });
 
@@ -174,7 +177,13 @@ export async function writeCliApiLoginConfig(input: CliApiLoginWriteInput): Prom
           npm: '@ai-sdk/openai-compatible',
           name: 'Gateway',
           models: {
-            [rawModel]: {},
+            [rawModel]: reasoningEffort
+              ? {
+                  options: {
+                    reasoningEffort,
+                  },
+                }
+              : {},
           },
           options: {
             baseURL: baseUrl,
@@ -194,6 +203,7 @@ export async function writeCliApiLoginConfig(input: CliApiLoginWriteInput): Prom
       baseUrl,
       model,
       maskedApiKey: maskApiKey(apiKey),
+      reasoningEffort,
     };
   }
 
@@ -268,6 +278,19 @@ function normalizeOpenCodeModel(input: string): string {
     return trimmed;
   }
   return `gateway/${trimmed}`;
+}
+
+function normalizeReasoningEffort(input: string | undefined): string | undefined {
+  const trimmed = input?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const normalized = trimmed.toLowerCase();
+  const allowed = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+  if (!allowed.has(normalized)) {
+    throw new Error('invalid reasoning_effort');
+  }
+  return normalized;
 }
 
 function isExecutableFile(filePath: string): boolean {

@@ -67,4 +67,21 @@ describe('writeCliApiLoginConfig', () => {
     expect(configText).toContain('"gpt-5": {}');
     expect(readCliHomeDefaultModel('opencode', cliHomeDir)).toBe('gateway/gpt-5');
   });
+
+  it('writes opencode reasoning effort into model options when provided', async () => {
+    const cliHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-home-reasoning-'));
+    const result = await writeCliApiLoginConfig({
+      provider: 'opencode',
+      cliHomeDir,
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-opencode-secret',
+      model: 'gpt-5',
+      reasoningEffort: 'high',
+    });
+
+    const configPath = path.join(cliHomeDir, '.config', 'opencode', 'opencode.json');
+    const configText = fs.readFileSync(configPath, 'utf8');
+    expect(configText).toContain('"reasoningEffort": "high"');
+    expect(result.reasoningEffort).toBe('high');
+  });
 });

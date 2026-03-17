@@ -133,6 +133,7 @@ describe('buildFeishuApiLoginFormMessage', () => {
 
     expect(inputs.find((item) => item.name === 'base_url')?.default_value).toBe('https://api.openai.com/v1');
     expect(inputs.find((item) => item.name === 'model')?.default_value).toBe('gpt-5');
+    expect(inputs.find((item) => item.name === 'reasoning_effort')?.placeholder?.content).toBe('none | minimal | low | medium | high | xhigh');
   });
 });
 
