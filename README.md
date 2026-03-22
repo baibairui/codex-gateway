@@ -18,6 +18,7 @@
 - [环境变量与关键配置](#环境变量与关键配置)
 - [飞书接入](#飞书接入)
 - [企业微信接入](#企业微信接入)
+- [个人微信接入](#个人微信接入)
 - [登录与授权](#登录与授权)
 - [CLI 与会话命令](#cli-与会话命令)
 - [Skill、浏览器与提醒能力](#skill浏览器与提醒能力)
@@ -73,8 +74,9 @@
 
 - 企业微信自建应用
 - 飞书应用
+- 个人微信渠道（基于扫码登录 + 轮询收发）
 
-飞书支持长连接模式，适合没有公网回调条件的部署环境；企业微信仍需要公网可访问回调地址。
+飞书支持长连接模式，适合没有公网回调条件的部署环境；企业微信仍需要公网可访问回调地址。个人微信渠道使用固定微信后端地址，首次启动时会提示扫码登录。
 
 ### 4. Skill 驱动的真实执行
 
@@ -208,6 +210,20 @@ FEISHU_LONG_CONNECTION=true
 FEISHU_GROUP_REQUIRE_MENTION=true
 ```
 
+如果你只接个人微信，可以把：
+
+```env
+WECOM_ENABLED=false
+FEISHU_ENABLED=false
+WEIXIN_ENABLED=true
+```
+
+首次启动时如果还没有微信会话，gateway 会提示你先扫码登录；也可以手动执行：
+
+```bash
+npm run weixin:login
+```
+
 ### 4. 自检并启动
 
 ```bash
@@ -248,6 +264,27 @@ curl http://127.0.0.1:3000/healthz
 - `RUNNER_ENABLED`：是否允许网关实际调用 Codex
 - `CODEX_SEARCH`：默认是否开启联网搜索，可被用户 `/search on|off` 覆盖
 - `CODEX_SANDBOX`：Codex 沙箱模式，通常使用 `full-auto`
+
+### 个人微信配置
+
+- `WEIXIN_ENABLED=true`：启用个人微信渠道
+- `WEIXIN_BASE_URL`：可选，默认固定为 `https://ilinkai.weixin.qq.com`
+- `WEIXIN_BOT_TOKEN`：可选；更推荐通过扫码登录后自动落到 `.data/weixin-session.json`
+- `WEIXIN_POLL_INTERVAL_MS`：微信轮询间隔，默认 `1000`
+
+推荐方式不是手填 token，而是：
+
+```bash
+npm run weixin:login
+```
+
+登录成功后，会自动写入：
+
+```text
+.data/weixin-session.json
+```
+
+之后启动 gateway 时会优先读取这个会话文件；如果启用了微信渠道但未登录，启动器会先提示你完成扫码登录。
 
 ### 工作目录隔离
 
@@ -419,6 +456,60 @@ WEWORK_ENCODING_AES_KEY=你配置的43位EncodingAESKey
 ```env
 WECOM_ENABLED=false
 ```
+
+## 个人微信接入
+
+个人微信渠道适合你想把 `codex-gateway` 直接接到自己的微信号，而不是企业微信或飞书。
+
+### 最小配置
+
+```env
+WECOM_ENABLED=false
+FEISHU_ENABLED=false
+WEIXIN_ENABLED=true
+```
+
+默认情况下：
+
+- `WEIXIN_BASE_URL` 固定使用 `https://ilinkai.weixin.qq.com`
+- `WEIXIN_BOT_TOKEN` 不建议手填
+- 推荐通过扫码登录生成本地会话文件
+
+### 登录方式
+
+执行：
+
+```bash
+npm run weixin:login
+```
+
+会发生这些动作：
+
+1. 请求微信二维码
+2. 在终端输出二维码链接
+3. 你用手机微信扫码并确认
+4. 会话自动写入 `.data/weixin-session.json`
+
+### 启动方式
+
+扫码登录后，正常启动 gateway：
+
+```bash
+npm run build
+npm start
+```
+
+如果你直接启动且还没有微信会话，启动器会先提示你登录微信，而不是静默失败。
+
+### 普通用户怎么用
+
+管理员完成一次扫码登录后，普通用户只需要：
+
+1. 在微信里给这个 bot 发消息
+2. 像普通聊天一样提需求
+3. 等待 gateway 自动调用 Codex 并回消息
+
+普通用户不需要知道 `baseUrl`、`bot_token`、工作目录或内部会话文件。
 
 ### 回调配置
 
