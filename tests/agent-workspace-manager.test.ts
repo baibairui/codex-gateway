@@ -138,7 +138,79 @@ describe('AgentWorkspaceManager', () => {
     expect(manager.isSharedMemoryEmpty(userId)).toBe(true);
 
     const userDir = findOnlyUserDir(dir);
-    fs.appendFileSync(path.join(userDir, 'user.md'), '- Preferred name: Alice\n', 'utf8');
+    fs.writeFileSync(path.join(userDir, 'user.md'), [
+      '# User Identity',
+      '',
+      '## Core Identity',
+      '- Preferred name: Alice',
+      '- Primary role: 工程师',
+      '- Language style: 中文',
+      '- Communication style: 直接',
+      '- Decision principles:',
+      '  - 基于事实',
+      '',
+      '## Stable Preferences',
+      '-',
+      '',
+      '## Ongoing Context',
+      '-',
+      '',
+    ].join('\n'), 'utf8');
+
+    expect(manager.isSharedMemoryEmpty(userId)).toBe(false);
+  });
+
+  it('keeps user identity empty until core identity fields are populated', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-'));
+    const manager = new AgentWorkspaceManager(dir);
+    const userId = 'wecom:u1';
+
+    manager.createWorkspace({
+      userId,
+      agentName: '个人助理',
+      existingAgentIds: [],
+    });
+
+    const userDir = findOnlyUserDir(dir);
+    fs.writeFileSync(path.join(userDir, 'user.md'), [
+      '# User Identity',
+      '',
+      '## Core Identity',
+      '- Preferred name: Alice',
+      '- Primary role:',
+      '- Language style:',
+      '- Communication style:',
+      '- Decision principles:',
+      '  - 基于事实',
+      '',
+      '## Stable Preferences',
+      '-',
+      '',
+      '## Ongoing Context',
+      '-',
+      '',
+    ].join('\n'), 'utf8');
+
+    expect(manager.isSharedMemoryEmpty(userId)).toBe(true);
+
+    fs.writeFileSync(path.join(userDir, 'user.md'), [
+      '# User Identity',
+      '',
+      '## Core Identity',
+      '- Preferred name: Alice',
+      '- Primary role: 工程师',
+      '- Language style: 中文',
+      '- Communication style: 直接',
+      '- Decision principles:',
+      '  - 基于事实',
+      '',
+      '## Stable Preferences',
+      '-',
+      '',
+      '## Ongoing Context',
+      '-',
+      '',
+    ].join('\n'), 'utf8');
 
     expect(manager.isSharedMemoryEmpty(userId)).toBe(false);
   });
@@ -153,6 +225,54 @@ describe('AgentWorkspaceManager', () => {
       agentName: 'first-agent',
       existingAgentIds: [],
     });
+    expect(manager.isWorkspaceIdentityEmpty(workspace.workspaceDir)).toBe(true);
+
+    fs.writeFileSync(path.join(workspace.workspaceDir, 'SOUL.md'), [
+      '# SOUL',
+      '',
+      '- Agent name: first-agent',
+      '- Agent ID: first-agent',
+      '- Role: first-agent',
+      '- Mission: 负责需求澄清与实现',
+      '- Working style: 直接、基于事实',
+      '- Decision principles:',
+      '  - 遵守事实',
+      '- Boundaries:',
+      '  - 不做半途兼容方案',
+      '- Success criteria: 可验证、可回归、可上线',
+      '',
+    ].join('\n'), 'utf8');
+
+    expect(manager.isWorkspaceIdentityEmpty(workspace.workspaceDir)).toBe(false);
+  });
+
+  it('keeps workspace identity empty until role is initialized as well', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-workspace-'));
+    const manager = new AgentWorkspaceManager(dir);
+    const userId = 'wecom:u1';
+
+    const workspace = manager.createWorkspace({
+      userId,
+      agentName: 'first-agent',
+      existingAgentIds: [],
+    });
+
+    fs.writeFileSync(path.join(workspace.workspaceDir, 'SOUL.md'), [
+      '# SOUL',
+      '',
+      '- Agent name: first-agent',
+      '- Agent ID: first-agent',
+      '- Role:',
+      '- Mission: 负责需求澄清与实现',
+      '- Working style: 直接、基于事实',
+      '- Decision principles:',
+      '  - 遵守事实',
+      '- Boundaries:',
+      '  - 不做半途兼容方案',
+      '- Success criteria: 可验证、可回归、可上线',
+      '',
+    ].join('\n'), 'utf8');
+
     expect(manager.isWorkspaceIdentityEmpty(workspace.workspaceDir)).toBe(true);
 
     fs.writeFileSync(path.join(workspace.workspaceDir, 'SOUL.md'), [

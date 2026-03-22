@@ -286,9 +286,6 @@ function isSystemAgentRecord(agent: { agentId: string; name?: string }): boolean
 }
 
 function resolveAgentWorkdir(agent: { agentId: string; workspaceDir: string }): string {
-  if (agent.agentId === MEMORY_ONBOARDING_AGENT_ID) {
-    return path.dirname(agent.workspaceDir);
-  }
   return agent.workspaceDir;
 }
 

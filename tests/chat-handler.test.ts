@@ -2113,7 +2113,7 @@ local_audio_path=${sourcePath}`,
       template: 'memory-onboarding',
     }));
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      workdir: '/tmp',
+      workdir: '/tmp/memory-onboarding',
       search: false,
       prompt: expect.stringContaining('language style'),
     }));
@@ -2156,7 +2156,7 @@ local_audio_path=${sourcePath}`,
     expect(run).toHaveBeenCalledTimes(2);
     expect(run).toHaveBeenLastCalledWith(expect.objectContaining({
       threadId: 'thread_onboarding',
-      workdir: '/tmp',
+      workdir: '/tmp/memory-onboarding',
       prompt: expect.stringContaining('我叫 Alice'),
     }));
     expect(sessionStore.getCurrentAgent('u1').agentId).toBe('default');
@@ -2488,7 +2488,7 @@ local_audio_path=${sourcePath}`,
       prompt: expect.stringContaining('我们开始吧'),
     }));
     expect(sessionStore.getCurrentAgent('u1').agentId).toBe('default');
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('shared-memory 尚未初始化'));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('用户身份尚未初始化'));
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('/agent init-memory'));
   });
 
@@ -2528,7 +2528,7 @@ local_audio_path=${sourcePath}`,
       search: false,
       prompt: expect.stringContaining('继续'),
     }));
-    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('当前 agent 自身份尚未初始化'));
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('当前 agent 身份尚未初始化'));
     expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('/agent init-memory'));
   });
 

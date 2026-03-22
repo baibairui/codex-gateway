@@ -931,7 +931,7 @@ function matchField(content: string | undefined, label: string): string | undefi
   if (!content) {
     return undefined;
   }
-  const pattern = new RegExp(`^-\\s+${escapeRegExp(label)}:\\s*(.*)$`, 'im');
+  const pattern = new RegExp(`^-\\s+${escapeRegExp(label)}:[ \\t]*([^\\n]*)$`, 'im');
   const value = content.match(pattern)?.[1]?.trim();
   if (!value || value === '-') {
     return undefined;
@@ -1042,23 +1042,12 @@ function normalizeIdentityText(content: string): string {
 }
 
 function hasMeaningfulIdentityContent(content: string): boolean {
-  for (const rawLine of content.split('\n')) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#') || line === '-') {
-      continue;
-    }
-    if (/^-\s+\S/.test(line) && !line.endsWith(':')) {
-      return true;
-    }
-    if (/^-\s+[^:]+:\s+\S/.test(line)) {
-      return true;
-    }
-  }
-  return false;
+  const requiredFields = ['Preferred name', 'Primary role', 'Language style', 'Communication style'];
+  return requiredFields.every((label) => matchField(content, label));
 }
 
 function hasInitializedSoulContent(content: string): boolean {
-  const requiredFields = ['Mission', 'Working style', 'Success criteria'];
+  const requiredFields = ['Role', 'Mission', 'Working style', 'Success criteria'];
   for (const label of requiredFields) {
     if (!matchField(content, label)) {
       return false;
