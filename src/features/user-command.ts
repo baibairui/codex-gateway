@@ -29,6 +29,7 @@ export interface UserCommandResult {
   clearProvider?: boolean;
   querySearch?: boolean;
   setSearchEnabled?: boolean;
+  stopRunId?: string;
   reviewMode?: 'uncommitted' | 'base' | 'commit';
   reviewTarget?: string;
   reviewPrompt?: string;
@@ -123,6 +124,7 @@ const HELP_ENTRIES: Array<{ section: string; line: string }> = [
   { section: '模型、技能与执行', line: '/skills disable agent [skillName] - 禁用某个当前 agent skill' },
   { section: '模型、技能与执行', line: '/search - 查看联网搜索状态' },
   { section: '模型、技能与执行', line: '/search on|off - 开启/关闭联网搜索' },
+  { section: '模型、技能与执行', line: '/run stop [runId] - 停止指定运行中的任务' },
   { section: '工作区与运维', line: '/login - 使用设备码登录 Codex' },
   { section: '工作区与运维', line: '/repair-users - 清理并修复已部署用户工作区（技能注入、规则升级、工作目录自愈）' },
   { section: '工作区与运维', line: '/review - 审查当前 agent 工作区变更' },
@@ -447,6 +449,20 @@ export function handleUserCommand(content: string, context: UserCommandContext =
       return {
         handled: true,
         message: '用法：/search on|off',
+      };
+    }
+    case '/run': {
+      const action = (parts[1] ?? '').toLowerCase();
+      const runId = (parts[2] ?? '').trim();
+      if (action === 'stop' && runId) {
+        return {
+          handled: true,
+          stopRunId: runId,
+        };
+      }
+      return {
+        handled: true,
+        message: '用法：/run stop <runId>',
       };
     }
     case '/deploy-workspace':

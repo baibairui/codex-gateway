@@ -579,34 +579,43 @@ describe('FeishuApi', () => {
     });
   });
 
-  it('updates interactive messages using template shorthand', async () => {
-    const updateCalls: Array<{
-      message_id: string;
-      msg_type: string;
-      content: string;
+  it('patches interactive messages using template shorthand without msg_type', async () => {
+    const fetchCalls: Array<{
+      url: string;
+      method?: string;
+      headers?: HeadersInit;
+      body?: string;
     }> = [];
     const sdkClient = {
       im: {
         message: {
           create: vi.fn(),
           reply: vi.fn(),
-          update: vi.fn(async (payload: {
-            path: { message_id: string };
-            data: { msg_type: string; content: string };
-          }) => {
-            updateCalls.push({
-              message_id: payload.path.message_id,
-              msg_type: payload.data.msg_type,
-              content: payload.data.content,
-            });
-            return { code: 0, msg: 'ok' };
-          }),
+          update: vi.fn(),
         },
         image: { create: vi.fn() },
         file: { create: vi.fn() },
         messageResource: { get: vi.fn() },
       },
     };
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({
+        url: String(input),
+        method: init?.method,
+        headers: init?.headers,
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
+      if (String(input).includes('/tenant_access_token/internal')) {
+        return new Response(
+          JSON.stringify({ code: 0, msg: 'ok', tenant_access_token: 't_xxx', expire: 7200 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ code: 0, msg: 'ok', data: {} }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
 
     const api = new FeishuApi({
       appId: 'cli_xxx',
@@ -616,30 +625,31 @@ describe('FeishuApi', () => {
     });
 
     await (api as unknown as {
-      updateMessage: (input: {
+      patchCardMessage: (input: {
         messageId: string;
-        msgType: string;
         content: Record<string, unknown> | string;
       }) => Promise<void>;
-    }).updateMessage({
+    }).patchCardMessage({
       messageId: 'om_update_1',
-      msgType: 'interactive',
       content: {
         template_id: 'AAqC5c9997YMX',
         template_variable: { name: '白瑞' },
       },
     });
 
-    expect(updateCalls).toEqual([
+    expect(fetchCalls.slice(1)).toEqual([
       {
-        message_id: 'om_update_1',
-        msg_type: 'interactive',
-        content: JSON.stringify({
-          type: 'template',
-          data: {
-            template_id: 'AAqC5c9997YMX',
-            template_variable: { name: '白瑞' },
-          },
+        url: 'https://open.feishu.cn/open-apis/im/v1/messages/om_update_1',
+        method: 'PATCH',
+        headers: expect.any(Headers),
+        body: JSON.stringify({
+          content: JSON.stringify({
+            type: 'template',
+            data: {
+              template_id: 'AAqC5c9997YMX',
+              template_variable: { name: '白瑞' },
+            },
+          }),
         }),
       },
     ]);

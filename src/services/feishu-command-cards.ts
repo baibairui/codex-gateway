@@ -1,5 +1,6 @@
 type Channel = 'wecom' | 'feishu' | 'weixin';
 type CliProvider = 'codex' | 'opencode';
+type RunStatus = 'running' | 'stopping' | 'stopped' | 'stop_failed' | 'completed';
 
 type FeishuCardTemplate = 'blue' | 'wathet' | 'turquoise' | 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'grey';
 
@@ -905,6 +906,59 @@ export function formatCommandOutboundMessage(channel: Channel, commandName: stri
     return text;
   }
   return buildFeishuInteractiveMessage(buildFeishuInteractiveCommandCard(commandName, normalized));
+}
+
+export function buildFeishuRunCardMessage(input: {
+  runId: string;
+  agentName: string;
+  provider: CliProvider;
+  status: RunStatus;
+  startedAt: number;
+  lastActivityAt: number;
+  threadId?: string;
+}): string {
+  const statusMap: Record<RunStatus, { title: string; template: FeishuCardTemplate; summary: string }> = {
+    running: { title: '处理中', template: 'turquoise', summary: '正在为你处理当前请求' },
+    stopping: { title: '正在停止', template: 'yellow', summary: '正在结束当前任务' },
+    stopped: { title: '已停止', template: 'grey', summary: '当前任务已停止' },
+    stop_failed: { title: '停止未完成', template: 'orange', summary: '停止请求未成功完成' },
+    completed: { title: '已完成', template: 'green', summary: '当前任务已处理完成' },
+  };
+  const statusMeta = statusMap[input.status];
+  const elements: Array<Record<string, unknown>> = [
+    buildFeishuTextBlock(statusMeta.summary),
+  ];
+  if (input.status === 'running') {
+    elements.push(
+      ...buildValueButtonRows([
+        {
+          label: '结束',
+          type: 'danger',
+          value: {
+            gateway_cmd: `/run stop ${input.runId}`,
+            command: `/run stop ${input.runId}`,
+            text: `/run stop ${input.runId}`,
+            run_id: input.runId,
+          },
+        },
+      ], 1),
+    );
+  }
+  return buildFeishuInteractiveMessage({
+    config: {
+      wide_screen_mode: true,
+      enable_forward: true,
+      update_multi: true,
+    },
+    header: {
+      template: statusMeta.template,
+      title: {
+        tag: 'plain_text',
+        content: statusMeta.title,
+      },
+    },
+    elements,
+  });
 }
 
 export function buildFeishuLoginChoiceMessage(input: {

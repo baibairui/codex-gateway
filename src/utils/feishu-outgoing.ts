@@ -20,6 +20,6 @@ export function normalizeFeishuStructuredMessage(
   };
 }
 
-export function isFeishuUpdateMessageType(msgType: string): msgType is 'text' | 'post' | 'interactive' {
-  return msgType === 'text' || msgType === 'post' || msgType === 'interactive';
+export function isFeishuUpdateMessageType(msgType: string): msgType is 'text' | 'post' {
+  return msgType === 'text' || msgType === 'post';
 }

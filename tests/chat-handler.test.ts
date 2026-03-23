@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createChatHandler } from '../src/services/chat-handler.js';
+import { buildFeishuRunCardMessage } from '../src/services/feishu-command-cards.js';
 
 type FeishuCardElement = Record<string, unknown>;
 type FeishuCardButton = {
@@ -25,6 +26,19 @@ function getFeishuCardElements(payload: string): FeishuCardElement[] {
   };
   expect(parsed.content?.schema).toBe('2.0');
   return parsed.content?.body?.elements ?? [];
+}
+
+function getFeishuCardHeaderTitle(payload: string): string | undefined {
+  const parsed = JSON.parse(payload) as {
+    content?: {
+      header?: {
+        title?: {
+          content?: string;
+        };
+      };
+    };
+  };
+  return parsed.content?.header?.title?.content;
 }
 
 function extractFeishuButtons(elements: FeishuCardElement[]): FeishuCardButton[] {
@@ -172,6 +186,58 @@ async function withMockModelsCache(
 }
 
 describe('createChatHandler', () => {
+  it('renders a feishu run card with stop button while running', () => {
+    const payload = buildFeishuRunCardMessage({
+      runId: 'run_1',
+      agentName: '默认助手',
+      provider: 'codex',
+      status: 'running',
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
+    });
+    const elements = getFeishuCardElements(payload);
+    const buttons = extractFeishuButtons(elements);
+    const stopButton = buttons.find((button) => button.value?.gateway_cmd === '/run stop run_1');
+    const parsed = JSON.parse(payload) as {
+      content?: {
+        header?: {
+          template?: string;
+        };
+      };
+    };
+    expect(getFeishuCardHeaderTitle(payload)).toBe('处理中');
+    expect(parsed.content?.header?.template).toBe('turquoise');
+    expect(stopButton?.text?.content).toBe('结束');
+    expect(stopButton?.type).toBe('danger');
+    const serialized = JSON.stringify(elements);
+    expect(serialized).toContain('正在为你处理当前请求');
+    expect(serialized).not.toContain('Agent');
+    expect(serialized).not.toContain('框架');
+    expect(serialized).not.toContain('Run ID');
+    expect(serialized).not.toContain('开始时间');
+    expect(serialized).not.toContain('最近活动');
+    expect(serialized).not.toContain('Thread');
+  });
+
+  it('builds feishu run cards with update_multi enabled', () => {
+    const payload = buildFeishuRunCardMessage({
+      runId: 'run_1',
+      agentName: '默认助手',
+      provider: 'codex',
+      status: 'running',
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
+    });
+    const parsed = JSON.parse(payload) as {
+      content?: {
+        config?: {
+          update_multi?: boolean;
+        };
+      };
+    };
+    expect(parsed.content?.config?.update_multi).toBe(true);
+  });
+
   it('keeps sessions isolated per real user id', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
@@ -1056,6 +1122,162 @@ local_audio_path=${sourcePath}`,
 
     expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
     expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '默认助手 ·\n✅ 已处理完成。');
+  });
+
+  it('patches the same feishu run card to stopped after stop', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sendTextWithResult = vi.fn(async (_channel: 'wecom' | 'feishu' | 'weixin', _userId: string, content: string) => {
+      if (content.includes('结束')) {
+        return 'om_run_1';
+      }
+      return undefined;
+    });
+    const sessionStore = createSessionStore();
+    sessionStore.setSession('u1', 'default', 'thread_existing');
+
+    let rejectRun: ((error: Error) => void) | undefined;
+    const runResult = new Promise<{ threadId: string; rawOutput: string }>((_resolve, reject) => {
+      rejectRun = reject;
+    });
+    const stop = vi.fn(async () => {
+      rejectRun?.(new Error('codex exited with code 143'));
+      return true;
+    });
+
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_existing', rawOutput: '' }),
+        runWithControl: () => ({
+          result: runResult,
+          stop,
+        }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      sendTextWithResult,
+    });
+
+    const firstRun = handler({ channel: 'feishu', userId: 'u1', content: 'hello' });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const initialPayload = String(sendTextWithResult.mock.calls[0]?.[2] ?? '');
+    const stopCmd = extractFeishuButtons(getFeishuCardElements(initialPayload))
+      .find((button) => typeof button.value?.gateway_cmd === 'string')
+      ?.value?.gateway_cmd;
+    expect(stopCmd).toBeTruthy();
+
+    await handler({ channel: 'feishu', userId: 'u1', content: String(stopCmd) });
+    await firstRun;
+
+    expect(stop).toHaveBeenCalledWith('user_stop');
+    const updates = sendText.mock.calls
+      .map((call) => String(call[2] ?? ''))
+      .filter((payload) => payload.includes('"op":"update"'));
+    expect(updates.some((payload) => payload.includes('"message_id":"om_run_1"') && payload.includes('正在停止'))).toBe(true);
+    expect(updates.some((payload) => payload.includes('"message_id":"om_run_1"') && payload.includes('当前任务已停止'))).toBe(true);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('"op":"recall"'))).toBe(false);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('本次回复中断了'))).toBe(false);
+  });
+
+  it('does not append interruption warning after visible feishu output', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sendTextWithResult = vi.fn(async () => 'om_run_1');
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        runWithControl: (input) => ({
+          result: (async () => {
+            input.onMessage?.('收到，正常。');
+            throw new Error('boom-after-output');
+          })(),
+          stop: async () => false,
+        }),
+        run: async () => ({ threadId: 'thread_existing', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      sendTextWithResult,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: 'hello' });
+
+    expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n收到，正常。');
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('"op":"update"') && String(call[2] ?? '').includes('当前任务已处理完成'))).toBe(true);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('"op":"recall"'))).toBe(false);
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('本次回复中断了'))).toBe(false);
+  });
+
+  it('does not send a not-running warning when stop arrives after a completed feishu run', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sendTextWithResult = vi.fn(async (_channel: 'wecom' | 'feishu' | 'weixin', _userId: string, content: string) => {
+      if (content.includes('结束')) {
+        return 'om_run_1';
+      }
+      if (content.includes('当前任务已处理完成')) {
+        return 'om_done_1';
+      }
+      return undefined;
+    });
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        runWithControl: (input) => ({
+          result: (async () => {
+            input.onMessage?.('收到，正常。');
+            return { threadId: 'thread_existing', rawOutput: '' };
+          })(),
+          stop: async () => false,
+        }),
+        run: async () => ({ threadId: 'thread_existing', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      sendTextWithResult,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: 'hello' });
+    const initialPayload = String(sendTextWithResult.mock.calls[0]?.[2] ?? '');
+    const stopCmd = extractFeishuButtons(getFeishuCardElements(initialPayload))
+      .find((button) => typeof button.value?.gateway_cmd === 'string')
+      ?.value?.gateway_cmd;
+    expect(stopCmd).toBeTruthy();
+
+    await handler({ channel: 'feishu', userId: 'u1', content: String(stopCmd) });
+
+    expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('未找到正在运行的任务'))).toBe(false);
   });
 
   it('pushes help card automatically when a new feishu session starts', async () => {

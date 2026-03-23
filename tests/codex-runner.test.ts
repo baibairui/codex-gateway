@@ -18,14 +18,24 @@ function createMockChildProcess() {
   const child = new EventEmitter() as EventEmitter & {
     stdout: PassThrough;
     stderr: PassThrough;
+    stdin: {
+      write: ReturnType<typeof vi.fn>;
+    };
     kill: ReturnType<typeof vi.fn>;
     pid: number;
   };
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
+  child.stdin = {
+    write: vi.fn(),
+  };
   child.kill = vi.fn();
   child.pid = 12345;
   return child;
+}
+
+async function tick(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe('parseCodexJsonl', () => {
@@ -251,6 +261,101 @@ local_image_path=/tmp/workspace/.gateway-inbox/img-1.png`,
 message_id=om_1
 [飞书附件元数据]`,
     ]);
+  });
+});
+
+describe('CodexRunner active control', () => {
+  it('returns a stop handle for an active run', () => {
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const runner = new CodexRunner({ codexBin: 'codex' });
+    const active = runner.runWithControl({ prompt: 'hello' });
+
+    expect(typeof active.stop).toBe('function');
+    expect(child.stdin.write).toHaveBeenCalled();
+  });
+
+  it('interrupts the active turn through app-server and rejects the run', async () => {
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const runner = new CodexRunner({ codexBin: 'codex', timeoutMs: 1_000 });
+    const active = runner.runWithControl({ prompt: 'hello' });
+
+    await tick();
+    expect(String(child.stdin.write.mock.calls[0]?.[0] ?? '')).toContain('"method":"initialize"');
+    child.stdout.write(`${JSON.stringify({ id: 1, result: { ok: true } })}\n`);
+
+    await tick();
+    expect(child.stdin.write.mock.calls.some((call) => String(call[0]).includes('"method":"thread/start"'))).toBe(true);
+    const threadStartRequest = child.stdin.write.mock.calls
+      .map((call) => String(call[0]))
+      .find((payload) => payload.includes('"method":"thread/start"'));
+    const threadStartRequestId = JSON.parse(threadStartRequest ?? '{}').id;
+
+    child.stdout.write(`${JSON.stringify({ id: threadStartRequestId, result: { thread: { id: 'thread_active' } } })}\n`);
+    child.stdout.write(`${JSON.stringify({ method: 'thread/started', params: { thread: { id: 'thread_active' } } })}\n`);
+
+    await tick();
+    expect(child.stdin.write.mock.calls.some((call) => String(call[0]).includes('"method":"turn/start"'))).toBe(true);
+    const turnStartRequest = child.stdin.write.mock.calls
+      .map((call) => String(call[0]))
+      .find((payload) => payload.includes('"method":"turn/start"'));
+    const turnStartRequestId = JSON.parse(turnStartRequest ?? '{}').id;
+
+    child.stdout.write(`${JSON.stringify({ id: turnStartRequestId, result: { turn: { id: 'turn_active', status: 'inProgress' } } })}\n`);
+    child.stdout.write(`${JSON.stringify({ method: 'turn/started', params: { threadId: 'thread_active', turn: { id: 'turn_active', status: 'inProgress' } } })}\n`);
+
+    const stopPromise = active.stop('user_stop');
+    const interruptRequest = String(child.stdin.write.mock.calls.at(-1)?.[0] ?? '');
+    expect(interruptRequest).toContain('"method":"turn/interrupt"');
+    expect(interruptRequest).toContain('"threadId":"thread_active"');
+    expect(interruptRequest).toContain('"turnId":"turn_active"');
+
+    const interruptRequestId = JSON.parse(interruptRequest).id;
+    child.stdout.write(`${JSON.stringify({ id: interruptRequestId, result: {} })}\n`);
+    await expect(stopPromise).resolves.toBe(true);
+    child.stdout.write(`${JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread_active', turn: { id: 'turn_active', status: 'interrupted' } } })}\n`);
+
+    await expect(active.result).rejects.toThrow(/stopped by user/i);
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+  });
+
+  it('emits the final app-server agent message once after deltas are aggregated', async () => {
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const onMessage = vi.fn();
+
+    const runner = new CodexRunner({ codexBin: 'codex', timeoutMs: 1_000 });
+    const active = runner.runWithControl({ prompt: 'hello', onMessage });
+
+    await tick();
+    child.stdout.write(`${JSON.stringify({ id: 1, result: { ok: true } })}\n`);
+    await tick();
+    const threadStartRequest = child.stdin.write.mock.calls
+      .map((call) => String(call[0]))
+      .find((payload) => payload.includes('"method":"thread/start"'));
+    const threadStartRequestId = JSON.parse(threadStartRequest ?? '{}').id;
+    child.stdout.write(`${JSON.stringify({ id: threadStartRequestId, result: { thread: { id: 'thread_active' } } })}\n`);
+    child.stdout.write(`${JSON.stringify({ method: 'thread/started', params: { thread: { id: 'thread_active' } } })}\n`);
+
+    await tick();
+    const turnStartRequest = child.stdin.write.mock.calls
+      .map((call) => String(call[0]))
+      .find((payload) => payload.includes('"method":"turn/start"'));
+    const turnStartRequestId = JSON.parse(turnStartRequest ?? '{}').id;
+    child.stdout.write(`${JSON.stringify({ id: turnStartRequestId, result: { turn: { id: 'turn_active', status: 'inProgress' } } })}\n`);
+    child.stdout.write(`${JSON.stringify({ method: 'turn/started', params: { threadId: 'thread_active', turn: { id: 'turn_active', status: 'inProgress' } } })}\n`);
+
+    child.stdout.write(`${JSON.stringify({ method: 'item/agentMessage/delta', params: { threadId: 'thread_active', turnId: 'turn_active', itemId: 'msg_1', delta: '收到' } })}\n`);
+    child.stdout.write(`${JSON.stringify({ method: 'item/agentMessage/delta', params: { threadId: 'thread_active', turnId: 'turn_active', itemId: 'msg_1', delta: '，正常。' } })}\n`);
+    child.stdout.write(`${JSON.stringify({ method: 'item/completed', params: { threadId: 'thread_active', turnId: 'turn_active', item: { type: 'agentMessage', id: 'msg_1', text: '收到，正常。' } } })}\n`);
+    child.stdout.write(`${JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread_active', turn: { id: 'turn_active', status: 'completed' } } })}\n`);
+
+    await expect(active.result).resolves.toMatchObject({ threadId: 'thread_active' });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith('收到，正常。');
   });
 });
 

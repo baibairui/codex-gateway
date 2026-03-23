@@ -169,6 +169,7 @@ describe('handleUserCommand', () => {
     expect(handleUserCommand('/model page 2', context).queryModelsPage).toBe(2);
     expect(handleUserCommand('/models 2', context).queryModel).toBe(true);
     expect(handleUserCommand('/models 2', context).queryModelsPage).toBe(2);
+    expect(handleUserCommand('/run stop run_1', context).stopRunId).toBe('run_1');
     expect(handleUserCommand('/skills', context).querySkills).toBe(true);
     expect(handleUserCommand('/skills global', context).querySkillsScope).toBe('global');
     expect(handleUserCommand('/skills agent', context).querySkillsScope).toBe('agent');
