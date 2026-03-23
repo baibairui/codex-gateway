@@ -8,12 +8,14 @@ import { AgentSkillManager } from './agent-skill-manager.js';
 import { startCodexDeviceLogin } from './codex-login-flow.js';
 import {
   buildFeishuLoginChoiceMessage,
+  buildFeishuRunCardMessage,
   formatCommandOutboundMessage,
 } from './feishu-command-cards.js';
 import { buildOpenCodeAuthSessionKey, type OpenCodeAuthFlowManager } from './opencode-auth-flow.js';
 import type { SkillCatalogEntry } from './skill-registry.js';
 import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
 import { createLogger } from '../utils/logger.js';
+import { ActiveRunManager } from './active-run-manager.js';
 
 const log = createLogger('ChatHandler');
 const GATEWAY_LOCAL_PATH_KEYS = [
@@ -74,6 +76,25 @@ interface CodexRunnerLike {
     onMessage?: (text: string) => void;
     onThreadStarted?: (threadId: string) => void;
   }): Promise<{ threadId: string; rawOutput: string }>;
+  runWithControl?(input: {
+    prompt: string;
+    threadId?: string;
+    model?: string;
+    search?: boolean;
+    workdir?: string;
+    gatewayUserId?: string;
+    reminderToolContext?: {
+      dbPath: string;
+      channel: Channel;
+      userId: string;
+      agentId: string;
+    };
+    onMessage?: (text: string) => void;
+    onThreadStarted?: (threadId: string) => void;
+  }): {
+    result: Promise<{ threadId: string; rawOutput: string }>;
+    stop: (reason: string) => Promise<boolean>;
+  };
   review(input: {
     mode: 'uncommitted' | 'base' | 'commit';
     target?: string;
@@ -156,6 +177,7 @@ interface ChatHandlerDeps {
   defaultSearch: boolean;
   reminderDbPath: string;
   sendText: (channel: Channel, userId: string, content: string) => Promise<void>;
+  sendTextWithResult?: (channel: Channel, userId: string, content: string) => Promise<string | undefined>;
   sendStreamingText?: (
     channel: Channel,
     userId: string,
@@ -200,6 +222,7 @@ const MEMORY_ONBOARDING_AGENT_ID = 'memory-onboarding';
 const MEMORY_ONBOARDING_AGENT_NAME = '记忆初始化引导';
 const SKILL_ONBOARDING_AGENT_ID = 'skill-onboarding';
 const SKILL_ONBOARDING_AGENT_NAME = '技能扩展助手';
+const TERMINAL_RUN_RETENTION_MS = 60_000;
 const MEMORY_ONBOARDING_KICKOFF_BASE_PROMPT = [
   '你是记忆初始化引导 agent，请立即开始第一轮访谈。',
   '目标：帮助用户初始化长期记忆，并先建立 identity（用户专属身份）。',
@@ -484,6 +507,28 @@ function buildAgentProgressText(agent: { name: string }, phase: 'received' | 're
   return formatAgentVisibleReply(agent, '✅ 已处理完成。');
 }
 
+function buildGatewayUpdateMessage(messageId: string, content: string): string {
+  const structured = parseGatewayStructuredMessage(content);
+  if (!structured || structured.op === 'recall') {
+    return content;
+  }
+  return JSON.stringify({
+    __gateway_message__: true,
+    op: 'update',
+    message_id: messageId,
+    msg_type: structured.msg_type,
+    content: structured.content,
+  });
+}
+
+function buildGatewayRecallMessage(messageId: string): string {
+  return JSON.stringify({
+    __gateway_message__: true,
+    op: 'recall',
+    message_id: messageId,
+  });
+}
+
 function isCodexTimeoutError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /codex timeout after \d+ms/i.test(message) || /codex login timeout/i.test(message);
@@ -533,6 +578,11 @@ function buildChatFailureText(agent: { name: string }, kind: ChatFailureKind): s
     default:
       return '❌ 这次处理没完成，请稍后重试。';
   }
+}
+
+function isUserStoppedRunError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(code 143|sigterm|terminated)\b/i.test(message);
 }
 
 async function sendAgentProgress(
@@ -693,6 +743,20 @@ export function createChatHandler(deps: ChatHandlerDeps) {
   const onboardingKickoffInFlight = new Set<string>();
   const activeMemoryOnboarding = new Map<string, ActiveMemoryOnboardingState>();
   const skillManager = deps.skillManager ?? new AgentSkillManager();
+  const activeRunManager = new ActiveRunManager();
+  const terminalRunTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function retainTerminalRun(runId: string): void {
+    const existing = terminalRunTimers.get(runId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const timer = setTimeout(() => {
+      activeRunManager.delete(runId);
+      terminalRunTimers.delete(runId);
+    }, TERMINAL_RUN_RETENTION_MS);
+    terminalRunTimers.set(runId, timer);
+  }
 
   function getCurrentProvider(userKey: string, agentId: string): 'codex' | 'opencode' {
     return deps.sessionStore.getProviderOverride?.(userKey, agentId)
@@ -1501,6 +1565,71 @@ ${clipMessage(text, 500)}
         await sendCommandText(`联网搜索：${currentSearch ? 'on' : 'off'}`);
         return;
       }
+
+      if (commandResult.stopRunId) {
+        const activeRun = activeRunManager.get(commandResult.stopRunId);
+        if (!activeRun) {
+          await deps.sendText(channel, userId, '⚠️ 未找到正在运行的任务，可能已经结束。');
+          return;
+        }
+        if (activeRun.status === 'completed') {
+          return;
+        }
+        if (channel === 'feishu' && activeRun.messageId) {
+          await deps.sendText(
+            channel,
+            userId,
+            buildGatewayUpdateMessage(
+              activeRun.messageId,
+              buildFeishuRunCardMessage({
+                runId: activeRun.runId,
+                agentName: currentAgent.name.trim() === '默认Agent' ? '默认助手' : currentAgent.name,
+                provider: activeRun.provider ?? getCurrentProvider(sessionUserKey, currentAgent.agentId),
+                status: 'stopping',
+                startedAt: activeRun.startedAt,
+                lastActivityAt: Date.now(),
+                threadId: activeRun.threadId,
+              }),
+            ),
+          );
+          activeRunManager.update(commandResult.stopRunId, {
+            status: 'stopping',
+            lastActivityAt: Date.now(),
+          });
+        }
+        await activeRunManager.stopRun({
+          runId: commandResult.stopRunId,
+          channel,
+          userId,
+        });
+        const stoppedRun = activeRunManager.get(commandResult.stopRunId) ?? activeRun;
+        if (channel === 'feishu' && stoppedRun.messageId) {
+          await deps.sendText(
+            channel,
+            userId,
+            buildGatewayUpdateMessage(
+              stoppedRun.messageId,
+              buildFeishuRunCardMessage({
+                runId: stoppedRun.runId,
+                agentName: currentAgent.name.trim() === '默认Agent' ? '默认助手' : currentAgent.name,
+                provider: stoppedRun.provider ?? getCurrentProvider(sessionUserKey, currentAgent.agentId),
+                status: 'stopped',
+                startedAt: stoppedRun.startedAt,
+                lastActivityAt: Date.now(),
+                threadId: stoppedRun.threadId,
+              }),
+            ),
+          );
+          activeRunManager.update(commandResult.stopRunId, {
+            status: 'stopped',
+            lastActivityAt: Date.now(),
+          });
+          retainTerminalRun(commandResult.stopRunId);
+        } else {
+          await deps.sendText(channel, userId, '✅ 已发送停止请求。');
+        }
+        return;
+      }
       if (typeof commandResult.setSearchEnabled === 'boolean') {
         userSearchOverrides.set(sessionUserKey, commandResult.setSearchEnabled);
         await sendCommandText(`✅ 已${commandResult.setSearchEnabled ? '开启' : '关闭'}联网搜索`);
@@ -1671,6 +1800,7 @@ ${clipMessage(text, 500)}
     }
 
     let sawAgentOutput = false;
+    let activeRunId: string | undefined;
     let runtimeAgent = activeOnboarding
       ? resolveRuntimeAgent(
           deps.agentWorkspaceManager,
@@ -1720,58 +1850,78 @@ ${clipMessage(text, 500)}
         channel,
         speechPrompt?.prompt ?? normalizedPrompt,
       );
-      await sendAgentProgress(deps, channel, userId, runtimeAgent, 'received');
       const runtimeProvider = getCurrentProvider(sessionUserKey, runtimeAgent.agentId);
       const activeRunner = getRunner(runtimeProvider);
-      const result = await activeRunner.run({
-        prompt: runtimePrompt,
-        threadId: runtimeThreadId,
-        model: currentModel,
-        search: runtimeSearch,
-        workdir: resolveAgentWorkdir(runtimeAgent),
-        gatewayUserId: userId,
-        reminderToolContext: {
-          channel,
-          userId,
-          agentId: runtimeAgent.agentId,
-          dbPath: deps.reminderDbPath,
-        },
-        onThreadStarted: (startedThreadId) => {
-          persistSession(
-            sessionUserKey,
-            runtimeAgent.agentId,
-            startedThreadId,
-            prompt,
-            identityBinding.boundIdentityVersion,
-          );
-        },
-        onMessage: (text) => {
-          const normalizedOutput = rewriteGatewayStructuredLocalPaths(text, resolveAgentWorkdir(runtimeAgent));
-          const rawVisibleOutput = activeOnboarding ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
-          const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, rawVisibleOutput);
-          log.info(`
+      const runId = `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      activeRunId = runId;
+      const runStartedAt = Date.now();
+      const controlledRun = activeRunner.runWithControl
+        ? activeRunner.runWithControl({
+            prompt: runtimePrompt,
+            threadId: runtimeThreadId,
+            model: currentModel,
+            search: runtimeSearch,
+            workdir: resolveAgentWorkdir(runtimeAgent),
+            gatewayUserId: userId,
+            reminderToolContext: {
+              channel,
+              userId,
+              agentId: runtimeAgent.agentId,
+              dbPath: deps.reminderDbPath,
+            },
+            onThreadStarted: (startedThreadId) => {
+              persistSession(
+                sessionUserKey,
+                runtimeAgent.agentId,
+                startedThreadId,
+                prompt,
+                identityBinding.boundIdentityVersion,
+              );
+              activeRunManager.update(runId, {
+                threadId: startedThreadId,
+                lastActivityAt: Date.now(),
+              });
+            },
+            onMessage: (text) => {
+              activeRunManager.update(runId, {
+                lastActivityAt: Date.now(),
+              });
+              const normalizedOutput = rewriteGatewayStructuredLocalPaths(text, resolveAgentWorkdir(runtimeAgent));
+              const rawVisibleOutput = activeOnboarding ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
+              const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, rawVisibleOutput);
+              log.info(`
 ════════════════════════════════════════════════════════════
 🤖 Codex 回复  [${channel}:${userId}]
 ────────────────────────────────────────────────────────────
 ${clipMessage(userVisibleOutput, 500)}
 ════════════════════════════════════════════════════════════`);
-          if (!userVisibleOutput) {
-            return;
-          }
-          sawAgentOutput = true;
-          if (channel === 'feishu' && deps.sendStreamingText) {
-            streamedText = userVisibleOutput;
-            const now = Date.now();
-            if (now - lastFeishuStreamFlushAt < 450) {
-              return;
-            }
-            lastFeishuStreamFlushAt = now;
-            const snapshot = streamedText;
-            lastStreamSend = deps.sendStreamingText(channel, userId, streamId, snapshot, false)
-              .then(() => {
-                lastFeishuStreamSnapshot = snapshot;
-              })
-              .catch(async (err) => {
+              if (!userVisibleOutput) {
+                return;
+              }
+              sawAgentOutput = true;
+              if (channel === 'feishu' && deps.sendStreamingText) {
+                streamedText = userVisibleOutput;
+                const now = Date.now();
+                if (now - lastFeishuStreamFlushAt < 450) {
+                  return;
+                }
+                lastFeishuStreamFlushAt = now;
+                const snapshot = streamedText;
+                lastStreamSend = deps.sendStreamingText(channel, userId, streamId, snapshot, false)
+                  .then(() => {
+                    lastFeishuStreamSnapshot = snapshot;
+                  })
+                  .catch(async (err) => {
+                    log.error('handleText onMessage 推送失败', err);
+                    try {
+                      await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+                    } catch (fallbackErr) {
+                      log.error('handleText onMessage fallback 推送失败', fallbackErr);
+                    }
+                  });
+                return;
+              }
+              lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch(async (err) => {
                 log.error('handleText onMessage 推送失败', err);
                 try {
                   await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
@@ -1779,18 +1929,108 @@ ${clipMessage(userVisibleOutput, 500)}
                   log.error('handleText onMessage fallback 推送失败', fallbackErr);
                 }
               });
-            return;
-          }
-          lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch(async (err) => {
-            log.error('handleText onMessage 推送失败', err);
-            try {
-              await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
-            } catch (fallbackErr) {
-              log.error('handleText onMessage fallback 推送失败', fallbackErr);
-            }
-          });
-        },
-      });
+            },
+          })
+        : {
+            result: activeRunner.run({
+              prompt: runtimePrompt,
+              threadId: runtimeThreadId,
+              model: currentModel,
+              search: runtimeSearch,
+              workdir: resolveAgentWorkdir(runtimeAgent),
+              gatewayUserId: userId,
+              reminderToolContext: {
+                channel,
+                userId,
+                agentId: runtimeAgent.agentId,
+                dbPath: deps.reminderDbPath,
+              },
+              onThreadStarted: (startedThreadId) => {
+                persistSession(
+                  sessionUserKey,
+                  runtimeAgent.agentId,
+                  startedThreadId,
+                  prompt,
+                  identityBinding.boundIdentityVersion,
+                );
+              },
+              onMessage: (text) => {
+                const normalizedOutput = rewriteGatewayStructuredLocalPaths(text, resolveAgentWorkdir(runtimeAgent));
+                const rawVisibleOutput = activeOnboarding ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
+                const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, rawVisibleOutput);
+                log.info(`
+════════════════════════════════════════════════════════════
+🤖 Codex 回复  [${channel}:${userId}]
+────────────────────────────────────────────────────────────
+${clipMessage(userVisibleOutput, 500)}
+════════════════════════════════════════════════════════════`);
+                if (!userVisibleOutput) {
+                  return;
+                }
+                sawAgentOutput = true;
+                if (channel === 'feishu' && deps.sendStreamingText) {
+                  streamedText = userVisibleOutput;
+                  const now = Date.now();
+                  if (now - lastFeishuStreamFlushAt < 450) {
+                    return;
+                  }
+                  lastFeishuStreamFlushAt = now;
+                  const snapshot = streamedText;
+                  lastStreamSend = deps.sendStreamingText(channel, userId, streamId, snapshot, false)
+                    .then(() => {
+                      lastFeishuStreamSnapshot = snapshot;
+                    })
+                    .catch(async (err) => {
+                      log.error('handleText onMessage 推送失败', err);
+                      try {
+                        await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+                      } catch (fallbackErr) {
+                        log.error('handleText onMessage fallback 推送失败', fallbackErr);
+                      }
+                    });
+                  return;
+                }
+                lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch(async (err) => {
+                  log.error('handleText onMessage 推送失败', err);
+                  try {
+                    await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+                  } catch (fallbackErr) {
+                    log.error('handleText onMessage fallback 推送失败', fallbackErr);
+                  }
+                });
+              },
+            }),
+            stop: async () => false,
+          };
+      if (channel === 'feishu' && activeRunner.runWithControl) {
+        const messageId = await (deps.sendTextWithResult ?? (async () => undefined))(channel, userId, buildFeishuRunCardMessage({
+          runId,
+          agentName: runtimeAgent.name.trim() === '默认Agent' ? '默认助手' : runtimeAgent.name,
+          provider: runtimeProvider,
+          status: 'running',
+          startedAt: runStartedAt,
+          lastActivityAt: runStartedAt,
+          threadId: runtimeThreadId,
+        }));
+        activeRunManager.register({
+          runId,
+          channel,
+          userId,
+          agentId: runtimeAgent.agentId,
+          provider: runtimeProvider,
+          status: 'running',
+          startedAt: runStartedAt,
+          lastActivityAt: runStartedAt,
+          messageId,
+          threadId: runtimeThreadId,
+          stop: async (reason: string) => {
+            await controlledRun.stop(reason);
+          },
+        });
+      } else {
+        await sendAgentProgress(deps, channel, userId, runtimeAgent, 'received');
+      }
+      const result = await controlledRun.result;
       const elapsed = Date.now() - startTime;
       await lastStreamSend;
       if (channel === 'feishu' && deps.sendStreamingText && streamedText && streamedText !== lastFeishuStreamSnapshot) {
@@ -1798,6 +2038,31 @@ ${clipMessage(userVisibleOutput, 500)}
       }
       if (!sawAgentOutput) {
         await sendAgentProgress(deps, channel, userId, runtimeAgent, 'done');
+      }
+      const finishedRun = activeRunManager.get(runId);
+      if (channel === 'feishu' && finishedRun?.messageId) {
+        await deps.sendText(
+          channel,
+          userId,
+          buildGatewayUpdateMessage(
+            finishedRun.messageId,
+            buildFeishuRunCardMessage({
+              runId,
+              agentName: runtimeAgent.name.trim() === '默认Agent' ? '默认助手' : runtimeAgent.name,
+              provider: runtimeProvider,
+              status: 'completed',
+              startedAt: finishedRun.startedAt,
+              lastActivityAt: Date.now(),
+              threadId: result.threadId,
+            }),
+          ),
+        );
+        activeRunManager.update(runId, {
+          status: 'completed',
+          lastActivityAt: Date.now(),
+          threadId: result.threadId,
+        });
+        retainTerminalRun(runId);
       }
 
       log.info('<<< handleText Codex 执行完成', {
@@ -1825,6 +2090,55 @@ ${clipMessage(userVisibleOutput, 500)}
         threadId: result.threadId,
       });
     } catch (error) {
+      const activeRun = activeRunId ? activeRunManager.get(activeRunId) : undefined;
+      if (channel === 'feishu' && sawAgentOutput && activeRun?.messageId) {
+        await deps.sendText(
+          channel,
+          userId,
+          buildGatewayUpdateMessage(
+            activeRun.messageId,
+            buildFeishuRunCardMessage({
+              runId: activeRun.runId,
+              agentName: runtimeAgent.name.trim() === '默认Agent' ? '默认助手' : runtimeAgent.name,
+              provider: activeRun.provider ?? getCurrentProvider(sessionUserKey, runtimeAgent.agentId),
+              status: 'completed',
+              startedAt: activeRun.startedAt,
+              lastActivityAt: Date.now(),
+              threadId: activeRun.threadId,
+            }),
+          ),
+        );
+        if (activeRunId) {
+          activeRunManager.update(activeRunId, {
+            status: 'completed',
+            lastActivityAt: Date.now(),
+          });
+          retainTerminalRun(activeRunId);
+        }
+        log.info('handleText suppressing feishu interruption warning after visible output', {
+          userId,
+          runId: activeRunId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      if (
+        channel === 'feishu'
+        && (
+          (activeRun?.messageId && (activeRun.status === 'stopping' || activeRun.status === 'stopped'))
+          || ((activeRun?.status === 'stopping' || activeRun?.status === 'stopped') && isUserStoppedRunError(error))
+        )
+      ) {
+        if (activeRunId) {
+          activeRunManager.delete(activeRunId);
+        }
+        log.info('handleText stop-requested run exited after user stop', {
+          userId,
+          runId: activeRunId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
       log.error('handleText 执行失败', {
         userId,
         error: error instanceof Error ? error.message : String(error),

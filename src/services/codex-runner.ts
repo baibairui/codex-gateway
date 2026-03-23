@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createLogger } from '../utils/logger.js';
 import { buildCodexSpawnSpec, type CodexWorkdirIsolationMode } from './codex-bwrap.js';
 import { getCliProviderSpec, isExecutableAvailable, resolveCodexBin, resolveOpenCodeBin, type CliProvider } from './cli-provider.js';
+import { CodexAppServerClient, type CodexTurnCompletion, type CodexTurnInputItem } from './codex-app-server-client.js';
 
 const log = createLogger('CodexRunner');
 const execFileAsync = promisify(execFile);
@@ -38,6 +39,11 @@ export interface CodexRunInput {
 export interface CodexRunResult {
   threadId: string;
   rawOutput: string;
+}
+
+export interface ControlledCodexRun {
+  result: Promise<CodexRunResult>;
+  stop: (reason: string) => Promise<boolean>;
 }
 
 export interface CodexReviewInput {
@@ -76,6 +82,7 @@ interface CodexRunnerOptions {
   sandbox?: 'full-auto' | 'none';
   workdirIsolation?: CodexWorkdirIsolationMode;
   codexHomeDir?: string;
+  codexRunTransport?: 'cli' | 'app-server';
 }
 
 const DEFAULT_TIMEOUT_MIN_MS = 180_000;
@@ -135,6 +142,7 @@ export class CodexRunner {
   private readonly sandbox: 'full-auto' | 'none';
   private readonly workdirIsolation: CodexWorkdirIsolationMode;
   private readonly codexHomeDir?: string;
+  private readonly codexRunTransport: 'cli' | 'app-server';
 
   constructor(options: CodexRunnerOptions = {}) {
     this.provider = options.provider ?? 'codex';
@@ -162,6 +170,7 @@ export class CodexRunner {
     this.sandbox = options.sandbox ?? 'full-auto';
     this.workdirIsolation = options.workdirIsolation ?? 'off';
     this.codexHomeDir = options.codexHomeDir?.trim() || undefined;
+    this.codexRunTransport = options.codexRunTransport ?? 'app-server';
     log.debug('CodexRunner 构造完成', {
       codexBin: this.codexBin,
       provider: this.provider,
@@ -176,12 +185,21 @@ export class CodexRunner {
       sandbox: this.sandbox,
       workdirIsolation: this.workdirIsolation,
       codexHomeDir: this.codexHomeDir ?? '(system HOME)',
+      codexRunTransport: this.codexRunTransport,
     });
   }
 
   run(input: CodexRunInput): Promise<CodexRunResult> {
+    return this.runWithControl(input).result;
+  }
+
+  runWithControl(input: CodexRunInput): ControlledCodexRun {
+    if (this.provider === 'codex' && this.codexRunTransport === 'app-server' && !input.search) {
+      return this.runWithAppServer(input);
+    }
+
     const args = buildCodexArgs(input, this.sandbox, this.provider);
-    return this.runJsonl({
+    const controlled = this.runJsonl({
       args,
       prompt: input.prompt,
       env: buildCodexChildEnv(process.env, {
@@ -203,15 +221,20 @@ export class CodexRunner {
         isResume: !!input.threadId,
         threadId: maskThreadId(input.threadId),
       },
-    }).then((result) => {
-      if (!result.threadId) {
-        throw new Error('thread id not found in codex output');
-      }
-      return {
-        threadId: result.threadId,
-        rawOutput: result.rawOutput,
-      };
     });
+
+    return {
+      result: controlled.result.then((result) => {
+        if (!result.threadId) {
+          throw new Error('thread id not found in codex output');
+        }
+        return {
+          threadId: result.threadId,
+          rawOutput: result.rawOutput,
+        };
+      }),
+      stop: controlled.stop,
+    };
   }
 
   review(input: CodexReviewInput): Promise<{ rawOutput: string }> {
@@ -233,7 +256,7 @@ export class CodexRunner {
         reviewMode: input.mode,
         reviewTarget: input.target ?? '(none)',
       },
-    }).then((result) => ({ rawOutput: result.rawOutput }));
+    }).result.then((result) => ({ rawOutput: result.rawOutput }));
   }
 
   login(input: CodexLoginInput): Promise<void> {
@@ -319,7 +342,7 @@ export class CodexRunner {
     initialThreadId?: string;
     requireThreadId: boolean;
     logMeta?: Record<string, unknown>;
-  }): Promise<{ rawOutput: string; threadId?: string }> {
+  }): { result: Promise<{ rawOutput: string; threadId?: string }>; stop: (reason: string) => Promise<boolean> } {
     if (this.provider === 'opencode') {
       repairLegacyOpenCodeConfig(this.codexHomeDir);
     }
@@ -338,7 +361,9 @@ export class CodexRunner {
       effectiveTimeoutMs,
     });
 
-    return new Promise<{ rawOutput: string; threadId?: string }>((resolve, reject) => {
+    let stopChild: ((reason: string) => Promise<boolean>) | undefined;
+
+    const result = new Promise<{ rawOutput: string; threadId?: string }>((resolve, reject) => {
       this.assertExecutableAvailable(options.env ?? process.env);
       const spawnSpec = buildCodexSpawnSpec({
         provider: this.provider,
@@ -364,6 +389,7 @@ export class CodexRunner {
       let lineBuf = '';
       let eventCount = 0;
       let observedThreadId = options.initialThreadId;
+      let stopRequested = false;
 
       let timer: NodeJS.Timeout | undefined;
       const refreshIdleTimeout = () => {
@@ -390,6 +416,20 @@ export class CodexRunner {
         }, effectiveTimeoutMs);
       };
       refreshIdleTimeout();
+
+      stopChild = async (_reason: string) => {
+        if (settled || stopRequested) {
+          return false;
+        }
+        stopRequested = true;
+        child.kill('SIGTERM');
+        setTimeout(() => {
+          if (!settled) {
+            child.kill('SIGKILL');
+          }
+        }, 1_000);
+        return true;
+      };
 
       child.stdout.on('data', (chunk) => {
         const text = chunk.toString('utf8');
@@ -453,6 +493,11 @@ export class CodexRunner {
           eventCount,
         });
 
+        if (stopRequested) {
+          reject(new Error(`${this.provider} stopped by user`));
+          return;
+        }
+
         if (code !== 0) {
           log.error('Codex 子进程异常退出', {
             exitCode: code,
@@ -501,6 +546,199 @@ export class CodexRunner {
         });
       });
     });
+
+    return {
+      result,
+      stop: async (reason: string) => {
+        if (!stopChild) {
+          return false;
+        }
+        return stopChild(reason);
+      },
+    };
+  }
+
+  private runWithAppServer(input: CodexRunInput): ControlledCodexRun {
+    const effectiveWorkdir = input.workdir ?? this.workdir;
+    const env = buildCodexChildEnv(process.env, {
+      reminderToolContext: input.reminderToolContext,
+      browserAutomation: this.browserAutomation,
+      gatewayRootDir: this.gatewayRootDir,
+      gatewayPublicBaseUrl: input.gatewayPublicBaseUrl ?? this.gatewayPublicBaseUrl,
+      gatewayUserId: input.gatewayUserId,
+      internalApiToken: this.internalApiToken,
+      internalApiBaseUrl: this.internalApiBaseUrl,
+    });
+    if (this.codexHomeDir?.trim()) {
+      const resolvedHome = this.codexHomeDir.trim();
+      env.HOME = resolvedHome;
+      env.XDG_CONFIG_HOME = `${resolvedHome}/.config`;
+      env.XDG_CACHE_HOME = `${resolvedHome}/.cache`;
+      env.XDG_DATA_HOME = `${resolvedHome}/.local/share`;
+    }
+
+    const promptItems = buildCodexTurnInputItems(input.prompt);
+    const effectiveTimeoutMs = this.resolveTimeoutMs(input.prompt);
+    let observedThreadId = input.threadId;
+    let observedTurnId: string | undefined;
+    let stopRequested = false;
+    let settled = false;
+    let rawOutput = '';
+    let timer: NodeJS.Timeout | undefined;
+    const agentMessageTextById = new Map<string, string>();
+    let resolveCompletion: ((value: CodexTurnCompletion) => void) | undefined;
+    let rejectCompletion: ((reason: Error) => void) | undefined;
+
+    const completionPromise = new Promise<CodexTurnCompletion>((resolve, reject) => {
+      resolveCompletion = resolve;
+      rejectCompletion = reject;
+    });
+
+    const client = new CodexAppServerClient({
+      provider: this.provider,
+      codexBin: this.codexBin,
+      cwd: effectiveWorkdir,
+      env,
+      isolationMode: this.workdirIsolation,
+      codexHomeDir: this.codexHomeDir,
+      sessionSource: 'exec',
+      onNotification: (notification) => {
+        rawOutput += `${JSON.stringify(notification)}\n`;
+        refreshIdleTimeout();
+        if (notification.method === 'thread/started') {
+          const thread = notification.params?.thread as { id?: string } | undefined;
+          if (typeof thread?.id === 'string') {
+            observedThreadId = thread.id;
+            input.onThreadStarted?.(thread.id);
+          }
+          return;
+        }
+        if (notification.method === 'turn/started') {
+          const turn = notification.params?.turn as { id?: string } | undefined;
+          if (typeof turn?.id === 'string') {
+            observedTurnId = turn.id;
+          }
+          return;
+        }
+        if (notification.method === 'item/agentMessage/delta') {
+          const itemId = typeof notification.params?.itemId === 'string' ? notification.params.itemId : undefined;
+          const delta = typeof notification.params?.delta === 'string' ? notification.params.delta : '';
+          if (itemId && delta) {
+            const nextText = `${agentMessageTextById.get(itemId) ?? ''}${delta}`;
+            agentMessageTextById.set(itemId, nextText);
+          }
+          return;
+        }
+        if (notification.method === 'item/completed') {
+          const item = notification.params?.item as Record<string, unknown> | undefined;
+          if (item?.type === 'agentMessage' && typeof item.id === 'string' && typeof item.text === 'string') {
+            agentMessageTextById.set(item.id, item.text);
+            input.onMessage?.(item.text);
+          }
+          return;
+        }
+        if (notification.method === 'turn/completed') {
+          const turn = notification.params?.turn as { id?: string; status?: string } | undefined;
+          resolveCompletion?.({
+            turnId: typeof turn?.id === 'string' ? turn.id : observedTurnId ?? '',
+            status: typeof turn?.status === 'string' ? turn.status : 'completed',
+          });
+        }
+      },
+    });
+
+    const refreshIdleTimeout = () => {
+      if (settled) {
+        return;
+      }
+      if (timer) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        client.close();
+        rejectCompletion?.(new Error(`${this.provider} timeout after ${effectiveTimeoutMs}ms`));
+      }, effectiveTimeoutMs);
+    };
+
+    refreshIdleTimeout();
+
+    const result = (async () => {
+      try {
+        await client.initialize();
+        refreshIdleTimeout();
+
+        const sandboxMode: 'workspace-write' | 'danger-full-access' = this.sandbox === 'none'
+          ? 'danger-full-access'
+          : 'workspace-write';
+        const threadConfig = {
+          cwd: effectiveWorkdir,
+          model: input.model,
+          sandbox: sandboxMode,
+          approvalPolicy: 'never' as const,
+          personality: 'pragmatic' as const,
+        };
+
+        if (input.threadId?.trim()) {
+          const resumed = await client.resumeThread(input.threadId.trim(), threadConfig);
+          observedThreadId = resumed.thread.id;
+        } else {
+          const started = await client.startThread(threadConfig);
+          observedThreadId = started.thread.id;
+          input.onThreadStarted?.(started.thread.id);
+        }
+        refreshIdleTimeout();
+
+        const turnStart = await client.startTurn({
+          threadId: observedThreadId ?? '',
+          items: promptItems,
+          cwd: effectiveWorkdir,
+          model: input.model,
+        });
+        observedTurnId = turnStart.turn.id;
+        refreshIdleTimeout();
+
+        const completion = await completionPromise;
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        if (stopRequested || completion.status === 'interrupted') {
+          throw new Error(`${this.provider} stopped by user`);
+        }
+        if (completion.status !== 'completed') {
+          throw new Error(`${this.provider} turn completed with status ${completion.status}`);
+        }
+        if (!observedThreadId) {
+          throw new Error('thread id not found in codex app-server output');
+        }
+        return {
+          threadId: observedThreadId,
+          rawOutput,
+        };
+      } finally {
+        client.close();
+      }
+    })();
+
+    return {
+      result,
+      stop: async (_reason: string) => {
+        if (settled || stopRequested) {
+          return false;
+        }
+        stopRequested = true;
+        if (observedThreadId && observedTurnId) {
+          await client.interruptTurn(observedThreadId, observedTurnId);
+        } else {
+          client.close();
+        }
+        return true;
+      },
+    };
   }
 
   private assertExecutableAvailable(env: NodeJS.ProcessEnv): void {
@@ -801,6 +1039,41 @@ function handleCodexLine(
   } catch {
     log.debug('Codex stdout 非 JSON 行', { line: line.substring(0, 100) });
   }
+}
+
+function buildCodexTurnInputItems(prompt: string): CodexTurnInputItem[] {
+  const seenImages = new Set<string>();
+  const imagePaths: string[] = [];
+  const keptLines: string[] = [];
+
+  for (const line of prompt.split('\n')) {
+    const imageMatch = line.match(/\blocal_image_path=([^\n\r]+)/);
+    if (imageMatch?.[1]) {
+      const filePath = imageMatch[1].trim();
+      if (filePath && !seenImages.has(filePath)) {
+        seenImages.add(filePath);
+        imagePaths.push(filePath);
+      }
+      continue;
+    }
+    keptLines.push(line);
+  }
+
+  const items: CodexTurnInputItem[] = [];
+  const text = keptLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (text) {
+    items.push({
+      type: 'text',
+      text,
+    });
+  }
+  for (const imagePath of imagePaths) {
+    items.push({
+      type: 'localImage',
+      path: imagePath,
+    });
+  }
+  return items;
 }
 
 function buildOpenCodeReviewPrompt(

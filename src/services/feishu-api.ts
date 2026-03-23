@@ -261,6 +261,41 @@ export class FeishuApi {
     }
   }
 
+  async patchCardMessage(input: {
+    messageId: string;
+    content: Record<string, unknown> | string;
+  }): Promise<void> {
+    const normalizedMessageId = input.messageId.trim();
+    if (!normalizedMessageId) {
+      throw new Error('feishu patch failed: messageId is required');
+    }
+    const payload = await this.resolveOutgoingContentPayload('interactive', input.content);
+    const token = await this.getTenantAccessToken();
+    const response = await this.fetchWithTimeout(
+      `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(normalizedMessageId)}`,
+      {
+        method: 'PATCH',
+        headers: new Headers({
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json; charset=utf-8',
+        }),
+        body: JSON.stringify({
+          content: payload,
+        }),
+      },
+    );
+    const body = await response.json().catch(() => ({})) as {
+      code?: number;
+      msg?: string;
+    };
+    if (!response.ok || (Object.keys(body).length > 0 && body.code !== 0)) {
+      if (response.status === 401 || response.status === 403) {
+        this.tokenCache = undefined;
+      }
+      throw new Error(`feishu patch failed: ${response.status} ${body.code ?? 'unknown'} ${body.msg ?? 'unknown'}`);
+    }
+  }
+
   async recallMessage(messageId: string): Promise<void> {
     const normalizedMessageId = messageId.trim();
     if (!normalizedMessageId) {
