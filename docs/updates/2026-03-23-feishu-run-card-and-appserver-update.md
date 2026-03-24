@@ -132,3 +132,65 @@
 ## 备注
 
 这次变更同时包含运行链路升级和交互体验刷新，属于同一条 Feishu 运行态能力的连续修复，不建议拆成多个零散 PR。
+
+## 2026-03-24 补充修复
+
+在 App-Server 链路切换后，又补了一组会话恢复保护，针对的是历史脏数据导致的非法 `threadId` 问题。
+
+### 现象
+
+部分旧会话里会存下非法的 `threadId`，例如：
+
+- `"<编号|threadId>"`
+
+这类值在旧链路里不一定马上暴露，但在 App-Server 恢复线程时会直接失败，典型报错是：
+
+- `invalid thread id`
+
+表现上会看到：
+
+- 进程在线
+- 飞书消息能收到
+- 但一进入当前会话恢复，就直接失败并回错误卡
+
+### 这次补了什么
+
+1. 会话恢复保护
+
+- 读取当前 session 时，不再直接信任持久化的 `threadId`
+- 如果值明显非法，会先清掉这条 session
+- 然后自动降级为新会话继续处理
+
+2. `/switch` 输入保护
+
+- `/switch <编号|threadId>` 这类占位符文本，不再允许写回 session
+- 会直接提示用户使用 `/sessions` 中的编号或真实 `threadId`
+
+### 修复结果
+
+- 非法历史 `threadId` 不再导致整次消息失败
+- 旧脏 session 会在恢复前被自动清理
+- `/switch` 不再继续制造同类脏数据
+
+### 本次涉及文件
+
+- `src/services/chat-handler.ts`
+- `tests/chat-handler.test.ts`
+
+### 本次实际验证
+
+- `node /usr/lib/node_modules/npm/bin/npm-cli.js exec -- vitest run tests/chat-handler.test.ts -t "drops an invalid persisted thread id and starts a fresh session instead of failing|rejects placeholder switch targets instead of persisting them as sessions"`
+- `node /usr/lib/node_modules/npm/bin/npm-cli.js exec -- vitest run tests/chat-handler.test.ts -t "drops an invalid persisted thread id and starts a fresh session instead of failing|rejects placeholder switch targets instead of persisting them as sessions|renders a feishu run card with stop button while running|patches the same feishu run card to stopped after stop|does not append interruption warning after visible feishu output|does not send a not-running warning when stop arrives after a completed feishu run"`
+- `node ./node_modules/typescript/bin/tsc --noEmit`
+
+线上实际验证：
+
+- `node ./node_modules/typescript/bin/tsc -p tsconfig.json`
+- `pm2 restart gateway-b`
+- `pm2 describe gateway-b`
+
+结果：
+
+- `gateway-b` 保持 `online`
+- 旧非法 session 会自动清理
+- 同类非法 `threadId` 不再导致恢复失败

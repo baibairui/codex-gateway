@@ -1464,6 +1464,69 @@ local_audio_path=${sourcePath}`,
     expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '默认助手 ·\n第一条回复');
   });
 
+  it('drops an invalid persisted thread id and starts a fresh session instead of failing', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async (input: { threadId?: string; onMessage?: (text: string) => void }) => {
+      input.onMessage?.('重新开始处理。');
+      return { threadId: 'thread_recovered', rawOutput: '' };
+    });
+    const sessionStore = createSessionStore();
+    sessionStore.setSession('u1', 'default', '<编号|threadId>');
+
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '继续' });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: undefined,
+      prompt: expect.stringContaining('继续'),
+    }));
+    expect(sessionStore.getSession('u1', 'default')).toBe('thread_recovered');
+    expect(sendText).not.toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('这次处理没完成'));
+  });
+
+  it('rejects placeholder switch targets instead of persisting them as sessions', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_new', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'wecom', userId: 'u1', content: '/switch <编号|threadId>' });
+
+    expect(sessionStore.getSession('u1', 'default')).toBeUndefined();
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', expect.stringContaining('无效的会话标识'));
+  });
+
   it('creates and switches agent by command', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();

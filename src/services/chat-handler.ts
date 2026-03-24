@@ -529,6 +529,20 @@ function buildGatewayRecallMessage(messageId: string): string {
   });
 }
 
+function isInvalidThreadIdLiteral(threadId?: string): boolean {
+  if (!threadId) {
+    return false;
+  }
+  const trimmed = threadId.trim();
+  if (!trimmed) {
+    return true;
+  }
+  if (trimmed !== threadId) {
+    return true;
+  }
+  return trimmed.includes('<') || trimmed.includes('>');
+}
+
 function isCodexTimeoutError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /codex timeout after \d+ms/i.test(message) || /codex login timeout/i.test(message);
@@ -1067,7 +1081,16 @@ ${clipMessage(prompt, 500)}
       }
     }
     const existingSessionState = getSessionState(sessionUserKey, currentAgent.agentId);
-    const existingThreadId = existingSessionState.threadId;
+    const persistedThreadId = existingSessionState.threadId;
+    const existingThreadId = isInvalidThreadIdLiteral(persistedThreadId) ? undefined : persistedThreadId;
+    if (persistedThreadId && !existingThreadId) {
+      log.warn('handleText 检测到非法会话 threadId，已清理并降级为新会话', {
+        userId,
+        agentId: currentAgent.agentId,
+        threadIdPreview: clipMessage(persistedThreadId, 80),
+      });
+      deps.sessionStore.clearSession(sessionUserKey, currentAgent.agentId);
+    }
     const currentModel = getCurrentModel(sessionUserKey, currentAgent.agentId);
     const currentSearch = userSearchOverrides.get(sessionUserKey) ?? deps.defaultSearch;
     // 对用户展示时，过滤掉系统内置 agent（如 memory-onboarding）
@@ -1446,6 +1469,10 @@ ${clipMessage(text, 500)}
         const resolved = deps.sessionStore.resolveSwitchTarget(sessionUserKey, currentAgent.agentId, commandResult.switchTarget);
         if (!resolved) {
           await sendCommandText('❌ 未找到目标会话，请先发送 /sessions 查看编号。');
+          return;
+        }
+        if (isInvalidThreadIdLiteral(resolved)) {
+          await sendCommandText('❌ 无效的会话标识，请使用 /sessions 中的编号或真实 threadId。');
           return;
         }
         deps.sessionStore.setSession(sessionUserKey, currentAgent.agentId, resolved);
