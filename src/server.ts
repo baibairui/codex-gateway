@@ -909,7 +909,7 @@ function mapFeishuResourceTypes(kind: 'image' | 'file' | 'audio' | 'media' | 'st
 }
 
 app.listen(config.port, () => {
-  log.info(`✅ codex gateway 已启动，监听 http://127.0.0.1:${config.port}`);
+  log.info(`✅ AgentClaw 已启动，监听 http://127.0.0.1:${config.port}`);
   log.info('飞书运行状态摘要', feishuStatusSummary);
   if (config.feishuEnabled && config.feishuLongConnection && config.feishuAppId && config.feishuAppSecret) {
     const wsClient = new LarkWSClient({

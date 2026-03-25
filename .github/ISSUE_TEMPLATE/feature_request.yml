@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a new feature or enhancement
+description: Propose a new capability or workflow improvement for AgentClaw
 title: "[Feature] "
 labels: ["enhancement"]
 body:
@@ -7,7 +7,15 @@ body:
     id: problem
     attributes:
       label: Problem statement
-      description: What problem are you trying to solve?
+      description: What real user or team workflow is blocked today?
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Concrete use case
+      description: Describe the chat flow, channel, agent role, and expected outcome.
+      placeholder: "In Feishu, I want a reviewer agent to..."
     validations:
       required: true
   - type: textarea
@@ -24,3 +32,9 @@ body:
     id: impact
     attributes:
       label: Expected impact
+      description: Why would this be broadly useful to users of AgentClaw?
+  - type: textarea
+    id: scope
+    attributes:
+      label: Non-goals or scope limits
+      description: Call out what this request does not need to include.

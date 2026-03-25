@@ -218,7 +218,7 @@ console.log(`- RUNNER_ENABLED=${runnerEnabled}`);
 console.log('\n飞书安装检查：');
 if (!feishuEnabled) {
   console.log('- 状态：未启用飞书（FEISHU_ENABLED=false）');
-  nextSteps.push('如需接入飞书，先执行 codexclaw setup 并启用 FEISHU_ENABLED=true。');
+  nextSteps.push('如需接入飞书，先执行 agentclaw setup 并启用 FEISHU_ENABLED=true。');
 } else {
   console.log(`- 接入模式：${feishuLongConnection ? '长连接（不需要公网回调地址）' : 'webhook（需要公网回调地址）'}`);
   console.log(`- App 凭据：${missingIfEmpty('FEISHU_APP_ID') || missingIfEmpty('FEISHU_APP_SECRET') ? '缺失' : '已配置'}`);
@@ -237,7 +237,7 @@ if (!feishuEnabled) {
 
 if (feishuEnabled) {
   console.log('\n验收标准：');
-  console.log(`- \`codexclaw doctor\` 没有飞书阻塞项。`);
+  console.log(`- \`agentclaw doctor\` 没有飞书阻塞项。`);
   console.log(`- 服务启动后，\`/healthz\` 中飞书模式显示为 ${feishuLongConnection ? 'long-connection' : 'webhook'}。`);
   console.log(`- 在飞书私聊机器人发送一条消息，能收到正常回复。`);
   if (!feishuGroupRequireMention) {
@@ -245,8 +245,8 @@ if (feishuEnabled) {
   }
 
   console.log('\n飞书安装验收清单：');
-  console.log('- 1. 执行 `codexclaw doctor`，确认没有飞书阻塞项。');
-  console.log('- 2. 执行 `codexclaw up` 或 `codexclaw start`，确认启动日志打印了“飞书运行状态摘要”。');
+  console.log('- 1. 执行 `agentclaw doctor`，确认没有飞书阻塞项。');
+  console.log('- 2. 执行 `agentclaw up` 或 `agentclaw start`，确认启动日志打印了“飞书运行状态摘要”。');
   console.log(`- 3. 访问 \`/healthz\`，确认飞书模式显示为 ${feishuLongConnection ? 'long-connection' : 'webhook'}。`);
   console.log('- 4. 在飞书私聊机器人发送一条消息，确认能收到正常回复。');
   if (feishuGroupRequireMention) {

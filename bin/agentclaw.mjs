@@ -38,7 +38,7 @@ function run(bin, binArgs) {
 
 function printHelp() {
   console.log(`
-codexclaw <command>
+agentclaw <command>
 
 Commands:
   up            启动（开发模式，启动前自动配置检查）

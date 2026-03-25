@@ -357,6 +357,37 @@ describe('CodexRunner active control', () => {
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(onMessage).toHaveBeenCalledWith('收到，正常。');
   });
+
+  it('rewrites app-server cwd to /workspace when bwrap isolation is enabled', async () => {
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const runner = new CodexRunner({
+      codexBin: 'codex',
+      timeoutMs: 1_000,
+      workdirIsolation: 'bwrap',
+    });
+    const active = runner.runWithControl({ prompt: 'hello', workdir: '/tmp/agent-bwrap-appserver' });
+
+    await tick();
+    child.stdout.write(`${JSON.stringify({ id: 1, result: { ok: true } })}\n`);
+    await tick();
+
+    const threadStartRequest = child.stdin.write.mock.calls
+      .map((call) => String(call[0]))
+      .find((payload) => payload.includes('"method":"thread/start"'));
+    expect(threadStartRequest).toContain('"cwd":"/workspace"');
+    const threadStartRequestId = JSON.parse(threadStartRequest ?? '{}').id;
+
+    child.stdout.write(`${JSON.stringify({ id: threadStartRequestId, result: { thread: { id: 'thread_active' } } })}\n`);
+    child.stdout.write(`${JSON.stringify({ method: 'thread/started', params: { thread: { id: 'thread_active' } } })}\n`);
+    await tick();
+
+    const turnStartRequest = child.stdin.write.mock.calls
+      .map((call) => String(call[0]))
+      .find((payload) => payload.includes('"method":"turn/start"'));
+    expect(turnStartRequest).toContain('"cwd":"/workspace"');
+  });
 });
 
 describe('buildCodexReviewArgs', () => {
@@ -545,6 +576,35 @@ describe('buildCodexSpawnSpec', () => {
     expect(spec.args[cdIndex + 1]).toBe('/workspace');
   });
 
+  it('mounts the configured host shell into bubblewrap and exposes SHELL', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bwrap-shell-'));
+    const shellDir = path.join(tempRoot, 'custom-bin');
+    const shellPath = path.join(shellDir, 'zsh');
+    const workspaceDir = path.join(tempRoot, 'workspace');
+    fs.mkdirSync(shellDir, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(shellPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const spec = buildCodexSpawnSpec({
+      codexBin: '/usr/bin/codex',
+      args: ['exec', '--json', 'hello'],
+      cwd: workspaceDir,
+      env: {
+        HOME: '/root',
+        PATH: '/usr/bin:/bin',
+        SHELL: shellPath,
+      },
+      isolationMode: 'bwrap',
+      codexHomeDir: path.join(tempRoot, 'instance-home'),
+    });
+
+    expect(spec.args).toContain(shellPath);
+    const shellEnvIndex = spec.args.indexOf('SHELL');
+    expect(shellEnvIndex).toBeGreaterThan(-1);
+    expect(spec.args[shellEnvIndex + 1]).toBe(shellPath);
+    expect(spec.env.SHELL).toBe(shellPath);
+  });
+
   it('uses the current node executable inside bubblewrap for node-shebang codex scripts', () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-script-bwrap-'));
     const codexScript = path.join(tempRoot, 'bin', 'codex.js');
@@ -562,9 +622,7 @@ describe('buildCodexSpawnSpec', () => {
       codexHomeDir: path.join(tempRoot, 'instance-home'),
     });
 
-    const pathIndex = spec.args.lastIndexOf('PATH');
-    expect(pathIndex).toBeGreaterThan(-1);
-    const commandIndex = pathIndex + 2;
+    const commandIndex = spec.args.lastIndexOf(process.execPath);
     expect(spec.args[commandIndex]).toBe(process.execPath);
     expect(spec.args[commandIndex + 1]).toBe(codexScript);
   });
@@ -781,8 +839,8 @@ describe('buildCodexSpawnSpec', () => {
     fs.mkdirSync(instanceHome, { recursive: true });
     fs.mkdirSync(workspaceDir, { recursive: true });
     fs.writeFileSync(path.join(hostHome, '.gitconfig'), '[safe]\n\tdirectory = /repo\n', 'utf8');
-    fs.writeFileSync(path.join(hostHome, '.ssh', 'codex-gateway-deploy'), 'PRIVATE KEY\n', 'utf8');
-    fs.writeFileSync(path.join(hostHome, '.ssh', 'config'), 'Host github\n  HostName github.com\n  IdentityFile ~/.ssh/codex-gateway-deploy\n', 'utf8');
+    fs.writeFileSync(path.join(hostHome, '.ssh', 'agentclaw-deploy'), 'PRIVATE KEY\n', 'utf8');
+    fs.writeFileSync(path.join(hostHome, '.ssh', 'config'), 'Host github\n  HostName github.com\n  IdentityFile ~/.ssh/agentclaw-deploy\n', 'utf8');
     fs.writeFileSync(path.join(hostHome, '.ssh', 'known_hosts'), 'github.com ssh-ed25519 AAAA\n', 'utf8');
 
     const spec = buildCodexSpawnSpec({
@@ -803,8 +861,8 @@ describe('buildCodexSpawnSpec', () => {
     expect(spec.args).toContain('/workspace/.codex-runtime/home/.ssh/config');
     expect(spec.args).toContain(path.join(hostHome, '.ssh', 'known_hosts'));
     expect(spec.args).toContain('/workspace/.codex-runtime/home/.ssh/known_hosts');
-    expect(spec.args).toContain(path.join(hostHome, '.ssh', 'codex-gateway-deploy'));
-    expect(spec.args).toContain('/workspace/.codex-runtime/home/.ssh/codex-gateway-deploy');
+    expect(spec.args).toContain(path.join(hostHome, '.ssh', 'agentclaw-deploy'));
+    expect(spec.args).toContain('/workspace/.codex-runtime/home/.ssh/agentclaw-deploy');
   });
 
   it('bridges extra home-relative config paths into isolated runtime home', () => {

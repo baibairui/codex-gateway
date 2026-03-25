@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const configCheckPath = new URL('../bin/config-check.mjs', import.meta.url);
-const codexclawPath = new URL('../bin/codexclaw.mjs', import.meta.url);
+const agentclawPath = new URL('../bin/agentclaw.mjs', import.meta.url);
 
 describe('config-check bin', () => {
   it('prints feishu long connection status and next step', { timeout: 20000 }, () => {
@@ -70,9 +70,9 @@ describe('config-check bin', () => {
     expect(result.stdout).toContain('FEISHU_APP_ID=<please_set>');
   });
 
-  it('shows doctor in codexclaw help', { timeout: 20000 }, () => {
-    const result = spawnSync('node', [codexclawPath.pathname, 'help'], {
-      cwd: path.resolve(path.dirname(codexclawPath.pathname), '..'),
+  it('shows doctor in agentclaw help', { timeout: 20000 }, () => {
+    const result = spawnSync('node', [agentclawPath.pathname, 'help'], {
+      cwd: path.resolve(path.dirname(agentclawPath.pathname), '..'),
       encoding: 'utf8',
     });
 

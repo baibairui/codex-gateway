@@ -118,7 +118,7 @@ export class CodexAppServerClient {
   async initialize(): Promise<void> {
     await this.request('initialize', {
       clientInfo: {
-        name: 'codex-gateway',
+        name: 'AgentClaw',
         version: '0.1.0',
       },
       capabilities: {

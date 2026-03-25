@@ -1849,7 +1849,7 @@ describeIfSqlite('feishu-openapi SDK-backed command groups', () => {
       action: 'create',
       args: {
         summary: '整理周报',
-        'origin-platform-name': 'codex-gateway',
+        'origin-platform-name': 'AgentClaw',
       },
       sdkClient,
     })).resolves.toEqual({

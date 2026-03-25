@@ -40,7 +40,7 @@ function runWithOutput(command, args) {
   });
 }
 
-console.log(paint(c.bold, '=== codexclaw update ==='));
+console.log(paint(c.bold, '=== AgentClaw update ==='));
 
 const gitCheck = runWithOutput('git', ['rev-parse', '--is-inside-work-tree']);
 if (gitCheck.status !== 0 || String(gitCheck.stdout).trim() !== 'true') {

@@ -591,6 +591,7 @@ export class CodexRunner {
   }
 
   private runWithAppServer(input: CodexRunInput, effectiveWorkdir: string): ControlledCodexRun {
+    const appServerCwd = this.resolveAppServerCwd(effectiveWorkdir);
     const env = buildCodexChildEnv(process.env, {
       reminderToolContext: input.reminderToolContext,
       browserAutomation: this.browserAutomation,
@@ -706,7 +707,7 @@ export class CodexRunner {
           ? 'danger-full-access'
           : 'workspace-write';
         const threadConfig = {
-          cwd: effectiveWorkdir,
+          cwd: appServerCwd,
           model: input.model,
           sandbox: sandboxMode,
           approvalPolicy: 'never' as const,
@@ -726,7 +727,7 @@ export class CodexRunner {
         const turnStart = await client.startTurn({
           threadId: observedThreadId ?? '',
           items: promptItems,
-          cwd: effectiveWorkdir,
+          cwd: appServerCwd,
           model: input.model,
         });
         observedTurnId = turnStart.turn.id;
@@ -770,6 +771,10 @@ export class CodexRunner {
         return true;
       },
     };
+  }
+
+  private resolveAppServerCwd(workdir: string): string {
+    return this.workdirIsolation === 'bwrap' ? '/workspace' : workdir;
   }
 
   private assertExecutableAvailable(env: NodeJS.ProcessEnv): void {

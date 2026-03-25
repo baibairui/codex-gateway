@@ -259,7 +259,7 @@ describe('config feishu mention trigger', () => {
       FEISHU_APP_ID: undefined,
       FEISHU_APP_SECRET: undefined,
       CODEX_SANDBOX: 'full-auto',
-    })).rejects.toThrow(/codexclaw setup|codexclaw doctor/);
+    })).rejects.toThrow(/agentclaw setup|agentclaw doctor/);
   });
 });
 

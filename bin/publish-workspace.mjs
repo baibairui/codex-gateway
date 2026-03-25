@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 const cwd = process.cwd();
 const SOURCE_DIR = path.resolve(
   process.env.SOURCE_DIR
-    ?? (fs.existsSync('/opt/gateway/workspace/wecom-codex-gateway') ? '/opt/gateway/workspace/wecom-codex-gateway' : cwd),
+    ?? (fs.existsSync('/opt/gateway/workspace/agentclaw') ? '/opt/gateway/workspace/agentclaw' : cwd),
 );
 const TARGET_DIR = path.resolve(
   process.env.TARGET_DIR

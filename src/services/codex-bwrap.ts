@@ -45,6 +45,7 @@ export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawn
   const provider = input.provider ?? 'codex';
   const hostEnv = buildHostCodexEnv(input.env, provider, input.codexHomeDir);
   const gatewayRootDir = resolveGatewayRootDir(hostEnv);
+  const shellBinary = resolveShellBinary(hostEnv);
   const launch = resolveCliLaunch(input.codexBin);
   if (input.isolationMode === 'off') {
     return {
@@ -70,9 +71,10 @@ export function buildCodexSpawnSpec(input: BuildCodexSpawnSpecInput): CodexSpawn
       hostHomeDir,
       gatewayRootDir,
       input.env[EXTRA_READS_ENV_NAME],
+      shellBinary,
     ),
     cwd: workspaceDir,
-    env: buildIsolatedEnv(hostEnv, runtimeHomeDir, gatewayRootDir, provider),
+    env: buildIsolatedEnv(hostEnv, runtimeHomeDir, gatewayRootDir, provider, shellBinary),
   };
 }
 
@@ -85,6 +87,7 @@ function buildBubblewrapArgs(
   hostHomeDir: string | undefined,
   gatewayRootDir: string | undefined,
   extraReadsRaw: string | undefined,
+  shellBinary: string | undefined,
 ): string[] {
   const sandboxArgs = normalizeArgsForWorkspace(args, workspaceDir);
   const readonlyMounts = collectReadonlyMounts(runtimeHomeDir, hostHomeDir, extraReadsRaw);
@@ -106,7 +109,7 @@ function buildBubblewrapArgs(
   appendIfExists(result, ['--ro-bind', '/lib', '/lib']);
   appendIfExists(result, ['--ro-bind', '/lib64', '/lib64']);
   appendIfExists(result, ['--ro-bind', '/etc', '/etc']);
-  appendAbsoluteBinaryMounts(result, launch.mountPaths);
+  appendAbsoluteBinaryMounts(result, shellBinary ? [...launch.mountPaths, shellBinary] : launch.mountPaths);
 
   result.push(
     '--bind',
@@ -148,6 +151,9 @@ function buildBubblewrapArgs(
     '--setenv',
     'PATH',
     DEFAULT_PATH,
+    '--setenv',
+    'SHELL',
+    shellBinary || '/bin/sh',
     launch.command,
     ...launch.argsPrefix,
     ...sandboxArgs,
@@ -187,6 +193,7 @@ function buildIsolatedEnv(
   runtimeHomeDir: string,
   gatewayRootDir: string | undefined,
   provider: CliProvider,
+  shellBinary: string | undefined,
 ): NodeJS.ProcessEnv {
   const nextEnv: NodeJS.ProcessEnv = {
     PATH: env.PATH || DEFAULT_PATH,
@@ -200,6 +207,7 @@ function buildIsolatedEnv(
     LANG: env.LANG || 'C.UTF-8',
     LC_ALL: env.LC_ALL || 'C.UTF-8',
     TERM: env.TERM || 'xterm-256color',
+    SHELL: shellBinary || '/bin/sh',
     NODE_PATH: resolveGatewayNodeModules(gatewayRootDir),
     HTTPS_PROXY: env.HTTPS_PROXY,
     HTTP_PROXY: env.HTTP_PROXY,
@@ -234,6 +242,31 @@ function buildIsolatedEnv(
     }
   }
   return nextEnv;
+}
+
+function resolveShellBinary(env: NodeJS.ProcessEnv): string | undefined {
+  const candidates = [
+    env.SHELL?.trim(),
+    '/bin/bash',
+    '/bin/sh',
+    '/usr/bin/bash',
+    '/usr/bin/sh',
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || !path.isAbsolute(candidate)) {
+      continue;
+    }
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return candidate;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
 }
 
 function applyCliHomeOverrides(

@@ -75,7 +75,7 @@ export class WeixinApi {
       msg: {
         from_user_id: '',
         to_user_id: toUserId,
-        client_id: `codex-gateway-${Date.now()}`,
+        client_id: `agentclaw-${Date.now()}`,
         message_type: 2,
         message_state: 2,
         context_token: contextToken,

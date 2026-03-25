@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible bug
+description: Report a reproducible problem in AgentClaw
 title: "[Bug] "
 labels: ["bug"]
 body:
@@ -7,7 +7,19 @@ body:
     id: summary
     attributes:
       label: Summary
-      description: What happened?
+      description: What broke, and why does it matter?
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Affected channel
+      options:
+        - Feishu
+        - WeCom
+        - WeChat
+        - CLI only
+        - Multiple
     validations:
       required: true
   - type: textarea
@@ -24,9 +36,23 @@ body:
     validations:
       required: true
   - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the visible error, broken output, or wrong routing result.
+    validations:
+      required: true
+  - type: textarea
     id: env
     attributes:
       label: Environment
-      description: Node.js, OS, deployment mode, relevant env vars (mask secrets)
+      description: Node.js, OS, deployment mode, PM2/systemd/dev, relevant env vars (mask secrets)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste the most relevant gateway logs, stack traces, or screenshots.
     validations:
       required: true

@@ -198,7 +198,7 @@ if (config.feishuEnabled) {
   if (!config.feishuAppId || !config.feishuAppSecret) {
     throw new Error(
       '飞书配置不完整：启用 FEISHU_ENABLED=true 时必须配置 FEISHU_APP_ID 和 FEISHU_APP_SECRET。' +
-      ' 可先执行 codexclaw setup 或 codexclaw doctor 进行安装自检。',
+      ' 可先执行 agentclaw setup 或 agentclaw doctor 进行安装自检。',
     );
   }
 }

@@ -63,8 +63,8 @@ function printFeishuNextSteps(values) {
   } else {
     console.log('- 去飞书开放平台配置可公网访问的 webhook 回调地址，并校验 Verification Token。');
   }
-  console.log('- 执行 codexclaw doctor，确认当前模式、缺失配置和下一步提示。');
-  console.log('- 执行 codexclaw up，启动后用 /healthz 或启动日志确认飞书状态。');
+  console.log('- 执行 agentclaw doctor，确认当前模式、缺失配置和下一步提示。');
+  console.log('- 执行 agentclaw up，启动后用 /healthz 或启动日志确认飞书状态。');
 }
 
 function setEnvValue(key, value) {
@@ -146,7 +146,7 @@ async function main() {
   }
 
   const rl = createInterface({ input, output });
-  console.log(paint(c.bold, '\n=== codexclaw 配置向导（逐行）==='));
+  console.log(paint(c.bold, '\n=== AgentClaw 配置向导（逐行）==='));
   console.log(paint(c.dim, '直接回车可使用默认值。'));
 
   const values = {};

@@ -1065,7 +1065,7 @@ local_audio_path=${sourcePath}`,
             { fileName: 'identity.md', summary: '叫我白瑞 / 中文交流 / 不弄虚作假' },
           ],
           agent: [
-            { fileName: 'projects.md', summary: 'wecom-codex-gateway 优化中' },
+            { fileName: 'projects.md', summary: 'AgentClaw 优化中' },
           ],
         }),
       },

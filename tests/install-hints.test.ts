@@ -8,7 +8,7 @@ describe('buildStartupFailureHints', () => {
       FEISHU_ENABLED: 'false',
     })).toEqual([
       '请先补齐 .env 中缺失项，再重新执行启动命令。',
-      '可以先执行 codexclaw doctor 查看阻塞项，再执行 codexclaw setup 逐项补齐配置。',
+      '可以先执行 agentclaw doctor 查看阻塞项，再执行 agentclaw setup 逐项补齐配置。',
     ]);
   });
 
