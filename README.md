@@ -5,178 +5,62 @@
 [![CI](https://github.com/baibairui/AgentClaw/actions/workflows/ci.yml/badge.svg)](https://github.com/baibairui/AgentClaw/actions/workflows/ci.yml)
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](./LICENSE)
 
-把 Codex CLI 接到飞书、企业微信或个人微信，让 AI 不再只是一次性聊天窗口，而是一个长期在线、带记忆、带工作区、可执行真实动作的多 Agent 系统。
+把 Codex CLI 接到飞书、企业微信或个人微信，让 AI 不再只是一次性聊天窗口，而是一个长期在线、带记忆、带工作区、能执行真实动作的多 Agent 系统。
 
-AgentClaw 适合想把 AI 真正接入团队协作流程的人：每个 Agent 有独立工作目录、长期身份、短期记忆、本地技能、浏览器能力和定时执行能力，可以在消息渠道里持续接着做事。
+AgentClaw 不是一个只会回消息的 bot 壳子，而是一个消息入口 + 本地 CLI 执行系统。消息从飞书、企业微信或微信进来后，会被路由到具体 Agent 的独立工作区，再由本地 Codex CLI、Skills、浏览器能力、提醒能力和平台 API 能力继续执行，最后把结果回传到聊天渠道。
 
-## 为什么值得 Star
+## 一眼看懂
 
-- 它把 Codex CLI 从“终端单人工具”变成了“团队可用的长期在线 Agent 系统”。
-- 它给每个 Agent 独立工作区和记忆边界，避免任务和人格互相污染。
-- 它支持真实执行，不只是回复文本：浏览器操作、提醒、飞书 API、文档流和自定义本地技能都能接进来。
-- 它可以自托管，凭证、上下文、工作区和自动化能力都在你自己控制下。
+如果你只想快速理解这个项目，记住三件事：
+
+- 它把 Codex CLI 从终端里的个人工具，变成团队里长期在线的 Agent 系统
+- 它让每个 Agent 都有独立工作区、长期身份、短期记忆和执行边界
+- 它不只会回复文本，还能进入真实目录执行任务，调用工具链，持续接着做事
 
 ## AgentClaw 和普通聊天机器人有什么不同
 
 | 能力 | AgentClaw | 普通聊天机器人 |
 | --- | --- | --- |
-| 长期在线的 Agent 工作区 | 有 | 通常没有 |
-| 每个 Agent 独立记忆 | 有 | 常常共用或临时 |
+| 每个 Agent 独立工作区 | 有 | 通常没有 |
+| 每个 Agent 独立长期身份与记忆 | 有 | 常常共用上下文 |
 | 在真实项目目录里运行 Codex CLI | 有 | 少见 |
-| 本地 Skill 系统 | 有 | 少见 |
-| 飞书 / 企业微信 / 微信接入 | 有 | 常常只有单一渠道 |
-| 自托管部署 | 有 | 常常依赖 SaaS |
+| 本地 Skill / 工具系统 | 有 | 常常只有文本回复 |
+| 浏览器 / 桌面真实操作能力 | 可接入 | 通常没有 |
+| 飞书 / 企业微信 / 个人微信接入 | 有 | 常常只有单一渠道 |
+| 自托管 | 有 | 常常依赖 SaaS |
 
-## 适合的使用场景
+## 系统长什么样
 
-- 在飞书或企业微信里放一个长期在线的 coding agent。
-- 给不同角色分配不同 Agent：工程、评审、研究、文档、运营。
-- 让 Agent 打开浏览器、读写文件、更新文档，再把结果回传到聊天渠道。
-- 把团队内部自动化脚本封装成 Skill，直接交给 Agent 调用。
-- 把上下文和记忆保留在自己的服务器和工作目录里，而不是托管给外部机器人平台。
-
-## 工作方式
-
-```text
-飞书 / 企业微信 / 微信
-        |
-        v
-      AgentClaw
-        |
-        +--> 用户 / 会话 / Agent 路由
-        +--> Agent 独立工作区与记忆
-        +--> Codex CLI / OpenCode 运行器
-        +--> 本地 Skill / 浏览器 / 提醒 / 平台 API
-        |
-        v
-   回复结果 + 更新后的状态
+```mermaid
+flowchart LR
+    A[飞书 / 企业微信 / 微信] --> B[AgentClaw]
+    B --> C[用户 / 会话 / Agent 路由]
+    C --> D[Agent 独立工作区]
+    C --> E[长期身份与短期记忆]
+    C --> F[Codex CLI / OpenCode]
+    F --> G[本地 Skills]
+    F --> H[浏览器 / 桌面能力]
+    F --> I[飞书 API / 提醒 / 自定义脚本]
+    G --> J[结果回传到聊天渠道]
+    H --> J
+    I --> J
 ```
 
-## 渠道支持
+## 工作区模型
 
-| 渠道 | 状态 | 说明 |
-| --- | --- | --- |
-| 飞书 | 支持 | 支持长连接模式 |
-| 企业微信 | 支持 | 需要公网回调地址 |
-| 个人微信 | 支持 | 扫码登录 + 轮询收发 |
+每个 Agent 都有自己的工作目录、规则、身份和短期记忆。不同角色互不污染，这是 AgentClaw 能长期稳定工作的核心。
 
-## 快速开始
-
-### 1. 环境准备
-
-- Node.js 20+
-- npm 10+
-- 已安装可执行的 `codex`
-- 至少接入一种渠道：飞书、企业微信或个人微信
-
-可选但常用：
-
-- Playwright，用于浏览器自动化
-- `xvfb`，用于无桌面 Linux 服务器
-- Nginx、FRP、ngrok 等反向代理或隧道
-
-安装依赖：
-
-```bash
-npm install
+```mermaid
+flowchart TD
+    A[user.md<br/>用户长期身份] --> B[SOUL.md<br/>Agent 长期身份]
+    B --> C[memory/daily/<date>.md<br/>短期记忆]
+    B --> D[AGENTS.md<br/>工作规则]
+    B --> E[.codex/workspace.json<br/>工作区元数据]
+    D --> F[Skills]
+    E --> G[真实项目目录执行]
 ```
 
-如需浏览器自动化：
-
-```bash
-npx playwright install chromium
-```
-
-### 2. 初始化配置
-
-```bash
-cp .env.example .env
-```
-
-或者使用配置向导：
-
-```bash
-agentclaw setup
-```
-
-### 3. 最小配置示例
-
-飞书：
-
-```env
-PORT=3000
-WECOM_ENABLED=false
-FEISHU_ENABLED=true
-FEISHU_APP_ID=your_app_id
-FEISHU_APP_SECRET=your_app_secret
-FEISHU_LONG_CONNECTION=true
-CODEX_BIN=codex
-CODEX_WORKDIR=/absolute/path/to/agent-root
-CODEX_SANDBOX=full-auto
-CODEX_WORKDIR_ISOLATION=off
-RUNNER_ENABLED=true
-```
-
-企业微信：
-
-```env
-PORT=3000
-WECOM_ENABLED=true
-WEWORK_CORP_ID=your_corp_id
-WEWORK_SECRET=your_secret
-WEWORK_AGENT_ID=your_agent_id
-WEWORK_TOKEN=your_callback_token
-WEWORK_ENCODING_AES_KEY=your_encoding_aes_key
-CODEX_BIN=codex
-CODEX_WORKDIR=/absolute/path/to/agent-root
-RUNNER_ENABLED=true
-```
-
-个人微信：
-
-```env
-PORT=3000
-WECOM_ENABLED=false
-FEISHU_ENABLED=false
-WEIXIN_ENABLED=true
-CODEX_BIN=codex
-CODEX_WORKDIR=/absolute/path/to/agent-root
-RUNNER_ENABLED=true
-```
-
-首次启用微信且还没有会话时：
-
-```bash
-npm run weixin:login
-```
-
-### 4. 启动
-
-开发模式：
-
-```bash
-agentclaw doctor
-agentclaw up
-```
-
-生产模式：
-
-```bash
-npm run build
-agentclaw start
-```
-
-### 5. 健康检查
-
-```bash
-curl http://127.0.0.1:3000/healthz
-```
-
-## 为什么工作区模型很重要
-
-每个 Agent 都有自己的工作区、长期身份和短期记忆，这正是系统长期稳定的核心。
-
-典型结构：
+典型目录结构：
 
 ```text
 .data/
@@ -190,85 +74,407 @@ curl http://127.0.0.1:3000/healthz
       .codex/workspace.json
 ```
 
-这个结构把：
+这套结构把：
 
 - 用户长期身份放在 `user.md`
 - Agent 长期身份放在 `SOUL.md`
 - 短期上下文放在 `memory/daily/`
-- 每次执行严格限制在具体 Agent 工作区
+- 执行边界落在具体 Agent 工作区
 
-## 内置能力
+## 你可以拿它做什么
 
-- 多 Agent 路由和会话持久化
-- 飞书、企业微信、微信渠道接入
-- 工作区级别的本地 Skill 加载
-- 浏览器和桌面自动化接入
-- 提醒和周期任务能力
-- 健康检查和 PM2 友好部署
+- 在飞书里放一个长期在线的 coding agent
+- 给工程、评审、文档、研究分别配不同 Agent
+- 让 Agent 在真实仓库里持续读写代码和文档
+- 把浏览器操作、提醒、文档写入接进同一条工作链路
+- 把团队内部脚本和自动化封装成 Skill 交给 Agent 调用
+
+## 当前支持的渠道
+
+| 渠道 | 状态 | 说明 |
+| --- | --- | --- |
+| 飞书 | 支持 | 支持长连接模式 |
+| 企业微信 | 支持 | 需要公网回调地址 |
+| 个人微信 | 支持 | 扫码登录 + 轮询收发 |
+
+## 核心能力
+
+- 多 Agent 路由与会话持久化
+- 独立工作区、长期身份、短期记忆
+- 本地 Skill 体系
+- 浏览器能力链路
+- 桌面 GUI 能力链路
+- 飞书官方 API 能力
+- 提醒与定时任务
+- 健康检查与发布脚本
+- 面向真实代码仓库的执行环境
+
+## 什么时候适合用它
+
+适合你，如果你想要的是：
+
+- 把 Codex 真正接进团队协作工具
+- 让 AI 长期在线，而不是临时问答
+- 让不同 Agent 有明确职责和边界
+- 让 AI 进入真实工作目录持续工作
+- 把工作区、凭证、上下文和自动化能力都掌握在自己手里
+
+不太适合你，如果你只想要：
+
+- 一个简单 FAQ 机器人
+- 一个纯托管 SaaS
+- 一个不涉及本地 CLI 与工作区执行的轻量 bot
+
+---
+
+# 请让 AI 阅读以下内容并部署
+
+以下内容面向 AI 或运维执行者，目标是在一台机器上把 AgentClaw 跑起来，并验证它已经可用。
+
+## 部署目标
+
+启动一个可运行的 AgentClaw 实例，并至少接通一种消息渠道：
+
+- 飞书
+- 企业微信
+- 个人微信
+
+默认建议优先使用飞书长连接模式，因为它不依赖公网事件回调地址。
+
+## 运行前提
+
+必须满足：
+
+- Node.js 20+
+- npm 10+
+- 本机已安装且可执行 `codex`
+- 当前机器允许 AgentClaw 访问目标工作目录
+- 拥有至少一种消息渠道的应用配置
+
+常见可选依赖：
+
+- `playwright`，用于浏览器自动化
+- `xvfb`，用于无桌面的 Linux 服务器
+- `pm2` 或 systemd，用于常驻运行
+- 反向代理或隧道，用于企业微信 webhook 模式
+
+## 安装依赖
+
+```bash
+npm install
+```
+
+如果需要浏览器能力：
+
+```bash
+npx playwright install chromium
+```
+
+如果是无桌面的 Linux 且需要浏览器上下文：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y xvfb
+```
+
+如果本机还没有全局命令，可执行：
+
+```bash
+npm link
+```
+
+## 飞书接入的重要说明
+
+飞书接入分成两部分。
+
+### 1. 人工完成的平台步骤
+
+以下步骤默认不是 AI 自己自动完成的，而是需要人在飞书开放平台手工完成：
+
+- 创建飞书应用
+- 开启机器人能力
+- 配置权限
+- 配置事件订阅
+- 发布应用
+- 如有需要，等待管理员审核或审批
+
+这部分不应被理解成“AI 自动完成”。
+
+### 2. AI / CLI 完成的本地接入步骤
+
+拿到应用配置后，AI 或运维可以继续完成：
+
+- 写入 `.env`
+- 启动 AgentClaw
+- 检查 `/healthz`
+- 发送测试消息验证连通性
+
+OpenClaw 官方 Feishu 接入文档：
+https://docs.openclaw.ai/channels/feishu
+
+飞书开放平台：
+https://open.feishu.cn
+
+## 初始化配置
+
+先复制环境变量模板：
+
+```bash
+cp .env.example .env
+```
+
+或者使用向导：
+
+```bash
+agentclaw setup
+```
+
+## 最小可运行配置
+
+### 飞书长连接
+
+```env
+PORT=3000
+
+WECOM_ENABLED=false
+FEISHU_ENABLED=true
+FEISHU_APP_ID=your_app_id
+FEISHU_APP_SECRET=your_app_secret
+FEISHU_LONG_CONNECTION=true
+FEISHU_GROUP_REQUIRE_MENTION=true
+
+CODEX_BIN=codex
+CODEX_WORKDIR=/absolute/path/to/agent-root
+CODEX_SANDBOX=full-auto
+CODEX_WORKDIR_ISOLATION=off
+RUNNER_ENABLED=true
+CODEX_SEARCH=false
+```
+
+说明：
+
+- `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 是最小阻塞项
+- 长连接模式不需要公网 webhook 回调地址
+- 但仍然需要你先在飞书开放平台完成应用创建、Bot 配置、事件订阅和权限设置
+
+### 企业微信
+
+```env
+PORT=3000
+
+WECOM_ENABLED=true
+WEWORK_CORP_ID=your_corp_id
+WEWORK_SECRET=your_secret
+WEWORK_AGENT_ID=your_agent_id
+WEWORK_TOKEN=your_callback_token
+WEWORK_ENCODING_AES_KEY=your_encoding_aes_key
+
+FEISHU_ENABLED=false
+
+CODEX_BIN=codex
+CODEX_WORKDIR=/absolute/path/to/agent-root
+RUNNER_ENABLED=true
+```
+
+### 个人微信
+
+```env
+PORT=3000
+
+WECOM_ENABLED=false
+FEISHU_ENABLED=false
+WEIXIN_ENABLED=true
+
+CODEX_BIN=codex
+CODEX_WORKDIR=/absolute/path/to/agent-root
+RUNNER_ENABLED=true
+```
+
+首次启用个人微信且还没有登录会话时，先执行：
+
+```bash
+npm run weixin:login
+```
+
+## 启动方式
+
+### 开发模式
+
+适合验证最新源码：
+
+```bash
+npm run dev
+```
+
+或：
+
+```bash
+agentclaw up
+```
+
+### 生产模式
+
+适合部署稳定产物：
+
+```bash
+npm run build
+npm start
+```
+
+或：
+
+```bash
+agentclaw start
+```
+
+## 健康检查
+
+启动后执行：
+
+```bash
+curl http://127.0.0.1:3000/healthz
+```
+
+成功时应返回类似结果：
+
+```json
+{
+  "ok": true,
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "mode": "long-connection"
+    }
+  }
+}
+```
+
+判断方式：
+
+- `ok=true` 说明服务已启动
+- 飞书启用时，`mode=long-connection` 表示长连接模式已生效
+- 如果渠道已启用但消息仍不通，优先检查平台侧权限和事件订阅
+
+## 推荐验收顺序
+
+### 飞书
+
+1. 执行 `agentclaw doctor`
+2. 启动服务
+3. 检查 `/healthz`
+4. 在飞书私聊机器人发送一条消息
+5. 在飞书群聊中 `@` 机器人发送一条消息
+
+### 企业微信
+
+1. 确认公网回调地址可访问
+2. 执行 `agentclaw doctor`
+3. 启动服务
+4. 检查 `/healthz`
+5. 在企业微信中给应用发消息并观察回包
+
+### 个人微信
+
+1. 执行 `npm run weixin:login`
+2. 完成扫码登录
+3. 启动服务
+4. 发送消息验证是否能收到回复
 
 ## 常用命令
 
 ```bash
 npm run dev
 npm run build
+npm start
 npm run weixin:login
 npm run config:check
 npm run publish:workspace
 ```
 
-使用本地 CLI：
+## 关键运行逻辑
+
+部署者需要理解以下几点：
+
+- `CODEX_WORKDIR` 指向 Agent 工作区根目录
+- 每个 Agent 在独立工作区中运行
+- 长期身份和短期记忆不应混放
+- 浏览器、桌面、提醒、飞书 API 等能力通过 Skill 接入
+- 开发模式跑的是最新源码
+- 生产模式跑的是 `dist/` 产物
+- 如果修改了 `src/` 但没有重新 build，`start` 不会自动带上最新源码
+
+## 常见问题
+
+### 1. 服务能启动，但消息没有回
+
+优先检查：
+
+- 应用凭据是否正确
+- 飞书应用是否已创建并发布
+- 机器人能力是否已开启
+- 事件订阅是否已配置
+- 相关权限是否已开通
+- 群聊是否要求 `@` 机器人
+- `RUNNER_ENABLED` 是否为 `true`
+
+### 2. `/healthz` 正常，但 Agent 不执行
+
+优先检查：
+
+- `CODEX_BIN` 是否可执行
+- `CODEX_WORKDIR` 是否存在且可访问
+- 工作区结构是否完整
+- `codex` CLI 是否已正确安装
+
+### 3. 修改了源码但行为没变
+
+说明你可能在使用生产模式。重新执行：
 
 ```bash
-agentclaw setup
-agentclaw doctor
-agentclaw up
-agentclaw start
+npm run build
+npm start
 ```
 
-## 部署说明
+或者直接使用：
 
-- `deploy.sh` 会发布当前工作区到目标服务器，同时保留 `.env` 和 `.data`
-- 生产环境默认使用 PM2
-- `/healthz` 是主要就绪检查接口
-- `CODEX_WORKDIR` 应指向 Agent 根目录，而每次实际执行必须落到某个具体 Agent 工作区
+```bash
+npm run dev
+```
 
-## FAQ
+### 4. 浏览器能力不可用
 
-### 这是一个机器人还是 Agent 运行时？
+优先检查：
 
-更接近 Agent 运行时，消息渠道只是入口。
+- 是否安装了 Playwright 浏览器
+- Linux 下是否缺少 `xvfb`
+- 对应 Skill 是否存在并可被工作区读取
 
-### 支持一个用户对应多个 Agent 吗？
+### 5. 飞书应用建好了，但还是收不到消息
 
-支持，这是核心设计之一。
+优先检查：
 
-### 它能执行真实动作而不只是回复吗？
+- 平台侧事件订阅是否正确
+- 长连接 / webhook 模式是否和本地配置一致
+- Bot 权限是否足够
+- 应用是否已发布到正确租户
+- 群聊中是否满足 `@` 触发条件
 
-能，这正是 Skill 系统和运行器存在的意义。
+## 一条推荐部署路径
 
-### 必须依赖 SaaS 托管吗？
+如果没有特殊要求，推荐 AI 按以下顺序执行：
 
-不用，它是面向自托管设计的。
-
-### 微信登录是交互式的吗？
-
-是，首次登录通过二维码授权，之后会把会话保存在本地。
-
-## 参与贡献
-
-欢迎提 Issue 和 PR。高质量贡献通常包含：
-
-- 清晰的使用场景
-- 可复现的最小问题
-- 行为变更的验证说明
-- 影响外部使用方式时同步更新 README 或文档
-
-先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)，然后再提交 Issue 或 PR。
-
-## 项目状态
-
-AgentClaw 正在持续演进。当前仓库优先服务真实部署和实际工作流，所以有些部分仍然偏工程化而不是营销化。如果你在原始环境之外使用它，能提升安装、文档、复现性和演示效果的改进会非常有价值。
+1. `npm install`
+2. `cp .env.example .env`
+3. 在飞书开放平台人工创建并配置应用
+4. 填写飞书长连接最小配置
+5. `npm link`
+6. `agentclaw doctor`
+7. `agentclaw up`
+8. `curl http://127.0.0.1:3000/healthz`
+9. 在飞书私聊中发送测试消息
+10. 验证群聊 `@` 触发策略
+11. 如需生产部署，再执行 `npm run build && agentclaw start`
 
 ## 许可证
 
-[ISC](./LICENSE)
+ISC
