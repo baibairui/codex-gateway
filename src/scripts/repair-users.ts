@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { AgentWorkspaceManager } from '../services/agent-workspace-manager.js';
 import { installFeishuCanvasSkill } from '../services/feishu-canvas-skill.js';
@@ -13,6 +14,9 @@ interface RepairStats {
   skipped: number;
   repairedDefaultWorkdir: boolean;
   repairedConfiguredWorkdir: boolean;
+  syncedWorkspaceDirs: number;
+  movedLegacyWorkspaceDirs: number;
+  workspaceDirConflicts: number;
 }
 
 function resolveAgentsDir(): string {
@@ -69,6 +73,72 @@ function tryEnsureDir(dir: string): boolean {
   }
 }
 
+function resolveUserDirFromWorkspace(workspaceDir: string): string {
+  const normalized = path.resolve(workspaceDir);
+  const parent = path.dirname(normalized);
+  const parentBase = path.basename(parent);
+  if (parentBase === 'agents' || parentBase === 'internal') {
+    return path.dirname(parent);
+  }
+  return parent;
+}
+
+function resolveCanonicalWorkspaceDir(workspaceDir: string, agentId: string): string {
+  return path.join(resolveUserDirFromWorkspace(workspaceDir), 'agents', agentId);
+}
+
+function syncSessionWorkspaceDirs(dbPath: string): {
+  synced: number;
+  moved: number;
+  conflicts: number;
+} {
+  if (!fs.existsSync(dbPath)) {
+    return { synced: 0, moved: 0, conflicts: 0 };
+  }
+
+  const db = new DatabaseSync(dbPath);
+  const rows = db
+    .prepare('SELECT user_id AS userId, agent_id AS agentId, workspace_dir AS workspaceDir FROM user_agent')
+    .all() as Array<{ userId: string; agentId: string; workspaceDir: string }>;
+  const updateStmt = db.prepare(`
+    UPDATE user_agent
+    SET workspace_dir = ?, updated_at = ?
+    WHERE user_id = ? AND agent_id = ?
+  `);
+
+  let synced = 0;
+  let moved = 0;
+  let conflicts = 0;
+  const now = Date.now();
+
+  for (const row of rows) {
+    const currentDir = path.resolve(row.workspaceDir);
+    const targetDir = resolveCanonicalWorkspaceDir(currentDir, row.agentId);
+    if (currentDir === targetDir) {
+      continue;
+    }
+
+    fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+    const currentExists = fs.existsSync(currentDir);
+    const targetExists = fs.existsSync(targetDir);
+
+    if (currentExists && !targetExists) {
+      fs.renameSync(currentDir, targetDir);
+      moved += 1;
+    } else if (currentExists && targetExists) {
+      conflicts += 1;
+      continue;
+    }
+
+    if (fs.existsSync(targetDir)) {
+      updateStmt.run(targetDir, now, row.userId, row.agentId);
+      synced += 1;
+    }
+  }
+
+  return { synced, moved, conflicts };
+}
+
 function run(): void {
   const agentsDir = resolveAgentsDir();
   fs.mkdirSync(agentsDir, { recursive: true });
@@ -91,6 +161,9 @@ function run(): void {
     skipped: 0,
     repairedDefaultWorkdir: false,
     repairedConfiguredWorkdir: false,
+    syncedWorkspaceDirs: 0,
+    movedLegacyWorkspaceDirs: 0,
+    workspaceDirConflicts: 0,
   };
 
   const defaultWorkdir = path.resolve(agentsDir);
@@ -115,8 +188,13 @@ function run(): void {
     }
   }
 
+  const syncStats = syncSessionWorkspaceDirs(path.resolve(process.cwd(), '.data', 'sessions.db'));
+  stats.syncedWorkspaceDirs = syncStats.synced;
+  stats.movedLegacyWorkspaceDirs = syncStats.moved;
+  stats.workspaceDirConflicts = syncStats.conflicts;
+
   process.stdout.write(
-    `repair:users done (agentsDir=${agentsDir}, users=${stats.users}, workspaces=${stats.workspaces}, skipped=${stats.skipped}, defaultWorkdirReady=${stats.repairedDefaultWorkdir}, configuredWorkdirReady=${stats.repairedConfiguredWorkdir})\n`,
+    `repair:users done (agentsDir=${agentsDir}, users=${stats.users}, workspaces=${stats.workspaces}, skipped=${stats.skipped}, defaultWorkdirReady=${stats.repairedDefaultWorkdir}, configuredWorkdirReady=${stats.repairedConfiguredWorkdir}, syncedWorkspaceDirs=${stats.syncedWorkspaceDirs}, movedLegacyWorkspaceDirs=${stats.movedLegacyWorkspaceDirs}, workspaceDirConflicts=${stats.workspaceDirConflicts})\n`,
   );
 }
 
