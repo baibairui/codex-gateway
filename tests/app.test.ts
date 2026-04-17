@@ -443,6 +443,7 @@ describe('createApp feishu callback', () => {
       channel: 'feishu',
       userId: 'ou_card_1',
       content: '/skills global',
+      sourceMessageId: 'om_card_1',
       replyTargetId: 'oc_group_1',
       replyTargetType: 'chat_id',
     });
@@ -950,6 +951,7 @@ describe('dispatchFeishuCardActionEvent', () => {
       context: {
         chat_id: 'oc_2',
       },
+      open_message_id: 'om_2',
       action: {
         value: {
           gateway_cmd: '/agents',
@@ -961,6 +963,7 @@ describe('dispatchFeishuCardActionEvent', () => {
       channel: 'feishu',
       userId: 'ou_2',
       content: '/agents',
+      sourceMessageId: 'om_2',
       replyTargetId: 'oc_2',
       replyTargetType: 'chat_id',
     });

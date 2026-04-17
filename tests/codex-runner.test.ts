@@ -388,6 +388,44 @@ describe('CodexRunner active control', () => {
       .find((payload) => payload.includes('"method":"turn/start"'));
     expect(turnStartRequest).toContain('"cwd":"/workspace"');
   });
+
+  it('passes CODEX_HOME into app-server runs when codexHomeDir is configured', async () => {
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const originalCodexHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = '/tmp/original-home';
+
+    try {
+      const runner = new CodexRunner({
+        codexBin: 'codex',
+        timeoutMs: 1_000,
+        codexHomeDir: '/tmp/instance-home-appserver',
+      });
+      const active = runner.runWithControl({ prompt: 'hello', workdir: '/tmp/agent-appserver-home' });
+
+      await tick();
+
+      expect(spawn).toHaveBeenCalled();
+      expect(vi.mocked(spawn).mock.calls.at(-1)?.[2]).toEqual(expect.objectContaining({
+        env: expect.objectContaining({
+          HOME: '/tmp/instance-home-appserver',
+          CODEX_HOME: '/tmp/instance-home-appserver',
+          XDG_CONFIG_HOME: '/tmp/instance-home-appserver/.config',
+          XDG_CACHE_HOME: '/tmp/instance-home-appserver/.cache',
+          XDG_DATA_HOME: '/tmp/instance-home-appserver/.local/share',
+        }),
+      }));
+
+      child.kill('SIGKILL');
+      await expect(active.stop('cleanup')).resolves.toBe(true);
+    } finally {
+      if (originalCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = originalCodexHome;
+      }
+    }
+  });
 });
 
 describe('buildCodexReviewArgs', () => {
@@ -501,6 +539,7 @@ describe('buildCodexSpawnSpec', () => {
     expect(spec.cwd).toBe('/tmp/agent-direct');
     expect(spec.env.HOME).toBe('/root');
     expect(spec.env.CODEX_HOME).toBe('/tmp/instance-home');
+    expect(spec.env.GH_CONFIG_DIR).toBe('/tmp/instance-home/.config/gh');
     expect(spec.env.XDG_CONFIG_HOME).toBeUndefined();
     expect(spec.env.XDG_CACHE_HOME).toBeUndefined();
   });
@@ -542,6 +581,7 @@ describe('buildCodexSpawnSpec', () => {
 
     expect(spec.env.HOME).toBe(instanceHome);
     expect(spec.env.CODEX_HOME).toBe(instanceHome);
+    expect(spec.env.GH_CONFIG_DIR).toBe(`${instanceHome}/.config/gh`);
     expect(spec.env.XDG_CONFIG_HOME).toBe(`${instanceHome}/.config`);
     expect(spec.env.XDG_CACHE_HOME).toBe(`${instanceHome}/.cache`);
     expect(spec.env.XDG_DATA_HOME).toBe(`${instanceHome}/.local/share`);

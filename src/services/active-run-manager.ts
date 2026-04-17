@@ -1,5 +1,5 @@
 type Channel = 'wecom' | 'feishu' | 'weixin';
-export type ActiveRunStatus = 'running' | 'stopping' | 'stopped' | 'stop_failed' | 'completed';
+export type ActiveRunStatus = 'running' | 'stopping' | 'stopped' | 'stop_failed' | 'failed' | 'completed';
 
 export interface ActiveRunRecord {
   runId: string;

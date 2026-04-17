@@ -168,7 +168,9 @@ async function withMockModelsCache(
   payload: { fetched_at: string; models: Array<{ slug: string; visibility: string; supported_in_api: boolean }> },
   run: () => Promise<void>,
 ) {
-  const cacheDir = path.join(os.homedir(), '.codex');
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-handler-home-'));
+  const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(tempHome);
+  const cacheDir = path.join(tempHome, '.codex');
   const cachePath = path.join(cacheDir, 'models_cache.json');
   const hadOriginal = fs.existsSync(cachePath);
   const original = hadOriginal ? fs.readFileSync(cachePath, 'utf8') : '';
@@ -177,11 +179,13 @@ async function withMockModelsCache(
   try {
     await run();
   } finally {
+    homedirSpy.mockRestore();
     if (hadOriginal) {
       fs.writeFileSync(cachePath, original);
     } else {
       fs.rmSync(cachePath, { force: true });
     }
+    fs.rmSync(tempHome, { recursive: true, force: true });
   }
 }
 
@@ -1499,7 +1503,7 @@ local_audio_path=${sourcePath}`,
     expect(sendText).toHaveBeenCalledWith(
       'wecom',
       'u1',
-      expect.stringContaining('【Shared Memory】'),
+      expect.stringContaining('【User Identity】'),
     );
     expect(sendText).toHaveBeenCalledWith(
       'wecom',
@@ -1509,7 +1513,7 @@ local_audio_path=${sourcePath}`,
     expect(sendText).toHaveBeenCalledWith(
       'wecom',
       'u1',
-      expect.stringContaining('【Agent Memory】'),
+      expect.stringContaining('【Agent Identity】'),
     );
   });
 
@@ -1677,6 +1681,83 @@ local_audio_path=${sourcePath}`,
     expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('"op":"update"') && String(call[2] ?? '').includes('当前任务已处理完成'))).toBe(true);
     expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('"op":"recall"'))).toBe(false);
     expect(sendText.mock.calls.some((call) => String(call[2] ?? '').includes('本次回复中断了'))).toBe(false);
+  });
+
+  it('patches the same feishu run card to failed after a backend error without visible output', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sendTextWithResult = vi.fn(async (_channel: 'wecom' | 'feishu' | 'weixin', _userId: string, _content: string) => 'om_run_1');
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        runWithControl: () => ({
+          result: Promise.reject(new Error('network upstream timeout')),
+          stop: async () => false,
+        }),
+        run: async () => ({ threadId: 'thread_existing', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+      sendTextWithResult,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: 'hello' });
+
+    expect(sendText.mock.calls.some((call) => {
+      const payload = String(call[2] ?? '');
+      return payload.includes('"op":"update"')
+        && payload.includes('"message_id":"om_run_1"')
+        && payload.includes('处理失败');
+    })).toBe(true);
+    expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '❌ 这次处理没完成，请稍后重试。');
+  });
+
+  it('patches a stale feishu run card to failed when stop arrives after the run record is gone', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run: async () => ({ threadId: 'thread_existing', rawOutput: '' }),
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({
+      channel: 'feishu',
+      userId: 'u1',
+      content: '/run stop run_missing',
+      sourceMessageId: 'om_stale_1',
+    });
+
+    expect(sendText.mock.calls.some((call) => {
+      const payload = String(call[2] ?? '');
+      return payload.includes('"op":"update"')
+        && payload.includes('"message_id":"om_stale_1"')
+        && payload.includes('处理失败');
+    })).toBe(true);
+    expect(sendText).toHaveBeenCalledWith('feishu', 'u1', '⚠️ 未找到正在运行的任务，可能已经结束。');
   });
 
   it('does not send a not-running warning when stop arrives after a completed feishu run', async () => {
@@ -1871,8 +1952,7 @@ local_audio_path=${sourcePath}`,
 
     expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', expect.stringContaining('当前 agent 尚未显式选择模型通道'));
     expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', expect.stringContaining('可用命令（按功能分组，帮助页 1/3）：'));
-    expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
-    expect(sendText).toHaveBeenNthCalledWith(4, 'wecom', 'u1', '默认助手 ·\n开始处理。');
+    expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '默认助手 ·\n开始处理。');
   });
 
   it('keeps running when the progress status push fails', async () => {
@@ -1910,8 +1990,8 @@ local_audio_path=${sourcePath}`,
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
-    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '默认助手 ·\n第一条回复');
+    expect(sendText).toHaveBeenCalledWith('wecom', 'u1', '默认助手 ·\n第一条回复');
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it('drops an invalid persisted thread id and starts a fresh session instead of failing', async () => {
@@ -2570,7 +2650,8 @@ local_audio_path=${sourcePath}`,
       const markdownContents = elements
         .filter((item) => item.tag === 'markdown')
         .map((item) => String((item as { content?: unknown }).content ?? ''));
-      expect(markdownContents.join('\n')).toContain('**当前模型**');
+      expect(markdownContents.join('\n')).toContain('**当前重点**');
+      expect(markdownContents.join('\n')).toContain('已切换模型为：gpt-5');
       expect(markdownContents.join('\n')).toContain('**可选模型**');
       const currentModelAction = extractFeishuButtons(elements)
         .find((action) => action.value?.gateway_cmd === '/model');
@@ -3547,8 +3628,8 @@ local_audio_path=${sourcePath}`,
     expect(sendStreamingText.mock.calls[0]?.[2]).toBe(sendStreamingText.mock.calls[1]?.[2]);
     expect(sendStreamingText.mock.calls[0]?.[3]).toBe('默认助手 ·\n第一段');
     expect(sendStreamingText.mock.calls[0]?.[4]).toBe(false);
-    expect(sendStreamingText.mock.calls[1]?.[3]).toBe('默认助手 ·\n第一段默认助手 ·\n第二段');
-    expect(sendStreamingText.mock.calls[1]?.[4]).toBe(false);
+    expect(sendStreamingText.mock.calls[1]?.[3]).toBe('默认助手 ·\n第二段');
+    expect(sendStreamingText.mock.calls[1]?.[4]).toBe(true);
     expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n第一段');
     expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n第二段');
   });

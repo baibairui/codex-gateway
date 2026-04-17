@@ -308,6 +308,7 @@ export function dispatchFeishuCardActionEvent(
   const value = { ...formValue, ...rawValue };
   const context = (event.context ?? {}) as Record<string, unknown>;
   const chatId = typeof context.chat_id === 'string' ? context.chat_id : '';
+  const sourceMessageId = typeof event.open_message_id === 'string' ? event.open_message_id : undefined;
   const gatewayAction = firstNonEmptyString(value.gateway_action);
   const command = firstNonEmptyString(value.gateway_cmd, value.command, value.text) ?? '';
   log.info('飞书卡片动作入站', {
@@ -355,6 +356,7 @@ export function dispatchFeishuCardActionEvent(
     channel: 'feishu',
     userId: openId,
     content: command,
+    sourceMessageId,
     replyTargetId: chatId || openId,
     replyTargetType: chatId ? 'chat_id' : 'open_id',
   }).catch((err) => {

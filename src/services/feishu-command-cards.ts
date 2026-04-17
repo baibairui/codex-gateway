@@ -1,6 +1,6 @@
 type Channel = 'wecom' | 'feishu' | 'weixin';
 type CliProvider = 'codex' | 'opencode';
-type RunStatus = 'running' | 'stopping' | 'stopped' | 'stop_failed' | 'completed';
+type RunStatus = 'running' | 'stopping' | 'stopped' | 'stop_failed' | 'failed' | 'completed';
 
 type FeishuCardTemplate = 'blue' | 'wathet' | 'turquoise' | 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'grey';
 
@@ -931,6 +931,7 @@ export function buildFeishuRunCardMessage(input: {
     stopping: { title: '正在停止', template: 'yellow', summary: '正在结束当前任务' },
     stopped: { title: '已停止', template: 'grey', summary: '当前任务已停止' },
     stop_failed: { title: '停止未完成', template: 'orange', summary: '停止请求未成功完成' },
+    failed: { title: '处理失败', template: 'red', summary: '当前任务未正常完成' },
     completed: { title: '已完成', template: 'green', summary: '当前任务已处理完成' },
   };
   const statusMeta = statusMap[input.status];
