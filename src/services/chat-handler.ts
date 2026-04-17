@@ -1112,6 +1112,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
     channel: Channel;
     userId: string;
     content: string;
+    sourceMessageId?: string;
     reminderTrigger?: ReminderTriggerInput;
   }): Promise<void> {
     if (input.reminderTrigger) {
@@ -1122,7 +1123,7 @@ export function createChatHandler(deps: ChatHandlerDeps) {
       });
       return;
     }
-    const { channel, userId, content } = input;
+    const { channel, userId, content, sourceMessageId } = input;
     const sessionUserKey = resolveUserKey(userId);
     const prompt = content.trim();
     if (!prompt) {
@@ -1677,6 +1678,24 @@ ${clipMessage(text, 500)}
       if (commandResult.stopRunId) {
         const activeRun = activeRunManager.get(commandResult.stopRunId);
         if (!activeRun) {
+          if (channel === 'feishu' && sourceMessageId) {
+            await deps.sendText(
+              channel,
+              userId,
+              buildGatewayUpdateMessage(
+                sourceMessageId,
+                buildFeishuRunCardMessage({
+                  runId: commandResult.stopRunId,
+                  agentName: currentAgent.name.trim() === '默认Agent' ? '默认助手' : currentAgent.name,
+                  provider: getCurrentProvider(sessionUserKey, currentAgent.agentId),
+                  status: 'failed',
+                  startedAt: Date.now(),
+                  lastActivityAt: Date.now(),
+                  threadId: existingThreadId,
+                }),
+              ),
+            );
+          }
           await deps.sendText(channel, userId, '⚠️ 未找到正在运行的任务，可能已经结束。');
           return;
         }
@@ -2334,6 +2353,31 @@ ${clipMessage(userVisibleOutput, 500)}
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       });
+      if (channel === 'feishu' && activeRun?.messageId) {
+        await deps.sendText(
+          channel,
+          userId,
+          buildGatewayUpdateMessage(
+            activeRun.messageId,
+            buildFeishuRunCardMessage({
+              runId: activeRun.runId,
+              agentName: runtimeAgent.name.trim() === '默认Agent' ? '默认助手' : runtimeAgent.name,
+              provider: activeRun.provider ?? getCurrentProvider(sessionUserKey, runtimeAgent.agentId),
+              status: 'failed',
+              startedAt: activeRun.startedAt,
+              lastActivityAt: Date.now(),
+              threadId: activeRun.threadId,
+            }),
+          ),
+        );
+        if (activeRunId) {
+          activeRunManager.update(activeRunId, {
+            status: 'failed',
+            lastActivityAt: Date.now(),
+          });
+          retainTerminalRun(activeRunId);
+        }
+      }
       const failureKind = classifyChatFailure(error, sawAgentOutput);
       await deps.sendText(channel, userId, buildChatFailureText(runtimeAgent, failureKind));
     }

@@ -177,6 +177,7 @@ function buildHostCodexEnv(
   const nextEnv: NodeJS.ProcessEnv = {
     ...env,
     CODEX_HOME: resolvedHome,
+    GH_CONFIG_DIR: path.join(resolvedHome, '.config', 'gh'),
   };
   applyCliHomeOverrides(nextEnv, provider, resolvedHome);
   if (hasCliHomeConfig(provider, resolvedHome)) {
@@ -201,6 +202,7 @@ function buildIsolatedEnv(
     PATH: env.PATH || DEFAULT_PATH,
     HOME: runtimeHomeDir,
     CODEX_HOME: runtimeHomeDir,
+    GH_CONFIG_DIR: path.join(runtimeHomeDir, '.config', 'gh'),
     XDG_CONFIG_HOME: path.join(runtimeHomeDir, '.config'),
     XDG_CACHE_HOME: path.join(runtimeHomeDir, '.cache'),
     TMPDIR: '/tmp',

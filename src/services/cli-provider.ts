@@ -314,11 +314,6 @@ function resolveManagedCliBin(
     return isExecutableFile(requested) ? path.resolve(requested) : requested;
   }
 
-  const fromPath = resolveExecutableOnPath(requested, envPath);
-  if (fromPath) {
-    return fromPath;
-  }
-
   const homeRoot = homeDir?.trim() ? path.resolve(homeDir.trim()) : undefined;
   for (const dir of extraCandidateDirs) {
     const candidateDir = path.isAbsolute(dir)
@@ -331,6 +326,11 @@ function resolveManagedCliBin(
     if (isExecutableFile(candidate)) {
       return candidate;
     }
+  }
+
+  const fromPath = resolveExecutableOnPath(requested, envPath);
+  if (fromPath) {
+    return fromPath;
   }
 
   return requested;

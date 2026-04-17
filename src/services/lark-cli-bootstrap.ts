@@ -38,6 +38,7 @@ export async function ensureLarkCliReady(input: EnsureLarkCliReadyInput): Promis
     path.join(runtimeHomeDir, '.agents', 'skills'),
   ];
   syncOfficialLarkSkills(resolvedHostHome, targetRoots, input.log);
+  syncLarkCliState(path.resolve(input.codexHomeDir), runtimeHomeDir, input.log);
 }
 
 function ensureLarkCliBinary(log?: EnsureLarkCliReadyInput['log']): void {
@@ -97,6 +98,40 @@ function syncOfficialLarkSkills(
     log?.info('已同步官方 lark skills 到 gateway 运行目录', {
       skills: Array.from(copied).sort(),
       targetRoots,
+    });
+  }
+}
+
+function syncLarkCliState(
+  codexHomeDir: string,
+  runtimeHomeDir: string,
+  log?: EnsureLarkCliReadyInput['log'],
+): void {
+  const syncPairs = [
+    {
+      sourceDir: path.join(codexHomeDir, '.lark-cli'),
+      targetDir: path.join(runtimeHomeDir, '.lark-cli'),
+    },
+    {
+      sourceDir: path.join(codexHomeDir, '.local', 'share', 'lark-cli'),
+      targetDir: path.join(runtimeHomeDir, '.local', 'share', 'lark-cli'),
+    },
+  ];
+  const syncedTargets: string[] = [];
+
+  for (const pair of syncPairs) {
+    if (!fs.existsSync(pair.sourceDir) || !fs.statSync(pair.sourceDir).isDirectory()) {
+      continue;
+    }
+    fs.mkdirSync(path.dirname(pair.targetDir), { recursive: true });
+    fs.rmSync(pair.targetDir, { recursive: true, force: true });
+    fs.cpSync(pair.sourceDir, pair.targetDir, { recursive: true, force: true });
+    syncedTargets.push(pair.targetDir);
+  }
+
+  if (syncedTargets.length > 0) {
+    log?.info('已同步 lark-cli 状态到 runtime home', {
+      syncedTargets,
     });
   }
 }

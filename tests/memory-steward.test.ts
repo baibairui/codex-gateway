@@ -39,7 +39,7 @@ describe('MemorySteward', () => {
       agentWorkspaceManager: {
         ensureSystemMemoryStewardWorkspace,
       },
-      codexRunner: { run },
+      codexRunner: { runForSystem: run },
       enabled: true,
       intervalMs: 60_000,
       model: 'gpt-5-codex',
@@ -85,7 +85,7 @@ describe('MemorySteward', () => {
           sharedMemoryDir: '/tmp/users/u1',
         }),
       },
-      codexRunner: { run },
+      codexRunner: { runForSystem: run },
       enabled: true,
       intervalMs: 60_000,
     });
@@ -130,7 +130,7 @@ describe('MemorySteward', () => {
           sharedMemoryDir: '/tmp/users/u1',
         }),
       },
-      codexRunner: { run },
+      codexRunner: { runForSystem: run },
       enabled: true,
       intervalMs: 3_600_000,
     });
