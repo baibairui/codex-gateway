@@ -4,7 +4,7 @@ import { MemorySteward } from '../src/services/memory-steward.js';
 
 describe('MemorySteward', () => {
   it('runs hidden steward for users with custom agents and targets the new identity model', async () => {
-    const run = vi.fn(async () => ({ threadId: 'thread_memory', rawOutput: '' }));
+    const runForSystem = vi.fn(async () => ({ threadId: 'thread_memory', rawOutput: '' }));
     const ensureSystemMemoryStewardWorkspace = vi.fn(() => ({
       workspaceDir: '/tmp/users/u1/internal/memory-steward',
       userDir: '/tmp/users/u1',
@@ -39,7 +39,7 @@ describe('MemorySteward', () => {
       agentWorkspaceManager: {
         ensureSystemMemoryStewardWorkspace,
       },
-      codexRunner: { run },
+      codexRunner: { runForSystem },
       enabled: true,
       intervalMs: 60_000,
       model: 'gpt-5-codex',
@@ -48,20 +48,20 @@ describe('MemorySteward', () => {
     await steward.runCycle();
 
     expect(ensureSystemMemoryStewardWorkspace).toHaveBeenCalledWith('u1');
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+    expect(runForSystem).toHaveBeenCalledWith(expect.objectContaining({
       workdir: '/tmp/users/u1/internal/memory-steward',
       model: 'gpt-5-codex',
       search: false,
     }));
-    expect(run.mock.calls[0]?.[0]?.prompt).toContain('user identity: /tmp/users/u1/user.md');
-    expect(run.mock.calls[0]?.[0]?.prompt).toContain('soul: /tmp/users/u1/agents/assistant/SOUL.md');
-    expect(run.mock.calls[0]?.[0]?.prompt).toContain('daily: /tmp/users/u1/agents/assistant/memory/daily');
-    expect(run.mock.calls[0]?.[0]?.prompt).not.toContain('shared-memory');
-    expect(run.mock.calls[0]?.[0]?.prompt).not.toContain('profile.md');
+    expect(runForSystem.mock.calls[0]?.[0]?.prompt).toContain('user identity: /tmp/users/u1/user.md');
+    expect(runForSystem.mock.calls[0]?.[0]?.prompt).toContain('soul: /tmp/users/u1/agents/assistant/SOUL.md');
+    expect(runForSystem.mock.calls[0]?.[0]?.prompt).toContain('daily: /tmp/users/u1/agents/assistant/memory/daily');
+    expect(runForSystem.mock.calls[0]?.[0]?.prompt).not.toContain('shared-memory');
+    expect(runForSystem.mock.calls[0]?.[0]?.prompt).not.toContain('profile.md');
   });
 
   it('skips users without custom agents', async () => {
-    const run = vi.fn(async () => ({ threadId: 'thread_memory', rawOutput: '' }));
+    const runForSystem = vi.fn(async () => ({ threadId: 'thread_memory', rawOutput: '' }));
     const steward = new MemorySteward({
       sessionStore: {
         listKnownUsers: () => ['u1'],
@@ -85,19 +85,19 @@ describe('MemorySteward', () => {
           sharedMemoryDir: '/tmp/users/u1',
         }),
       },
-      codexRunner: { run },
+      codexRunner: { runForSystem },
       enabled: true,
       intervalMs: 60_000,
     });
 
     await steward.runCycle();
 
-    expect(run).not.toHaveBeenCalled();
+    expect(runForSystem).not.toHaveBeenCalled();
   });
 
   it('does not run immediately on start and waits for the next interval', async () => {
     vi.useFakeTimers();
-    const run = vi.fn(async () => ({ threadId: 'thread_memory', rawOutput: '' }));
+    const runForSystem = vi.fn(async () => ({ threadId: 'thread_memory', rawOutput: '' }));
     const steward = new MemorySteward({
       sessionStore: {
         listKnownUsers: () => ['u1'],
@@ -130,16 +130,16 @@ describe('MemorySteward', () => {
           sharedMemoryDir: '/tmp/users/u1',
         }),
       },
-      codexRunner: { run },
+      codexRunner: { runForSystem },
       enabled: true,
       intervalMs: 3_600_000,
     });
 
     steward.start();
-    expect(run).not.toHaveBeenCalled();
+    expect(runForSystem).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(3_600_000);
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(runForSystem).toHaveBeenCalledTimes(1);
 
     steward.stop();
     vi.useRealTimers();

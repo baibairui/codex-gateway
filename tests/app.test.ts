@@ -870,6 +870,96 @@ describe('dispatchFeishuMessageReceiveEvent', () => {
     });
   });
 
+  it('accepts group post messages with bot mention id and preserves markdown-style content', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      feishuGroupRequireMention: true,
+      feishuBotOpenId: 'ou_bot_post_1',
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_group_post_1' } },
+      message: {
+        message_id: 'om_group_post_1',
+        chat_id: 'oc_group_post_1',
+        chat_type: 'group',
+        message_type: 'post',
+        content: JSON.stringify({
+          zh_cn: {
+            title: '问题清单',
+            content: [[{
+              tag: 'md',
+              text: '1. 第一项\n2. 第二项',
+            }]],
+          },
+        }),
+        mentions: [
+          {
+            key: '@_user_1',
+            id: 'ou_bot_post_1',
+            id_type: 'open_id',
+            name: '机器人',
+          },
+        ],
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).toHaveBeenCalledWith({
+      channel: 'feishu',
+      userId: 'ou_group_post_1',
+      content: expect.stringContaining('1. 第一项'),
+      sourceMessageId: 'om_group_post_1',
+      allowReply: true,
+      replyTargetId: 'oc_group_post_1',
+      replyTargetType: 'chat_id',
+    });
+  });
+
+  it('accepts p2p root-level post payloads and preserves ordered text content', async () => {
+    const handleText = vi.fn(async () => undefined);
+
+    const result = dispatchFeishuMessageReceiveEvent({
+      allowFrom: '*',
+      isDuplicateMessage: () => false,
+      handleText,
+    }, {
+      sender: { sender_id: { open_id: 'ou_post_root_1' } },
+      message: {
+        message_id: 'om_post_root_1',
+        chat_id: 'oc_post_root_1',
+        chat_type: 'p2p',
+        message_type: 'post',
+        content: JSON.stringify({
+          title: '',
+          content: [
+            [
+              { tag: 'text', text: '1. ', style: [] },
+              { tag: 'text', text: '为什么是用 npm 来安装依赖和运行？', style: [] },
+            ],
+            [
+              { tag: 'text', text: '2. ', style: [] },
+              { tag: 'text', text: '为什么 deploy.sh 会不存在？', style: [] },
+            ],
+          ],
+        }),
+      },
+    });
+
+    expect(result).toBe('success');
+    expect(handleText).toHaveBeenCalledWith({
+      channel: 'feishu',
+      userId: 'ou_post_root_1',
+      content: expect.stringContaining('1. 为什么是用 npm 来安装依赖和运行？'),
+      sourceMessageId: 'om_post_root_1',
+      allowReply: true,
+      replyTargetId: 'ou_post_root_1',
+      replyTargetType: 'open_id',
+    });
+  });
+
   it('ignores group messages that only @ other users when mention trigger is enabled', async () => {
     const handleText = vi.fn(async () => undefined);
 

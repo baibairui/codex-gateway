@@ -13,6 +13,10 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
 function firstNonEmpty(values: Array<unknown>): string {
   for (const value of values) {
     const str = asString(value);
@@ -41,13 +45,76 @@ function appendMetadataBlock(content: string, lines: string[]): string {
   return `${content}\n[飞书消息元数据]\n${normalized.join('\n')}`;
 }
 
+function flattenPostFallbackValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => flattenPostFallbackValue(item))
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+  }
+  const obj = asObject(value);
+  if (!obj) {
+    return '';
+  }
+  return [
+    obj.text,
+    obj.content,
+    obj.title,
+  ]
+    .map((item) => flattenPostFallbackValue(item))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+function parseFeishuPostNode(node: JsonObject): string {
+  const tag = asString(node.tag).toLowerCase();
+  if (tag === 'text' || tag === 'md') {
+    return asText(node.text);
+  }
+  if (tag === 'a') {
+    return firstNonEmpty([node.text, node.href]);
+  }
+  if (tag === 'at') {
+    const mention = firstNonEmpty([node.user_name, node.user_id]);
+    return mention ? `@${mention}` : '';
+  }
+  if (tag === 'img') {
+    return '[图片]';
+  }
+  if (tag === 'media') {
+    return '[媒体]';
+  }
+
+  const fallbackText = [
+    node.text,
+    node.content,
+    node.title,
+  ]
+    .map((value) => flattenPostFallbackValue(value))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  if (fallbackText) {
+    return fallbackText;
+  }
+  return tag ? `[${tag}]` : '';
+}
+
 function parseFeishuPostContent(raw: JsonObject): string {
-  const locales = Object.values(raw).map(asObject).filter((item): item is JsonObject => !!item);
-  if (!locales.length) {
+  const locale = Array.isArray(raw.content)
+    ? raw
+    : Object.values(raw).map(asObject).find((item): item is JsonObject => {
+      return !!item && Array.isArray(item.content);
+    });
+  if (!locale) {
     return '';
   }
 
-  const locale = locales[0];
   const title = asString(locale.title);
   const content = Array.isArray(locale.content) ? locale.content : [];
   const lines: string[] = [];
@@ -62,38 +129,9 @@ function parseFeishuPostContent(raw: JsonObject): string {
       if (!obj) {
         continue;
       }
-      const tag = asString(obj.tag);
-      if (tag === 'text') {
-        const text = asString(obj.text);
-        if (text) {
-          segments.push(text);
-        }
-        continue;
-      }
-      if (tag === 'a') {
-        const text = firstNonEmpty([obj.text, obj.href]);
-        if (text) {
-          segments.push(text);
-        }
-        continue;
-      }
-      if (tag === 'at') {
-        const mention = firstNonEmpty([obj.user_name, obj.user_id]);
-        if (mention) {
-          segments.push(`@${mention}`);
-        }
-        continue;
-      }
-      if (tag === 'img') {
-        segments.push('[图片]');
-        continue;
-      }
-      if (tag === 'media') {
-        segments.push('[媒体]');
-        continue;
-      }
-      if (tag) {
-        segments.push(`[${tag}]`);
+      const text = parseFeishuPostNode(obj);
+      if (text) {
+        segments.push(text);
       }
     }
     const line = segments.join('').trim();

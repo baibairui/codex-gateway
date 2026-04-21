@@ -238,7 +238,23 @@ export function dispatchFeishuMessageReceiveEvent(
     );
   const mentions = message.mentions;
 
+  log.info('飞书消息入站摘要', {
+    openId: openId || '(empty)',
+    chatId: chatId || '(empty)',
+    chatType: chatType || '(empty)',
+    messageId: messageId || '(empty)',
+    messageType: messageType || '(empty)',
+    mentionCount: Array.isArray(mentions) ? mentions.length : 0,
+    rawContentPreview: clipText(rawContent, 240),
+  });
+
   if (!openId || !messageId || !messageType || !rawContent) {
+    log.warn('飞书消息忽略：缺少必要字段', {
+      openId: openId || '(empty)',
+      messageId: messageId || '(empty)',
+      messageType: messageType || '(empty)',
+      rawContentPreview: clipText(rawContent, 240),
+    });
     return 'ignored';
   }
   if (!shouldHandleFeishuMessage({
@@ -262,6 +278,14 @@ export function dispatchFeishuMessageReceiveEvent(
 
   const content = normalizeFeishuIncomingMessage(messageType, rawContent);
   if (!content) {
+    log.warn('飞书消息忽略：归一化后为空', {
+      openId,
+      chatId: chatId || '(empty)',
+      chatType: chatType || '(empty)',
+      messageId,
+      messageType,
+      rawContentPreview: clipText(rawContent, 240),
+    });
     return 'ignored';
   }
   const binaryType = messageType === 'image'

@@ -789,13 +789,15 @@ function buildOutboundMessageProtocolPrompt(channel: Channel, userPrompt: string
 }
 
 function buildInboundNonTextAck(prompt: string): string | undefined {
+  if (prompt.startsWith('[飞书富文本]') || prompt.includes('feishu_message_type=post')) {
+    return undefined;
+  }
   const patterns: Array<{ regex: RegExp; label: string }> = [
     { regex: /^\[飞书图片]/, label: '飞书图片' },
     { regex: /^\[飞书文件]/, label: '飞书文件' },
     { regex: /^\[飞书语音]/, label: '飞书语音' },
     { regex: /^\[飞书媒体]/, label: '飞书媒体' },
     { regex: /^\[飞书表情]/, label: '飞书表情' },
-    { regex: /^\[飞书富文本]/, label: '飞书富文本' },
     { regex: /^\[飞书卡片]/, label: '飞书卡片' },
     { regex: /^\[飞书分享群名片]/, label: '飞书分享群名片' },
     { regex: /^\[飞书分享个人名片]/, label: '飞书分享个人名片' },

@@ -46,6 +46,69 @@ describe('normalizeFeishuIncomingMessage', () => {
     expect(content).toContain('feishu_message_type=post');
   });
 
+  it('parses markdown-style nodes inside post messages', () => {
+    const content = normalizeFeishuIncomingMessage(
+      'post',
+      JSON.stringify({
+        zh_cn: {
+          title: '周报',
+          content: [[{
+            tag: 'md',
+            text: '1. 第一项\n2. 第二项\n- 补充说明',
+          }]],
+        },
+      }),
+    );
+
+    expect(content).toContain('[飞书富文本]');
+    expect(content).toContain('周报');
+    expect(content).toContain('1. 第一项');
+    expect(content).toContain('2. 第二项');
+    expect(content).toContain('- 补充说明');
+  });
+
+  it('falls back to readable text for unknown post nodes instead of dropping the message', () => {
+    const content = normalizeFeishuIncomingMessage(
+      'post',
+      JSON.stringify({
+        zh_cn: {
+          title: '结构化消息',
+          content: [[{
+            tag: 'unsupported_block',
+            text: '仍然可读的正文',
+          }]],
+        },
+      }),
+    );
+
+    expect(content).toContain('[飞书富文本]');
+    expect(content).toContain('结构化消息');
+    expect(content).toContain('仍然可读的正文');
+  });
+
+  it('parses root-level post payloads without locale wrapper', () => {
+    const content = normalizeFeishuIncomingMessage(
+      'post',
+      JSON.stringify({
+        title: '',
+        content: [
+          [
+            { tag: 'text', text: '1. ', style: [] },
+            { tag: 'text', text: '为什么是用 npm 来安装依赖和运行？', style: [] },
+          ],
+          [
+            { tag: 'text', text: '2. ', style: [] },
+            { tag: 'text', text: '为什么 deploy.sh 会不存在？', style: [] },
+          ],
+        ],
+      }),
+    );
+
+    expect(content).toContain('[飞书富文本]');
+    expect(content).toContain('1. 为什么是用 npm 来安装依赖和运行？');
+    expect(content).toContain('2. 为什么 deploy.sh 会不存在？');
+  });
+
   it('parses interactive card messages', () => {
     const content = normalizeFeishuIncomingMessage(
       'interactive',

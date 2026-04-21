@@ -679,6 +679,68 @@ describe('createChatHandler', () => {
     expect(run).toHaveBeenCalled();
   });
 
+  it('does not send ack when receiving normalized feishu rich text inbound message', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 't1', rawOutput: '' }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({ channel: 'feishu', userId: 'u1', content: '[飞书富文本]\n1. 第一项\n2. 第二项' });
+
+    expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '✅ 已收到飞书富文本消息，正在分析处理。');
+    expect(run).toHaveBeenCalled();
+  });
+
+  it('does not send ack when receiving normalized feishu post message with metadata', async () => {
+    const sendText = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ threadId: 't1', rawOutput: '' }));
+    const sessionStore = createSessionStore();
+    const handler = createChatHandler({
+      sessionStore,
+      rateLimitStore: { allow: () => true },
+      codexRunner: {
+        run,
+        review: async () => ({ rawOutput: '' }),
+      },
+      agentWorkspaceManager: {
+        createWorkspace: () => ({ agentId: 'a1', workspaceDir: '/tmp/a1' }),
+        isSharedMemoryEmpty: () => false,
+        isWorkspaceIdentityEmpty: () => false,
+      },
+      runnerEnabled: true,
+      defaultModel: 'gpt-5-codex',
+      defaultSearch: false,
+      reminderDbPath: '/tmp/reminders.db',
+      sendText,
+    });
+
+    await handler({
+      channel: 'feishu',
+      userId: 'u1',
+      content: '[飞书富文本]\n1. 第一项\n[飞书消息元数据]\nfeishu_message_type=post',
+    });
+
+    expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '✅ 已收到飞书富文本消息，正在分析处理。');
+    expect(run).toHaveBeenCalled();
+  });
+
   it('prefixes plain agent replies with the current agent name', async () => {
     const sendText = vi.fn(async () => undefined);
     const sessionStore = createSessionStore();
@@ -1499,7 +1561,7 @@ local_audio_path=${sourcePath}`,
     expect(sendText).toHaveBeenCalledWith(
       'wecom',
       'u1',
-      expect.stringContaining('【Shared Memory】'),
+      expect.stringContaining('【User Identity】'),
     );
     expect(sendText).toHaveBeenCalledWith(
       'wecom',
@@ -1509,7 +1571,7 @@ local_audio_path=${sourcePath}`,
     expect(sendText).toHaveBeenCalledWith(
       'wecom',
       'u1',
-      expect.stringContaining('【Agent Memory】'),
+      expect.stringContaining('【Agent Identity】'),
     );
   });
 
@@ -1871,8 +1933,8 @@ local_audio_path=${sourcePath}`,
 
     expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', expect.stringContaining('当前 agent 尚未显式选择模型通道'));
     expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', expect.stringContaining('可用命令（按功能分组，帮助页 1/3）：'));
-    expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
-    expect(sendText).toHaveBeenNthCalledWith(4, 'wecom', 'u1', '默认助手 ·\n开始处理。');
+    expect(sendText).toHaveBeenNthCalledWith(3, 'wecom', 'u1', '默认助手 ·\n开始处理。');
+    expect(sendText).toHaveBeenNthCalledWith(4, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
   });
 
   it('keeps running when the progress status push fails', async () => {
@@ -1910,8 +1972,7 @@ local_audio_path=${sourcePath}`,
 
     await handler({ channel: 'wecom', userId: 'u1', content: 'hello' });
 
-    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '默认助手 ·\n⏳ 已接收请求，正在处理...');
-    expect(sendText).toHaveBeenNthCalledWith(2, 'wecom', 'u1', '默认助手 ·\n第一条回复');
+    expect(sendText).toHaveBeenNthCalledWith(1, 'wecom', 'u1', '默认助手 ·\n第一条回复');
   });
 
   it('drops an invalid persisted thread id and starts a fresh session instead of failing', async () => {
@@ -2570,7 +2631,8 @@ local_audio_path=${sourcePath}`,
       const markdownContents = elements
         .filter((item) => item.tag === 'markdown')
         .map((item) => String((item as { content?: unknown }).content ?? ''));
-      expect(markdownContents.join('\n')).toContain('**当前模型**');
+      expect(markdownContents.join('\n')).toContain('**当前重点**');
+      expect(markdownContents.join('\n')).toContain('**当前状态**');
       expect(markdownContents.join('\n')).toContain('**可选模型**');
       const currentModelAction = extractFeishuButtons(elements)
         .find((action) => action.value?.gateway_cmd === '/model');
@@ -3547,8 +3609,8 @@ local_audio_path=${sourcePath}`,
     expect(sendStreamingText.mock.calls[0]?.[2]).toBe(sendStreamingText.mock.calls[1]?.[2]);
     expect(sendStreamingText.mock.calls[0]?.[3]).toBe('默认助手 ·\n第一段');
     expect(sendStreamingText.mock.calls[0]?.[4]).toBe(false);
-    expect(sendStreamingText.mock.calls[1]?.[3]).toBe('默认助手 ·\n第一段默认助手 ·\n第二段');
-    expect(sendStreamingText.mock.calls[1]?.[4]).toBe(false);
+    expect(sendStreamingText.mock.calls[1]?.[3]).toBe('默认助手 ·\n第二段');
+    expect(sendStreamingText.mock.calls[1]?.[4]).toBe(true);
     expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n第一段');
     expect(sendText).not.toHaveBeenCalledWith('feishu', 'u1', '默认助手 ·\n第二段');
   });
