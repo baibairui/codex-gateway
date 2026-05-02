@@ -7,6 +7,7 @@ import { parseCodexJsonl } from './codex-runner.js';
 import { formatPaginatedCodexModelsText, loadCodexModels, resolveModelFromSnapshot } from './codex-models.js';
 import { AgentSkillManager } from './agent-skill-manager.js';
 import { startCodexDeviceLogin } from './codex-login-flow.js';
+import { hasCliHomeAuth, hasCliHomeConfig, readCliHomeDefaultModel } from './cli-provider.js';
 import {
   buildFeishuLoginChoiceMessage,
   buildFeishuRunCardMessage,
@@ -17,6 +18,7 @@ import type { SkillCatalogEntry } from './skill-registry.js';
 import { parseGatewayStructuredMessage } from '../utils/gateway-message.js';
 import { createLogger } from '../utils/logger.js';
 import { ActiveRunManager } from './active-run-manager.js';
+import type { SkillRuntimePolicy } from './codex-bwrap.js';
 
 const log = createLogger('ChatHandler');
 const GATEWAY_LOCAL_PATH_KEYS = [
@@ -76,6 +78,7 @@ interface CodexRunnerLike {
     };
     onMessage?: (text: string) => void;
     onThreadStarted?: (threadId: string) => void;
+    skillPolicy?: SkillRuntimePolicy;
   }): Promise<{ threadId: string; rawOutput: string }>;
   runWithControl?(input: {
     prompt: string;
@@ -92,6 +95,7 @@ interface CodexRunnerLike {
     };
     onMessage?: (text: string) => void;
     onThreadStarted?: (threadId: string) => void;
+    skillPolicy?: SkillRuntimePolicy;
   }): {
     result: Promise<{ threadId: string; rawOutput: string }>;
     stop: (reason: string) => Promise<boolean>;
@@ -104,6 +108,7 @@ interface CodexRunnerLike {
     search?: boolean;
     workdir?: string;
     onMessage?: (text: string) => void;
+    skillPolicy?: SkillRuntimePolicy;
   }): Promise<{ rawOutput: string }>;
   login(input: {
     onMessage?: (text: string) => void;
@@ -121,7 +126,6 @@ interface CodexRunnerLike {
 
 interface WorkspacePublisherLike {
   publish(): Promise<{ output: string }>;
-  repairUsers(): Promise<{ output: string }>;
 }
 
 interface SpeechServiceLike {
@@ -175,6 +179,7 @@ interface ChatHandlerDeps {
   defaultProvider?: 'codex' | 'opencode';
   resolveDefaultModel?: (provider: 'codex' | 'opencode') => string | undefined;
   resolveRunner?: (provider: 'codex' | 'opencode') => CodexRunnerLike;
+  resolveRunnerHomeDir?: (provider: 'codex' | 'opencode') => string | undefined;
   defaultSearch: boolean;
   reminderDbPath: string;
   sendText: (channel: Channel, userId: string, content: string) => Promise<void>;
@@ -193,6 +198,7 @@ interface ChatHandlerDeps {
     disableGlobalSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
     enableGlobalSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
     disableAgentSkill(workspaceDir: string, skillName: string): { ok: boolean; reason?: string };
+    getPolicy?(workspaceDir: string): SkillRuntimePolicy;
   };
   openCodeAuthFlowManager?: OpenCodeAuthFlowManager;
   speechService?: SpeechServiceLike;
@@ -520,6 +526,7 @@ async function stageLocalPathIntoWorkspace(sourcePath: string, workspaceDir: str
   await fs.promises.copyFile(normalizedSource, stagedPath);
   return stagedPath;
 }
+
 function formatMemorySummary(agent: AgentRecord, snapshot: MemorySummarySnapshot): string {
   const sharedLines = snapshot.shared.length > 0
     ? snapshot.shared.map((entry, index) => `${index + 1}. ${entry.fileName}: ${entry.summary}`)
@@ -868,6 +875,19 @@ export function createChatHandler(deps: ChatHandlerDeps) {
 
   function getRunnerLabel(provider: 'codex' | 'opencode'): string {
     return provider === 'opencode' ? 'OpenCode' : 'Codex';
+  }
+
+  function getRunnerHomeDir(provider: 'codex' | 'opencode'): string | undefined {
+    return deps.resolveRunnerHomeDir?.(provider) ?? deps.codexHomeDir;
+  }
+
+  function resolveLoginAuthState(provider: 'codex' | 'opencode') {
+    const homeDir = getRunnerHomeDir(provider);
+    return {
+      hasConfig: hasCliHomeConfig(provider, homeDir),
+      hasAuth: hasCliHomeAuth(provider, homeDir),
+      model: readCliHomeDefaultModel(provider, homeDir) ?? deps.resolveDefaultModel?.(provider) ?? undefined,
+    };
   }
 
   function hasExplicitProviderSelection(userKey: string, agentId: string): boolean {
@@ -1450,6 +1470,7 @@ ${clipMessage(prompt, 500)}
             provider: runtimeProvider,
             providerLabel: loginRunnerLabel,
             supportsDeviceAuth,
+            authState: resolveLoginAuthState(runtimeProvider),
           }));
           return;
         }
@@ -1467,7 +1488,7 @@ ${clipMessage(prompt, 500)}
             channel,
             userId,
             sendText: deps.sendText,
-            codexHomeDir: deps.codexHomeDir,
+            codexHomeDir: getRunnerHomeDir(runtimeProvider),
             codexRunner: {
               login: async (input) => loginRunner.login({
                 onMessage: (text) => {
@@ -1767,28 +1788,6 @@ ${clipMessage(text, 500)}
         }
         return;
       }
-      if (commandResult.repairUsers) {
-        if (!deps.workspacePublisher) {
-          await sendCommandText('⚠️ 当前服务未开启用户修复命令，请联系管理员。');
-          return;
-        }
-        await sendCommandText('⏳ 正在执行用户工作区修复，请稍候...');
-        try {
-          const result = await deps.workspacePublisher.repairUsers();
-          const preview = result.output
-            ? `\n\n修复输出（末尾）：\n${clipMessage(result.output, 600)}`
-            : '';
-          await sendCommandText(`✅ 用户工作区修复完成。${preview}`);
-        } catch (error) {
-          log.error('handleText /repair-users 执行失败', {
-            userId,
-            error: error instanceof Error ? error.message : String(error),
-            stack: error instanceof Error ? error.stack : undefined,
-          });
-          await sendCommandText('❌ 用户工作区修复失败，请检查日志后重试。');
-        }
-        return;
-      }
       if (commandResult.reviewMode) {
         if (!deps.rateLimitStore.allow(sessionUserKey)) {
           log.warn('handleText /review 命中限流，拒绝执行', { userId });
@@ -1804,13 +1803,15 @@ ${clipMessage(text, 500)}
           let lastStreamSend: Promise<void> = Promise.resolve();
           const startTime = Date.now();
           const reviewRunner = getRunner(getCurrentProvider(sessionUserKey, currentAgent.agentId));
+          const reviewWorkdir = resolveAgentWorkdir(currentAgent);
           const reviewResult = await reviewRunner.review({
             mode: commandResult.reviewMode,
             target: commandResult.reviewTarget,
             prompt: commandResult.reviewPrompt,
             model: currentModel,
             search: currentSearch,
-            workdir: resolveAgentWorkdir(currentAgent),
+            workdir: reviewWorkdir,
+            skillPolicy: skillManager.getPolicy?.(reviewWorkdir),
             onMessage: (text) => {
               log.info(`
 ════════════════════════════════════════════════════════════
@@ -1830,7 +1831,7 @@ ${clipMessage(text, 500)}
             mode: commandResult.reviewMode,
             target: commandResult.reviewTarget ?? '(none)',
             agentId: currentAgent.agentId,
-            workdir: resolveAgentWorkdir(currentAgent),
+            workdir: reviewWorkdir,
             elapsedMs: elapsed,
             rawOutputLength: reviewResult.rawOutput.length,
           });
@@ -1850,7 +1851,20 @@ ${clipMessage(text, 500)}
       return;
     }
 
-    const activeOnboarding = getActiveMemoryOnboarding(sessionUserKey);
+    if (commandResult.nativeCodexCommand && getCurrentProvider(sessionUserKey, currentAgent.agentId) !== 'codex') {
+      await deps.sendText(
+        channel,
+        userId,
+        formatCommandOutboundMessage(
+          channel,
+          `/${commandResult.nativeCodexCommand}`,
+          `⚠️ /${commandResult.nativeCodexCommand} 是 Codex 原生命令。请先使用 /provider codex 切换当前 agent 的模型通道。`,
+        ),
+      );
+      return;
+    }
+
+    const activeOnboarding = commandResult.nativeCodexCommand ? undefined : getActiveMemoryOnboarding(sessionUserKey);
     const activeOnboardingThreadId = activeOnboarding
       ? deps.sessionStore.getSession(sessionUserKey, activeOnboarding.onboardingAgent.agentId)
       : undefined;
@@ -1862,13 +1876,14 @@ ${clipMessage(text, 500)}
     const isSharedMemoryEmpty = deps.agentWorkspaceManager.isSharedMemoryEmpty(sessionUserKey);
     const isCurrentAgentIdentityEmpty = !isSystemAgentRecord(currentAgent)
       && !!deps.agentWorkspaceManager.isWorkspaceIdentityEmpty?.(currentAgent.workspaceDir);
-    const shouldStartMemoryOnboarding = isSharedMemoryEmpty || isCurrentAgentIdentityEmpty;
+    const shouldStartMemoryOnboarding = !commandResult.nativeCodexCommand && (isSharedMemoryEmpty || isCurrentAgentIdentityEmpty);
     const onboardingReason: 'shared' | 'agent' | 'both' = isSharedMemoryEmpty && isCurrentAgentIdentityEmpty
       ? 'both'
       : isSharedMemoryEmpty
       ? 'shared'
       : 'agent';
-    const shouldPushStartupHelp = !existingThreadId
+    const shouldPushStartupHelp = !commandResult.nativeCodexCommand
+      && !existingThreadId
       && !shouldStartMemoryOnboarding
       && !isSystemAgentRecord(currentAgent);
     const shouldRecommendProviderSelection = !existingThreadId
@@ -1926,6 +1941,8 @@ ${clipMessage(text, 500)}
       let lastFeishuStreamFlushAt = 0;
       let lastFeishuStreamSnapshot = '';
       let feishuAudioOnlyMode = false;
+      let runnerOutputReady = false;
+      const bufferedRunnerOutputs: string[] = [];
       const initialRuntimeThreadId = activeOnboarding
         ? activeOnboardingThreadId
         : existingThreadId;
@@ -1960,26 +1977,99 @@ ${clipMessage(text, 500)}
       }
       const shouldReplyWithWeixinVoice = channel === 'weixin' && Boolean(deps.ttsService);
       const canFeishuRequestAudioReply = channel === 'feishu' && Boolean(deps.ttsService);
-      const runtimePrompt = buildOutboundMessageProtocolPrompt(
-        channel,
-        speechPrompt?.prompt ?? normalizedPrompt,
-        {
-          feishuTtsEnabled: canFeishuRequestAudioReply,
-        },
-      );
+      const promptForRunner = speechPrompt?.prompt ?? normalizedPrompt;
+      const runtimePrompt = commandResult.nativeCodexCommand
+        ? promptForRunner
+        : buildOutboundMessageProtocolPrompt(
+            channel,
+            promptForRunner,
+            {
+              feishuTtsEnabled: canFeishuRequestAudioReply,
+            },
+          );
       const runtimeProvider = getCurrentProvider(sessionUserKey, runtimeAgent.agentId);
       const activeRunner = getRunner(runtimeProvider);
+      const runtimeWorkdir = resolveAgentWorkdir(runtimeAgent);
+      const runtimeSkillPolicy = skillManager.getPolicy?.(runtimeWorkdir);
       const runId = `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
       activeRunId = runId;
       const runStartedAt = Date.now();
+      const emitRunnerOutput = (text: string): void => {
+        if (shouldReplyWithWeixinVoice) {
+          return;
+        }
+        const normalizedOutput = rewriteGatewayStructuredLocalPaths(text, runtimeWorkdir);
+        const rawVisibleOutput = activeOnboarding ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
+        lastAgentRawOutput = rawVisibleOutput;
+        const visibleReply = extractReplyModeDirective(rawVisibleOutput);
+        feishuAudioOnlyMode = visibleReply.replyMode === 'audio';
+        if (feishuAudioOnlyMode) {
+          return;
+        }
+        const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, visibleReply.cleanedText);
+        log.info(`
+════════════════════════════════════════════════════════════
+🤖 Codex 回复  [${channel}:${userId}]
+────────────────────────────────────────────────────────────
+${clipMessage(userVisibleOutput, 500)}
+════════════════════════════════════════════════════════════`);
+        if (!userVisibleOutput) {
+          return;
+        }
+        sawAgentOutput = true;
+        if (channel === 'feishu' && deps.sendStreamingText) {
+          streamedText = userVisibleOutput;
+          const now = Date.now();
+          if (now - lastFeishuStreamFlushAt < 450) {
+            return;
+          }
+          lastFeishuStreamFlushAt = now;
+          const snapshot = streamedText;
+          lastStreamSend = deps.sendStreamingText(channel, userId, streamId, snapshot, false)
+            .then(() => {
+              lastFeishuStreamSnapshot = snapshot;
+            })
+            .catch(async (err) => {
+              log.error('handleText onMessage 推送失败', err);
+              try {
+                await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+              } catch (fallbackErr) {
+                log.error('handleText onMessage fallback 推送失败', fallbackErr);
+              }
+            });
+          return;
+        }
+        lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch(async (err) => {
+          log.error('handleText onMessage 推送失败', err);
+          try {
+            await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
+          } catch (fallbackErr) {
+            log.error('handleText onMessage fallback 推送失败', fallbackErr);
+          }
+        });
+      };
+      const handleRunnerOutput = (text: string): void => {
+        if (!runnerOutputReady) {
+          bufferedRunnerOutputs.push(text);
+          return;
+        }
+        emitRunnerOutput(text);
+      };
+      const flushBufferedRunnerOutputs = (): void => {
+        runnerOutputReady = true;
+        for (const pendingText of bufferedRunnerOutputs.splice(0)) {
+          emitRunnerOutput(pendingText);
+        }
+      };
       const controlledRun = activeRunner.runWithControl
         ? activeRunner.runWithControl({
             prompt: runtimePrompt,
             threadId: runtimeThreadId,
             model: currentModel,
             search: runtimeSearch,
-            workdir: resolveAgentWorkdir(runtimeAgent),
+            workdir: runtimeWorkdir,
             gatewayUserId: userId,
+            skillPolicy: runtimeSkillPolicy,
             reminderToolContext: {
               channel,
               userId,
@@ -2000,61 +2090,10 @@ ${clipMessage(text, 500)}
               });
             },
             onMessage: (text) => {
-              if (shouldReplyWithWeixinVoice) {
-                return;
-              }
               activeRunManager.update(runId, {
                 lastActivityAt: Date.now(),
               });
-              const normalizedOutput = rewriteGatewayStructuredLocalPaths(text, resolveAgentWorkdir(runtimeAgent));
-              const rawVisibleOutput = activeOnboarding ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
-              lastAgentRawOutput = rawVisibleOutput;
-              const visibleReply = extractReplyModeDirective(rawVisibleOutput);
-              feishuAudioOnlyMode = visibleReply.replyMode === 'audio';
-              if (feishuAudioOnlyMode) {
-                return;
-              }
-              const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, visibleReply.cleanedText);
-              log.info(`
-════════════════════════════════════════════════════════════
-🤖 Codex 回复  [${channel}:${userId}]
-────────────────────────────────────────────────────────────
-${clipMessage(userVisibleOutput, 500)}
-════════════════════════════════════════════════════════════`);
-              if (!userVisibleOutput) {
-                return;
-              }
-              sawAgentOutput = true;
-              if (channel === 'feishu' && deps.sendStreamingText) {
-                streamedText = userVisibleOutput;
-                const now = Date.now();
-                if (now - lastFeishuStreamFlushAt < 450) {
-                  return;
-                }
-                lastFeishuStreamFlushAt = now;
-                const snapshot = streamedText;
-                lastStreamSend = deps.sendStreamingText(channel, userId, streamId, snapshot, false)
-                  .then(() => {
-                    lastFeishuStreamSnapshot = snapshot;
-                  })
-                  .catch(async (err) => {
-                    log.error('handleText onMessage 推送失败', err);
-                    try {
-                      await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
-                    } catch (fallbackErr) {
-                      log.error('handleText onMessage fallback 推送失败', fallbackErr);
-                    }
-                  });
-                return;
-              }
-              lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch(async (err) => {
-                log.error('handleText onMessage 推送失败', err);
-                try {
-                  await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
-                } catch (fallbackErr) {
-                  log.error('handleText onMessage fallback 推送失败', fallbackErr);
-                }
-              });
+              handleRunnerOutput(text);
             },
           })
         : {
@@ -2063,8 +2102,9 @@ ${clipMessage(userVisibleOutput, 500)}
               threadId: runtimeThreadId,
               model: currentModel,
               search: runtimeSearch,
-              workdir: resolveAgentWorkdir(runtimeAgent),
+              workdir: runtimeWorkdir,
               gatewayUserId: userId,
+              skillPolicy: runtimeSkillPolicy,
               reminderToolContext: {
                 channel,
                 userId,
@@ -2081,58 +2121,7 @@ ${clipMessage(userVisibleOutput, 500)}
                 );
               },
               onMessage: (text) => {
-                if (shouldReplyWithWeixinVoice) {
-                  return;
-                }
-                const normalizedOutput = rewriteGatewayStructuredLocalPaths(text, resolveAgentWorkdir(runtimeAgent));
-                const rawVisibleOutput = activeOnboarding ? sanitizeOnboardingText(normalizedOutput) : normalizedOutput;
-                lastAgentRawOutput = rawVisibleOutput;
-                const visibleReply = extractReplyModeDirective(rawVisibleOutput);
-                feishuAudioOnlyMode = visibleReply.replyMode === 'audio';
-                if (feishuAudioOnlyMode) {
-                  return;
-                }
-                const userVisibleOutput = formatAgentVisibleReply(runtimeAgent, visibleReply.cleanedText);
-                log.info(`
-════════════════════════════════════════════════════════════
-🤖 Codex 回复  [${channel}:${userId}]
-────────────────────────────────────────────────────────────
-${clipMessage(userVisibleOutput, 500)}
-════════════════════════════════════════════════════════════`);
-                if (!userVisibleOutput) {
-                  return;
-                }
-                sawAgentOutput = true;
-                if (channel === 'feishu' && deps.sendStreamingText) {
-                  streamedText = userVisibleOutput;
-                  const now = Date.now();
-                  if (now - lastFeishuStreamFlushAt < 450) {
-                    return;
-                  }
-                  lastFeishuStreamFlushAt = now;
-                  const snapshot = streamedText;
-                  lastStreamSend = deps.sendStreamingText(channel, userId, streamId, snapshot, false)
-                    .then(() => {
-                      lastFeishuStreamSnapshot = snapshot;
-                    })
-                    .catch(async (err) => {
-                      log.error('handleText onMessage 推送失败', err);
-                      try {
-                        await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
-                      } catch (fallbackErr) {
-                        log.error('handleText onMessage fallback 推送失败', fallbackErr);
-                      }
-                    });
-                  return;
-                }
-                lastStreamSend = deps.sendText(channel, userId, userVisibleOutput).catch(async (err) => {
-                  log.error('handleText onMessage 推送失败', err);
-                  try {
-                    await deps.sendText(channel, userId, '⚠️ 消息发送失败，请检查机器人发送权限或消息类型配置。');
-                  } catch (fallbackErr) {
-                    log.error('handleText onMessage fallback 推送失败', fallbackErr);
-                  }
-                });
+                handleRunnerOutput(text);
               },
             }),
             stop: async () => false,
@@ -2162,8 +2151,10 @@ ${clipMessage(userVisibleOutput, 500)}
             await controlledRun.stop(reason);
           },
         });
+        flushBufferedRunnerOutputs();
       } else {
         await sendAgentProgress(deps, channel, userId, runtimeAgent, 'received');
+        flushBufferedRunnerOutputs();
       }
       const result = await controlledRun.result;
       const elapsed = Date.now() - startTime;
@@ -2337,7 +2328,14 @@ ${clipMessage(userVisibleOutput, 500)}
         stack: error instanceof Error ? error.stack : undefined,
       });
       const failureKind = classifyChatFailure(error, sawAgentOutput);
-      await deps.sendText(channel, userId, buildChatFailureText(runtimeAgent, failureKind));
+      const failureText = buildChatFailureText(runtimeAgent, failureKind);
+      await deps.sendText(
+        channel,
+        userId,
+        channel === 'feishu'
+          ? formatCommandOutboundMessage(channel, '/failure', failureText)
+          : failureText,
+      );
     }
   };
 }
